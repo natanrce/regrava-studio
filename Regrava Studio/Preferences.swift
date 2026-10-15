@@ -29,6 +29,23 @@ enum AfterRecordingAction: String, Codable, CaseIterable {
     }
 }
 
+/// Width × height in points (saved area dimensions).
+struct AreaSize: Codable, Hashable {
+    var width: Int
+    var height: Int
+}
+
+/// An area selection on a display, in display-local points (top-left origin).
+struct PickedArea: Codable, Hashable {
+    var displayID: UInt32
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+
+    var rect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+}
+
 /// A keyboard shortcut: modifiers + one key (stored as a display key and macOS key code).
 struct KeyShortcut: Codable, Hashable {
     var keyCode: UInt16
@@ -119,6 +136,14 @@ final class Preferences: ObservableObject {
     @Published var openRecentProjectsWithRecordingPicker: Bool
     @Published var webcamPreviewType: String
     @Published var showSpeakerNotes: Bool
+    /// Saved area dimensions ("Saved" menu of the area picker).
+    @Published var recordingAreaCropPresets: [AreaSize]
+    /// Last area selection, restored when "Area" is chosen (`lastPickedArea`).
+    @Published var lastPickedArea: PickedArea?
+    /// Devices chosen in the record picker (`recordingSourceInput`).
+    @Published var recordingCameraID: String?
+    @Published var recordingMicrophoneID: String?
+    @Published var recordingSystemAudio: Bool
     // Editing
     @Published var useLastProjectConfigForNewProjects: Bool
     @Published var autoSaveProject: Bool
@@ -153,6 +178,11 @@ final class Preferences: ObservableObject {
         openRecentProjectsWithRecordingPicker = bool("openRecentProjectsWithRecordingPicker", false)
         webcamPreviewType = store.string(forKey: "webcamPreviewType") ?? "square"
         showSpeakerNotes = bool("showSpeakerNotes", false)
+        recordingAreaCropPresets = decode("recordingAreaCropPresets") ?? []
+        lastPickedArea = decode("lastPickedArea")
+        recordingCameraID = store.string(forKey: "recordingCameraID")
+        recordingMicrophoneID = store.string(forKey: "recordingMicrophoneID")
+        recordingSystemAudio = bool("recordingSystemAudio", false)
         useLastProjectConfigForNewProjects = bool("useLastProjectConfigForNewProjects", false)
         autoSaveProject = bool("autoSaveProject", true)
         presetsFolderPath = store.string(forKey: "presetsFolderPath")
@@ -193,6 +223,11 @@ final class Preferences: ObservableObject {
         set("openRecentProjectsWithRecordingPicker", openRecentProjectsWithRecordingPicker)
         set("webcamPreviewType", webcamPreviewType)
         set("showSpeakerNotes", showSpeakerNotes)
+        encode("recordingAreaCropPresets", recordingAreaCropPresets)
+        encode("lastPickedArea", lastPickedArea)
+        set("recordingCameraID", recordingCameraID)
+        set("recordingMicrophoneID", recordingMicrophoneID)
+        set("recordingSystemAudio", recordingSystemAudio)
         set("useLastProjectConfigForNewProjects", useLastProjectConfigForNewProjects)
         set("autoSaveProject", autoSaveProject)
         set("presetsFolderPath", presetsFolderPath)
@@ -222,6 +257,11 @@ final class Preferences: ObservableObject {
         openRecentProjectsWithRecordingPicker = false
         webcamPreviewType = "square"
         showSpeakerNotes = false
+        recordingAreaCropPresets = []
+        lastPickedArea = nil
+        recordingCameraID = nil
+        recordingMicrophoneID = nil
+        recordingSystemAudio = false
         useLastProjectConfigForNewProjects = false
         autoSaveProject = true
         presetsFolderPath = nil
