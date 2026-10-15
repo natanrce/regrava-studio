@@ -63,13 +63,13 @@
       allowLocationSimulation = "YES">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "91765981309AD77000006E68"
-               BuildableName = "Regrava Studio.app"
-               BlueprintName = "Regrava Studio"
-               ReferencedContainer = "container:Regrava Studio.xcodeproj">
-            </BuildableReference>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "91765981309AD77000006E68"
+            BuildableName = "Regrava Studio.app"
+            BlueprintName = "Regrava Studio"
+            ReferencedContainer = "container:Regrava Studio.xcodeproj">
+         </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
@@ -80,13 +80,13 @@
       debugDocumentVersioning = "YES">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "91765981309AD77000006E68"
-               BuildableName = "Regrava Studio.app"
-               BlueprintName = "Regrava Studio"
-               ReferencedContainer = "container:Regrava Studio.xcodeproj">
-            </BuildableReference>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "91765981309AD77000006E68"
+            BuildableName = "Regrava Studio.app"
+            BlueprintName = "Regrava Studio"
+            ReferencedContainer = "container:Regrava Studio.xcodeproj">
+         </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
    <AnalyzeAction
