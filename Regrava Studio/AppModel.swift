@@ -16,9 +16,6 @@ final class AppModel: ObservableObject {
     @Published var displays: [DisplayInfo] = []
     @Published var selectedDisplayID: CGDirectDisplayID?
     @Published var options = CaptureOptions()
-    @Published var createsAutomaticZooms: Bool {
-        didSet { UserDefaults.standard.set(createsAutomaticZooms, forKey: "createsAutomaticZooms") }
-    }
     @Published private(set) var isRecording = false
     @Published private(set) var isBusy = false
     @Published private(set) var recordingStartedAt: Date?
@@ -27,15 +24,7 @@ final class AppModel: ObservableObject {
     private let recorder = ScreenRecorder()
     private var pendingBundle: URL?
 
-    init() {
-        createsAutomaticZooms = UserDefaults.standard.object(forKey: "createsAutomaticZooms") as? Bool ?? true
-    }
-
-    static var projectsDirectory: URL {
-        let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser
-        return movies.appendingPathComponent("Regrava Studio", isDirectory: true)
-    }
+    static var projectsDirectory: URL { Preferences.shared.projectsFolder }
 
     func loadDisplays() async {
         do {
@@ -86,7 +75,7 @@ final class AppModel: ObservableObject {
                 ),
                 mouseEvents: result.mouseEvents
             )
-            project.autoZoom.isEnabled = createsAutomaticZooms
+            project.autoZoom.isEnabled = Preferences.shared.createAutomaticZooms
             project.regenerateAutomaticZooms()
             try ProjectStore.save(project, to: bundle)
             open(bundle: bundle, project: project)

@@ -1,0 +1,255 @@
+import AppKit
+import Combine
+import RegravaCore
+import ServiceManagement
+
+/// What happens when a recording finishes (`actionAfterRecording`).
+enum AfterRecordingAction: String, Codable, CaseIterable {
+    case createProject = "create-project"
+    case exportAndCopyToClipboard = "export-and-copy-to-clipboard"
+    case exportAndCreateShareableLink = "export-and-create-shareable-link"
+    case exportAndSaveToFile = "export-and-save-to-file"
+
+    var menuTitle: String {
+        switch self {
+        case .createProject: return "Create project"
+        case .exportAndCopyToClipboard: return "Export and copy to clipboard"
+        case .exportAndCreateShareableLink: return "Export and create shareable link"
+        case .exportAndSaveToFile: return "Export and save to file"
+        }
+    }
+
+    var startButtonTitle: String {
+        switch self {
+        case .createProject: return "Start recording"
+        case .exportAndCopyToClipboard: return "Record & Copy"
+        case .exportAndCreateShareableLink: return "Record & Create Link"
+        case .exportAndSaveToFile: return "Record & Save"
+        }
+    }
+}
+
+/// A keyboard shortcut: modifiers + one key (stored as a display key and macOS key code).
+struct KeyShortcut: Codable, Hashable {
+    var keyCode: UInt16
+    var key: String
+    var command = false
+    var control = false
+    var option = false
+    var shift = false
+
+    var hasModifiers: Bool { command || control || option || shift }
+
+    /// macOS order: ⌃⌥⇧⌘ then the key.
+    var display: String {
+        (control ? "⌃" : "") + (option ? "⌥" : "") + (shift ? "⇧" : "") + (command ? "⌘" : "") + key
+    }
+
+    static func make(_ key: String, keyCode: UInt16, _ modifiers: String = "") -> KeyShortcut {
+        KeyShortcut(
+            keyCode: keyCode,
+            key: key,
+            command: modifiers.contains("⌘"),
+            control: modifiers.contains("⌃"),
+            option: modifiers.contains("⌥"),
+            shift: modifiers.contains("⇧")
+        )
+    }
+}
+
+/// Shortcut slots shown in Settings ▸ Shortcuts, with their defaults.
+enum ShortcutAction: String, CaseIterable, Codable {
+    // Recording (global)
+    case recordStartStop, pauseResume, restartRecording, addRecordingMarker
+    case recordDisplay, recordWindow, recordArea
+    case toggleShowSpeakerNotes, toggleSpeakerNotesPrompter
+    case toggleRecordingWidget
+    // Editing
+    case cutSlice, removeSliceBeforeCut, playOrIncreaseSpeed, playBackwardOrIncreaseSpeed, playOrPause
+
+    var isGlobal: Bool {
+        switch self {
+        case .cutSlice, .removeSliceBeforeCut, .playOrIncreaseSpeed, .playBackwardOrIncreaseSpeed, .playOrPause: return false
+        default: return true
+        }
+    }
+
+    var defaultShortcut: KeyShortcut {
+        switch self {
+        case .recordStartStop: return .make("↩", keyCode: 36, "⌃⌘")
+        case .pauseResume: return .make("P", keyCode: 35, "⌥⌘")
+        case .restartRecording: return .make("⌫", keyCode: 51, "⌥⌘")
+        case .addRecordingMarker: return .make("F", keyCode: 3, "⌃⌥⌘")
+        case .recordDisplay: return .make("3", keyCode: 20, "⌥⌘")
+        case .recordWindow: return .make("4", keyCode: 21, "⌥⌘")
+        case .recordArea: return .make("5", keyCode: 23, "⌥⌘")
+        case .toggleShowSpeakerNotes: return .make("/", keyCode: 44, "⌥⌘")
+        case .toggleSpeakerNotesPrompter: return .make(".", keyCode: 47, "⌥⌘")
+        case .toggleRecordingWidget: return .make("'", keyCode: 39, "⌥⌘")
+        case .cutSlice: return .make("C", keyCode: 8)
+        case .removeSliceBeforeCut: return .make("X", keyCode: 7)
+        case .playOrIncreaseSpeed: return .make("L", keyCode: 37)
+        case .playBackwardOrIncreaseSpeed: return .make("J", keyCode: 38)
+        case .playOrPause: return .make("K", keyCode: 40)
+        }
+    }
+}
+
+/// App preferences persisted in UserDefaults, with the keys and defaults. Not every key
+/// is used by the current phase yet.
+@MainActor
+final class Preferences: ObservableObject {
+    static let shared = Preferences()
+    private let defaults = UserDefaults.standard
+    private var cancellables: Set<AnyCancellable> = []
+
+    // General
+    @Published var startAtStartup: Bool
+    @Published var hideDockIcon: Bool
+    // Recording
+    @Published var projectsFolderPath: String?
+    @Published var recordingAreaCover: Bool
+    @Published var createAutomaticZooms: Bool
+    @Published var showRecordingWidget: Bool
+    @Published var maximumWebcamHeight: Int
+    @Published var recordingCountdownDuration: Int?
+    @Published var hideDesktopContentWhileRecording: Bool
+    @Published var hideAppDockIconWhileRecording: Bool
+    @Published var actionAfterRecording: AfterRecordingAction
+    @Published var openRecentProjectsWithRecordingPicker: Bool
+    @Published var webcamPreviewType: String
+    @Published var showSpeakerNotes: Bool
+    // Editing
+    @Published var useLastProjectConfigForNewProjects: Bool
+    @Published var autoSaveProject: Bool
+    @Published var presetsFolderPath: String?
+    // Quick export
+    @Published var showQuickExportWidget: Bool
+    @Published var alwaysSaveProjectWhenUsingQuickExportWidget: Bool
+    @Published var editProjectTitleWhenUsingQuickExportWidget: Bool
+    @Published var exportSettings: ExportSettingsStore
+    @Published var widgetExportSettings: ExportSettingsStore
+    // Shortcuts (nil = cleared)
+    @Published var shortcuts: [ShortcutAction: KeyShortcut?]
+
+    private init() {
+        let store = UserDefaults.standard
+        func bool(_ key: String, _ fallback: Bool) -> Bool { store.object(forKey: key) as? Bool ?? fallback }
+        func decode<T: Decodable>(_ key: String) -> T? {
+            store.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        }
+
+        startAtStartup = bool("startAtStartup", false)
+        hideDockIcon = bool("hideDockIcon", false)
+        projectsFolderPath = store.string(forKey: "projectsFolderPath")
+        recordingAreaCover = bool("recordingAreaCover", true)
+        createAutomaticZooms = bool("createAutomaticZooms", true)
+        showRecordingWidget = bool("showRecordingWidget", true)
+        maximumWebcamHeight = store.object(forKey: "maximumWebcamHeight") as? Int ?? 1080
+        recordingCountdownDuration = store.object(forKey: "recordingCountdownDuration") as? Int
+        hideDesktopContentWhileRecording = bool("hideDesktopContentWhileRecording", false)
+        hideAppDockIconWhileRecording = bool("hideAppDockIconWhileRecording", true)
+        actionAfterRecording = AfterRecordingAction(rawValue: store.string(forKey: "actionAfterRecording") ?? "") ?? .createProject
+        openRecentProjectsWithRecordingPicker = bool("openRecentProjectsWithRecordingPicker", false)
+        webcamPreviewType = store.string(forKey: "webcamPreviewType") ?? "square"
+        showSpeakerNotes = bool("showSpeakerNotes", false)
+        useLastProjectConfigForNewProjects = bool("useLastProjectConfigForNewProjects", false)
+        autoSaveProject = bool("autoSaveProject", true)
+        presetsFolderPath = store.string(forKey: "presetsFolderPath")
+        showQuickExportWidget = bool("showQuickExportWidget", true)
+        alwaysSaveProjectWhenUsingQuickExportWidget = bool("alwaysSaveProjectWhenUsingQuickExportWidget", false)
+        editProjectTitleWhenUsingQuickExportWidget = bool("editProjectTitleWhenUsingQuickExportWidget", false)
+        exportSettings = decode("export-settings") ?? ExportSettingsStore()
+        widgetExportSettings = decode("widget-export-settings") ?? ExportSettingsStore()
+        let stored: [String: KeyShortcut?] = decode("shortcuts") ?? [:]
+        shortcuts = Dictionary(uniqueKeysWithValues: ShortcutAction.allCases.map { action in
+            (action, stored.keys.contains(action.rawValue) ? stored[action.rawValue]! : action.defaultShortcut)
+        })
+
+        objectWillChange
+            .debounce(for: .milliseconds(50), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.persist() }
+            .store(in: &cancellables)
+    }
+
+    private func persist() {
+        func set(_ key: String, _ value: Any?) {
+            if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        func encode<T: Encodable>(_ key: String, _ value: T) {
+            defaults.set(try? JSONEncoder().encode(value), forKey: key)
+        }
+        set("startAtStartup", startAtStartup)
+        set("hideDockIcon", hideDockIcon)
+        set("projectsFolderPath", projectsFolderPath)
+        set("recordingAreaCover", recordingAreaCover)
+        set("createAutomaticZooms", createAutomaticZooms)
+        set("showRecordingWidget", showRecordingWidget)
+        set("maximumWebcamHeight", maximumWebcamHeight)
+        set("recordingCountdownDuration", recordingCountdownDuration)
+        set("hideDesktopContentWhileRecording", hideDesktopContentWhileRecording)
+        set("hideAppDockIconWhileRecording", hideAppDockIconWhileRecording)
+        set("actionAfterRecording", actionAfterRecording.rawValue)
+        set("openRecentProjectsWithRecordingPicker", openRecentProjectsWithRecordingPicker)
+        set("webcamPreviewType", webcamPreviewType)
+        set("showSpeakerNotes", showSpeakerNotes)
+        set("useLastProjectConfigForNewProjects", useLastProjectConfigForNewProjects)
+        set("autoSaveProject", autoSaveProject)
+        set("presetsFolderPath", presetsFolderPath)
+        set("showQuickExportWidget", showQuickExportWidget)
+        set("alwaysSaveProjectWhenUsingQuickExportWidget", alwaysSaveProjectWhenUsingQuickExportWidget)
+        set("editProjectTitleWhenUsingQuickExportWidget", editProjectTitleWhenUsingQuickExportWidget)
+        encode("export-settings", exportSettings)
+        encode("widget-export-settings", widgetExportSettings)
+        encode("shortcuts", Dictionary(uniqueKeysWithValues: shortcuts.map { ($0.key.rawValue, $0.value) }))
+    }
+
+    /// "Reset preferences": back to the defaults.
+    func reset() {
+        let domain = Bundle.main.bundleIdentifier ?? "com.natanzin.regravastudio"
+        defaults.removePersistentDomain(forName: domain)
+        startAtStartup = false
+        hideDockIcon = false
+        projectsFolderPath = nil
+        recordingAreaCover = true
+        createAutomaticZooms = true
+        showRecordingWidget = true
+        maximumWebcamHeight = 1080
+        recordingCountdownDuration = nil
+        hideDesktopContentWhileRecording = false
+        hideAppDockIconWhileRecording = true
+        actionAfterRecording = .createProject
+        openRecentProjectsWithRecordingPicker = false
+        webcamPreviewType = "square"
+        showSpeakerNotes = false
+        useLastProjectConfigForNewProjects = false
+        autoSaveProject = true
+        presetsFolderPath = nil
+        showQuickExportWidget = true
+        alwaysSaveProjectWhenUsingQuickExportWidget = false
+        editProjectTitleWhenUsingQuickExportWidget = false
+        exportSettings = ExportSettingsStore()
+        widgetExportSettings = ExportSettingsStore()
+        shortcuts = Dictionary(uniqueKeysWithValues: ShortcutAction.allCases.map { ($0, $0.defaultShortcut) })
+        applyStartAtLogin()
+    }
+
+    /// Default projects folder when none is chosen.
+    var projectsFolder: URL {
+        if let projectsFolderPath { return URL(fileURLWithPath: projectsFolderPath, isDirectory: true) }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Regrava Studio Projects", isDirectory: true)
+    }
+
+    /// Registers or unregisters the app as a login item.
+    func applyStartAtLogin() {
+        do {
+            if startAtStartup {
+                try SMAppService.mainApp.register()
+            } else if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            NSLog("Start at login change failed: \(error.localizedDescription)")
+        }
+    }
+}
