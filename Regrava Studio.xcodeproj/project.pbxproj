@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		917659A0309AD77000006E68 /* RegravaKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RegravaKit; sourceTree = "<group>"; };
 		91765982309AD77000006E68 /* Regrava Studio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Regrava Studio.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -33,6 +34,7 @@
 			isa = PBXGroup;
 			children = (
 				91765984309AD77000006E68 /* Regrava Studio */,
+				917659A0309AD77000006E68 /* RegravaKit */,
 				91765983309AD77000006E68 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -94,6 +96,9 @@
 			);
 			mainGroup = 91765979309AD77000006E68;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				917659A1309AD77000006E68 /* XCLocalSwiftPackageReference "RegravaKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 91765983309AD77000006E68 /* Products */;
 			projectDirPath = "";
@@ -341,6 +346,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		917659A1309AD77000006E68 /* XCLocalSwiftPackageReference "RegravaKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = RegravaKit;
+		};
+/* End XCLocalSwiftPackageReference section */
 	};
 	rootObject = 9176597A309AD77000006E68 /* Project object */;
 }
