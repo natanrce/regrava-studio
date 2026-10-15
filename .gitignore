@@ -8,3 +8,6 @@ RegravaKit/.build/
 RegravaKit/.swiftpm/
 
 .DS_Store
+
+# Coverage
+*.profraw

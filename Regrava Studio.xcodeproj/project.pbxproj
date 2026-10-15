@@ -13,8 +13,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		917659A0309AD77000006E68 /* RegravaKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RegravaKit; sourceTree = "<group>"; };
 		91765982309AD77000006E68 /* Regrava Studio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Regrava Studio.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		917659A0309AD77000006E68 /* RegravaKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RegravaKit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
