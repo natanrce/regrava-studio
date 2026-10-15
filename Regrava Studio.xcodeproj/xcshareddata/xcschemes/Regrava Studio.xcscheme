@@ -39,6 +39,16 @@
                ReferencedContainer = "container:RegravaKit">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "RegravaRenderTests"
+               BuildableName = "RegravaRenderTests"
+               BlueprintName = "RegravaRenderTests"
+               ReferencedContainer = "container:RegravaKit">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
