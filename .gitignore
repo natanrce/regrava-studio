@@ -1,0 +1,10 @@
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+
+# Swift Package Manager
+RegravaKit/.build/
+RegravaKit/.swiftpm/
+
+.DS_Store
