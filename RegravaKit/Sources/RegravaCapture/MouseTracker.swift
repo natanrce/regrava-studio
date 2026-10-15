@@ -73,27 +73,4 @@ final class MouseTracker {
         let location = event.cgEvent?.location ?? CGEvent(source: nil)?.location ?? .zero
         samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber))
     }
-
-    /// Converts samples to video-pixel events relative to `startUptime`.
-    static func convert(
-        _ samples: [Sample],
-        startUptime: TimeInterval,
-        displayBounds: CGRect,
-        pointPixelScale: Double
-    ) -> [MouseEvent] {
-        samples
-            .map { sample in
-                MouseEvent(
-                    kind: sample.kind,
-                    timeMs: (sample.uptime - startUptime) * 1000,
-                    position: Vec2(
-                        (sample.location.x - displayBounds.minX) * pointPixelScale,
-                        (sample.location.y - displayBounds.minY) * pointPixelScale
-                    ),
-                    button: sample.button
-                )
-            }
-            .filter { $0.timeMs >= 0 }
-            .sorted { $0.timeMs < $1.timeMs }
-    }
 }

@@ -28,7 +28,7 @@ final class AppModel: ObservableObject {
 
     func loadDisplays() async {
         do {
-            displays = try await ScreenRecorder.availableDisplays()
+            displays = try await CaptureCatalog.displays()
             if selectedDisplayID == nil || !displays.contains(where: { $0.id == selectedDisplayID }) {
                 selectedDisplayID = displays.first?.id
             }
@@ -47,7 +47,7 @@ final class AppModel: ObservableObject {
             .appendingPathComponent("Recording \(formatter.string(from: Date())).\(ProjectStore.fileExtension)", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
-            try await recorder.start(displayID: displayID, options: options, outputURL: bundle.appendingPathComponent("recording.mov"))
+            try await recorder.start(source: .display(displayID), options: options, workDirectory: bundle.appendingPathComponent("segments", isDirectory: true))
             pendingBundle = bundle
             isRecording = true
             recordingStartedAt = Date()
@@ -64,7 +64,8 @@ final class AppModel: ObservableObject {
         isRecording = false
         recordingStartedAt = nil
         do {
-            let result = try await recorder.stop()
+            let result = try await recorder.finish(to: bundle.appendingPathComponent("recording.mov"))
+            try? FileManager.default.removeItem(at: bundle.appendingPathComponent("segments", isDirectory: true))
             var project = Project(
                 recording: RecordingInfo(
                     videoFileName: result.videoURL.lastPathComponent,
