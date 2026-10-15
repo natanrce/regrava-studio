@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		917659A5309AD77000006E68 /* RegravaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 917659A2309AD77000006E68 /* RegravaCore */; };
+		917659A6309AD77000006E68 /* RegravaRender in Frameworks */ = {isa = PBXBuildFile; productRef = 917659A3309AD77000006E68 /* RegravaRender */; };
+		917659A7309AD77000006E68 /* RegravaCapture in Frameworks */ = {isa = PBXBuildFile; productRef = 917659A4309AD77000006E68 /* RegravaCapture */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		917659A0309AD77000006E68 /* RegravaKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RegravaKit; sourceTree = "<group>"; };
 		91765982309AD77000006E68 /* Regrava Studio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Regrava Studio.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -24,6 +30,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				917659A5309AD77000006E68 /* RegravaCore in Frameworks */,
+				917659A6309AD77000006E68 /* RegravaRender in Frameworks */,
+				917659A7309AD77000006E68 /* RegravaCapture in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -67,6 +76,9 @@
 			);
 			name = "Regrava Studio";
 			packageProductDependencies = (
+				917659A2309AD77000006E68 /* RegravaCore */,
+				917659A3309AD77000006E68 /* RegravaRender */,
+				917659A4309AD77000006E68 /* RegravaCapture */,
 			);
 			productName = "Regrava Studio";
 			productReference = 91765982309AD77000006E68 /* Regrava Studio.app */;
@@ -353,6 +365,21 @@
 			relativePath = RegravaKit;
 		};
 /* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		917659A2309AD77000006E68 /* RegravaCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RegravaCore;
+		};
+		917659A3309AD77000006E68 /* RegravaRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RegravaRender;
+		};
+		917659A4309AD77000006E68 /* RegravaCapture */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RegravaCapture;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9176597A309AD77000006E68 /* Project object */;
 }
