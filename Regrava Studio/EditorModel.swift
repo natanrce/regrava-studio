@@ -17,9 +17,7 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomID: UUID?
     @Published private(set) var currentTimeMs: Double = 0
     @Published private(set) var isPlaying = false
-    @Published private(set) var exportProgress: Double?
     @Published var errorMessage: String?
-    @Published var lastExportURL: URL?
 
     private let cursor = CursorAsset.defaultArrow()
     private let renderState: RenderState
@@ -163,27 +161,16 @@ final class EditorModel: ObservableObject {
 
     // MARK: Export
 
-    func export() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.mpeg4Movie]
-        panel.nameFieldStringValue = bundleURL.deletingPathExtension().lastPathComponent + ".mp4"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+    let exports = ExportController()
+
+    var projectName: String { bundleURL.deletingPathExtension().lastPathComponent }
+    var videoURL: URL { ProjectStore.videoURL(bundle: bundleURL, project: project) }
+
+    /// `openExportPicker` (⌘⇧E): pauses playback and opens the picker.
+    func openExportPicker() {
+        guard !exports.isExporting else { return }
         player.pause()
-        exportProgress = 0
-        let project = self.project
-        let videoURL = ProjectStore.videoURL(bundle: bundleURL, project: project)
-        let cursor = self.cursor
-        Task {
-            do {
-                try await ProjectExporter.export(project: project, videoURL: videoURL, settings: ExportSettingsStore().current, to: url, cursor: cursor) { value in
-                    Task { @MainActor [weak self] in self?.exportProgress = value }
-                }
-                lastExportURL = url
-            } catch {
-                errorMessage = "Export failed: \(error.localizedDescription)"
-            }
-            exportProgress = nil
-        }
+        exports.openPicker()
     }
 
     deinit {

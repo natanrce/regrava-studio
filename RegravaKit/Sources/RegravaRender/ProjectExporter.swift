@@ -23,7 +23,7 @@ public enum ExportError: LocalizedError {
 /// rate, quality) using AVAssetReader/AVAssetWriter, or ImageIO for GIF.
 public enum ProjectExporter {
     /// Bits per pixel per frame used for H.264 at each quality. These are this project's choices.
-    static func bitsPerPixel(_ quality: ExportQuality) -> Double {
+    public static func bitsPerPixel(_ quality: ExportQuality) -> Double {
         switch quality {
         case .studio: return 0.30
         case .socialMedia: return 0.12
