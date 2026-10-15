@@ -44,59 +44,30 @@ public final class RenderState: @unchecked Sendable {
 
 public enum CompositionFactory {
     /// Video composition that runs every frame through `state`.
-    public static func make(asset: AVAsset, state: RenderState, canvas: Size2) async throws -> AVMutableVideoComposition {
+    ///
+    /// Frames are composed at canvas size and then scaled to `outputSize` (defaults to the
+    /// canvas). `fps` sets the composition frame rate (defaults to the source's).
+    public static func make(
+        asset: AVAsset,
+        state: RenderState,
+        canvas: Size2,
+        outputSize: Size2? = nil,
+        fps: Int? = nil
+    ) async throws -> AVMutableVideoComposition {
+        let output = outputSize ?? canvas
+        let scaleX = output.width / max(canvas.width, 1)
+        let scaleY = output.height / max(canvas.height, 1)
+        let outputRect = CGRect(x: 0, y: 0, width: output.width.rounded(), height: output.height.rounded())
         let composition = try await AVMutableVideoComposition.videoComposition(with: asset) { request in
             let timeMs = request.compositionTime.seconds * 1000
-            let image = state.render(source: request.sourceImage, timeMs: timeMs)
+            var image = state.render(source: request.sourceImage, timeMs: timeMs)
+            if scaleX != 1 || scaleY != 1 {
+                image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY)).cropped(to: outputRect)
+            }
             request.finish(with: image, context: nil)
         }
-        composition.renderSize = CGSize(width: canvas.width.rounded(), height: canvas.height.rounded())
+        composition.renderSize = outputRect.size
+        if let fps { composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps)) }
         return composition
-    }
-}
-
-public enum ExportError: LocalizedError {
-    case cannotCreateSession
-    case failed(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .cannotCreateSession: return "Could not create the export session."
-        case .failed(let message): return message
-        }
-    }
-}
-
-public enum VideoExporter {
-    /// Renders the project to an MP4 file (video composition + source audio tracks).
-    public static func export(
-        project: Project,
-        videoURL: URL,
-        to outputURL: URL,
-        cursor: CursorAsset? = CursorAsset.defaultArrow(),
-        progress: @escaping @Sendable (Double) -> Void = { _ in }
-    ) async throws {
-        let asset = AVURLAsset(url: videoURL)
-        let state = RenderState(project: project, cursor: cursor)
-        let composition = try await CompositionFactory.make(asset: asset, state: state, canvas: project.style.canvas)
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
-            throw ExportError.cannotCreateSession
-        }
-        session.videoComposition = composition
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
-        let monitor = Task {
-            for await state in session.states(updateInterval: 0.2) {
-                if case .exporting(let p) = state { progress(p.fractionCompleted) }
-            }
-        }
-        defer { monitor.cancel() }
-        do {
-            try await session.export(to: outputURL, as: .mp4)
-        } catch {
-            throw ExportError.failed(error.localizedDescription)
-        }
-        progress(1)
     }
 }

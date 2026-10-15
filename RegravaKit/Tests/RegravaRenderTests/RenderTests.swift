@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import Foundation
+import ImageIO
 import Testing
 @testable import RegravaCore
 @testable import RegravaRender
@@ -76,21 +77,96 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
-    @Test func exportsComposedVideo() async throws {
+    private func withTestVideo(_ body: (URL, URL) async throws -> Void) async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("regrava-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = dir.appendingPathComponent("recording.mov")
-        let output = dir.appendingPathComponent("export.mp4")
         try await makeTestVideo(url: source, width: 640, height: 360, frames: 60, fps: 30)
+        try await body(source, dir)
+    }
 
-        try await VideoExporter.export(project: sampleProject(duration: 2000), videoURL: source, to: output, cursor: nil)
-
-        let asset = AVURLAsset(url: output)
+    private func videoInfo(_ url: URL) async throws -> (size: CGSize, duration: Double, fps: Float, codec: FourCharCode) {
+        let asset = AVURLAsset(url: url)
         let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
-        let size = try await track.load(.naturalSize)
-        #expect(size == CGSize(width: 1280, height: 720))
-        let duration = try await asset.load(.duration).seconds
-        #expect(abs(duration - 2) < 0.2)
+        let format = try #require(try await track.load(.formatDescriptions).first)
+        return (
+            try await track.load(.naturalSize),
+            try await asset.load(.duration).seconds,
+            try await track.load(.nominalFrameRate),
+            CMFormatDescriptionGetMediaSubType(format)
+        )
+    }
+
+    @Test func exportsMP4WithChosenResolutionAndFrameRate() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("export.mp4")
+            var settings = ExportSettings.defaults(for: .mp4)
+            settings.fps = 10
+            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, to: output, cursor: nil)
+            let info = try await videoInfo(output)
+            #expect(info.size == CGSize(width: 1280, height: 720))
+            #expect(abs(info.duration - 2) < 0.2)
+            #expect(abs(info.fps - 10) < 1)
+            #expect(info.codec == kCMVideoCodecType_H264)
+        }
+    }
+
+    @Test func exportsBothCodecsAsTwoFiles() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("export.mp4")
+            var settings = ExportSettings.defaults(for: .mp4)
+            settings.codec = .both
+            let files = try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, target: .file, to: output, cursor: nil)
+            #expect(files.count == 2)
+            #expect(try await videoInfo(files[0]).codec == kCMVideoCodecType_H264)
+            #expect(try await videoInfo(files[1]).codec == kCMVideoCodecType_HEVC)
+        }
+    }
+
+    @Test func exportsProRes() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("export.mov")
+            var settings = ExportSettings.defaults(for: .prores)
+            settings.height = 720
+            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, to: output, cursor: nil)
+            #expect(try await videoInfo(output).codec == kCMVideoCodecType_AppleProRes422HQ)
+        }
+    }
+
+    @Test func frameRateLimiterKeepsEveryOtherFrame() {
+        let times = (0..<60).map { Double($0) / 30 }
+        let kept = FrameRateLimiter.select(times: times, fps: 15, duration: 2)
+        #expect(kept.count == 30)
+        #expect(FrameRateLimiter.select(times: times, fps: 60, duration: 2).count == 60)
+    }
+
+    @Test func exportsGIF() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("export.gif")
+            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: .defaults(for: .gif), to: output, cursor: nil)
+            let gif = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+            var totalDelay = 0.0
+            for i in 0..<CGImageSourceGetCount(gif) {
+                let props = CGImageSourceCopyPropertiesAtIndex(gif, i, nil) as? [CFString: Any]
+                let gifProps = props?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+                totalDelay += (gifProps?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? 0
+            }
+            #expect(abs(totalDelay - 2) < 0.15)
+            let first = try #require(CGImageSourceCreateImageAtIndex(gif, 0, nil))
+            #expect(first.height == 480)
+        }
+    }
+
+    @Test func cancellationStopsExportAndRemovesFile() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("export.mp4")
+            let task = Task {
+                try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: .defaults(for: .mp4), to: output, cursor: nil)
+            }
+            task.cancel()
+            await #expect(throws: (any Error).self) { try await task.value }
+            #expect(!FileManager.default.fileExists(atPath: output.path))
+        }
     }
 }

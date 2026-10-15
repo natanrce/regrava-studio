@@ -175,7 +175,7 @@ final class EditorModel: ObservableObject {
         let cursor = self.cursor
         Task {
             do {
-                try await VideoExporter.export(project: project, videoURL: videoURL, to: url, cursor: cursor) { value in
+                try await ProjectExporter.export(project: project, videoURL: videoURL, settings: ExportSettingsStore().current, to: url, cursor: cursor) { value in
                     Task { @MainActor [weak self] in self?.exportProgress = value }
                 }
                 lastExportURL = url
