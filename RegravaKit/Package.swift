@@ -11,6 +11,7 @@ let package = Package(
     targets: [
         // Pure, platform-independent logic: models, auto-zoom, grouping, springs, camera track.
         .target(name: "RegravaCore"),
+        .testTarget(name: "RegravaCoreTests", dependencies: ["RegravaCore"]),
     ],
     swiftLanguageModes: [.v5]
 )
