@@ -147,6 +147,8 @@ public struct Project: Codable, Hashable, Sendable {
     public var markersMs: [Double]
     /// Key presses and releases (`recording.keystrokes`); only their timing is kept.
     public var keystrokes: [Keystroke]
+    /// Clips in source order (`scene.slices`).
+    public var slices: [Slice]
 
     public init(
         recording: RecordingInfo,
@@ -157,7 +159,8 @@ public struct Project: Codable, Hashable, Sendable {
         animation: AnimationConfig = AnimationConfig(),
         autoZoom: AutoZoomConfig = AutoZoomConfig(),
         markersMs: [Double] = [],
-        keystrokes: [Keystroke] = []
+        keystrokes: [Keystroke] = [],
+        slices: [Slice]? = nil
     ) {
         self.formatVersion = 1
         self.recording = recording
@@ -169,6 +172,7 @@ public struct Project: Codable, Hashable, Sendable {
         self.autoZoom = autoZoom
         self.markersMs = markersMs
         self.keystrokes = keystrokes.sorted { $0.timeMs < $1.timeMs }
+        self.slices = (slices ?? Self.defaultSlices(durationMs: recording.durationMs)).sorted { $0.sourceStartMs < $1.sourceStartMs }
     }
 
     public init(from decoder: Decoder) throws {
@@ -183,6 +187,8 @@ public struct Project: Codable, Hashable, Sendable {
         autoZoom = c.value(.autoZoom, default: AutoZoomConfig())
         markersMs = c.value(.markersMs, default: [])
         keystrokes = c.value(.keystrokes, default: [])
+        let stored: [Slice] = c.value(.slices, default: [])
+        slices = stored.isEmpty ? Self.defaultSlices(durationMs: recording.durationMs) : stored.sorted { $0.sourceStartMs < $1.sourceStartMs }
     }
 
     /// Output canvas size in pixels (aspect ratio from `style`).
