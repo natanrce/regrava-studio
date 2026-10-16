@@ -58,7 +58,7 @@ final class EditorModel: ObservableObject {
     @Published var focusedTrack: String? = "zooms"
     @Published var errorMessage: String?
 
-    private let cursor = CursorAsset.defaultArrow()
+    private let cursors: CursorLibrary
     private let renderState: RenderState
     private var baseComposition: AVMutableVideoComposition?
     private var compositionCanvas: Size2?
@@ -76,7 +76,8 @@ final class EditorModel: ObservableObject {
     init(bundleURL: URL, project: Project) {
         self.bundleURL = bundleURL
         self.project = project
-        renderState = RenderState(project: project, cursor: cursor, assetsDirectory: bundleURL)
+        cursors = CursorLibrary.make(project: project, bundle: bundleURL)
+        renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
         let saved = UserDefaults.standard.double(forKey: "project-view-timeline-zoom.\(bundleURL.path)")
         visibleDurationMs = clampVisibleDuration(saved > 0 ? saved : 30_000)
         Publishers.Merge(preferences.$playbackPreviewResolution.map { _ in () }, preferences.$playbackPreviewMaxHeight.map { _ in () })
@@ -164,7 +165,7 @@ final class EditorModel: ObservableObject {
 
     /// New composition (canvas or preview size changed); keeps the playhead.
     func rebuildComposition() async {
-        let snapshot = RenderState.makeSnapshot(project: project, cursor: cursor, assetsDirectory: bundleURL)
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundleURL)
         renderState.replace(with: snapshot)
         let asset = AVURLAsset(url: videoURL)
         do {
@@ -189,13 +190,13 @@ final class EditorModel: ObservableObject {
     private func scheduleRefresh() {
         refreshTask?.cancel()
         let project = self.project
-        let cursor = self.cursor
+        let cursors = self.cursors
         let bundle = bundleURL
         refreshTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 30_000_000)
             guard !Task.isCancelled else { return }
             let snapshot = await Task.detached(priority: .userInitiated) {
-                RenderState.makeSnapshot(project: project, cursor: cursor, assetsDirectory: bundle)
+                RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle)
             }.value
             guard !Task.isCancelled, let self else { return }
             self.renderState.replace(with: snapshot)

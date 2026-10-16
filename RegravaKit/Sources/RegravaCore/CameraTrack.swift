@@ -35,6 +35,10 @@ public struct CameraFrame: Hashable, Sendable {
     public var cursor: Vec2?
     /// 1 = visible; fades to 0 with "Hide cursor if not moving".
     public var cursorOpacity: Double = 1
+    /// Cursor image name ("pointer", "pointinghand", "ibeamstroke"… or "custom-N").
+    public var cursorName: String = CursorTypes.defaultName
+    /// Spring-animated press scale: 0.9 while pressed.
+    public var cursorScale: Double = 1
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -50,8 +54,13 @@ public final class CameraTrack: @unchecked Sendable {
     public let sampleIntervalMs: Double
     public static let clickRippleMs: Double = 450
 
+    /// Scale of the cursor while a button is held.
+    public static let pressedCursorScale = 0.9
+
     private let samples: [CameraFrame]
     private let clicks: [MouseEvent]
+    private let typeEvents: [MouseEvent]
+    private let cursorConfig: CursorConfig
 
     public init(project: Project, sampleRateHz: Double? = nil) {
         let layout = CanvasLayout(style: project.style, videoSize: project.recording.videoSize)
@@ -63,6 +72,10 @@ public final class CameraTrack: @unchecked Sendable {
         let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.removeShakeThreshold)
         let sparse = MouseProcessing.downsample(cleaned, minDistance: 10 * project.recording.pointPixelScale)
         clicks = cleaned.filter { $0.kind == .down }
+        cursorConfig = project.cursor
+        let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)
+        self.typeEvents = typeEvents
+        let imageChanges = CursorTypes.imageChangeTimes(typeEvents, config: project.cursor)
 
         let planner = CameraPlanner(project: project, layout: layout, cleaned: cleaned, sparse: sparse)
 
@@ -74,16 +87,18 @@ public final class CameraTrack: @unchecked Sendable {
                 loopMs: project.cursor.loopPositionBeforeEndMs,
                 stopMs: project.cursor.stopMovementInLastPartMs,
                 spring: project.animation.mouseSpring,
-                pointPixelScale: project.recording.pointPixelScale
+                pointPixelScale: project.recording.pointPixelScale,
+                imageChangesMs: imageChanges
             )
         ) {
             let pathPoints = Self.cursorPathPoints(events: cleaned, durationMs: duration, config: project.cursor)
-            guard !pathPoints.isEmpty else { return nil }
+            guard let endMs = pathPoints.last?.timeMs else { return nil }
             return SmoothedCursorPath.plan(
                 points: pathPoints,
                 syncPoints: Self.cursorSyncPoints(
-                    events: cleaned.filter { $0.timeMs >= 0 && $0.timeMs <= (pathPoints.last?.timeMs ?? 0) },
-                    pointPixelScale: project.recording.pointPixelScale
+                    events: cleaned.filter { $0.timeMs >= 0 && $0.timeMs <= endMs },
+                    pointPixelScale: project.recording.pointPixelScale,
+                    cursorImageChangesMs: imageChanges.filter { $0 >= 0 && $0 <= endMs }
                 ),
                 spring: project.animation.mouseSpring,
                 durationMs: duration
@@ -91,6 +106,9 @@ public final class CameraTrack: @unchecked Sendable {
         }
 
         var screen = SpringRect(layout.restScreen)
+        var press = SpringValue(1)
+        let pressSpring = project.animation.mouseSpring ?? .instant
+        let buttonEvents = cleaned.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
         frames.reserveCapacity(count)
@@ -105,7 +123,12 @@ public final class CameraTrack: @unchecked Sendable {
                 screen.advance(toward: target.rect, config: screenConfig, milliseconds: sampleIntervalMs)
             }
 
+            let pressed = CursorTypes.isPressed(at: t, events: cleaned, clicks: buttonEvents, smoothed: project.animation.mouseSpring != nil)
+            press.setTarget(pressed ? Self.pressedCursorScale : 1, config: pressSpring)
+            if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
+
             var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursorPath?.position(at: t))
+            frame.cursorScale = press.value
             frame.cursorOpacity = Self.cursorOpacity(at: t, events: cleaned, hideAfterMs: project.cursor.hideNotMovingAfterMs)
             frames.append(frame)
         }
@@ -127,6 +150,8 @@ public final class CameraTrack: @unchecked Sendable {
             cursor: interpolate(a.cursor, b.cursor, f) ?? first.cursor
         )
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
+        frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
+        frame.cursorName = CursorTypes.assetName(at: timeMs, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: timeMs, in: clicks) {
             let age = timeMs - clicks[i].timeMs
             if age >= 0 && age < Self.clickRippleMs {
@@ -278,6 +303,7 @@ final class CursorPathCache: @unchecked Sendable {
         var stopMs: Double
         var spring: SpringConfig?
         var pointPixelScale: Double
+        var imageChangesMs: [Double]
     }
 
     static let shared = CursorPathCache()

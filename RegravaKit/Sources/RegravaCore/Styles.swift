@@ -284,6 +284,12 @@ public struct CursorConfig: Codable, Hashable, Sendable {
     public var stopMovementInLastPartMs: Double
     /// "Rotate cursor" (−180…180°).
     public var baseRotation: Double
+    /// "Always use pointer cursor".
+    public var alwaysUseDefault: Bool
+    /// "Optimize cursor changes".
+    public var optimizeOriginalTypes: Bool
+    /// "Keep cursor in sync with hovers" (needs hover detection, not recorded yet).
+    public var followRecordedPositionOnHover: Bool
 
     public init(
         size: Double = 48,
@@ -293,7 +299,10 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         clickEffect: ClickEffect? = nil,
         removeShakeThreshold: Double = 500,
         stopMovementInLastPartMs: Double = 0,
-        baseRotation: Double = 0
+        baseRotation: Double = 0,
+        alwaysUseDefault: Bool = false,
+        optimizeOriginalTypes: Bool = true,
+        followRecordedPositionOnHover: Bool = true
     ) {
         self.size = size
         self.hide = hide
@@ -303,6 +312,9 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         self.removeShakeThreshold = removeShakeThreshold
         self.stopMovementInLastPartMs = stopMovementInLastPartMs
         self.baseRotation = baseRotation
+        self.alwaysUseDefault = alwaysUseDefault
+        self.optimizeOriginalTypes = optimizeOriginalTypes
+        self.followRecordedPositionOnHover = followRecordedPositionOnHover
     }
 
     public init(from decoder: Decoder) throws {
@@ -316,6 +328,9 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         removeShakeThreshold = c.value(.removeShakeThreshold, default: d.removeShakeThreshold)
         stopMovementInLastPartMs = c.value(.stopMovementInLastPartMs, default: d.stopMovementInLastPartMs)
         baseRotation = c.value(.baseRotation, default: d.baseRotation)
+        alwaysUseDefault = c.value(.alwaysUseDefault, default: d.alwaysUseDefault)
+        optimizeOriginalTypes = c.value(.optimizeOriginalTypes, default: d.optimizeOriginalTypes)
+        followRecordedPositionOnHover = c.value(.followRecordedPositionOnHover, default: d.followRecordedPositionOnHover)
     }
 
     /// Multiplier over the system cursor size (32 px reference).

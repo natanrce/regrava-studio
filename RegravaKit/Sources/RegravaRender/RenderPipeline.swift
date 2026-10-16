@@ -14,14 +14,14 @@ public final class RenderState: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot: Snapshot
 
-    public init(project: Project, cursor: CursorAsset? = CursorAsset.defaultArrow(), assetsDirectory: URL? = nil) {
-        snapshot = Self.makeSnapshot(project: project, cursor: cursor, assetsDirectory: assetsDirectory)
+    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil) {
+        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory)
     }
 
     /// `assetsDirectory` is the project folder (background images).
-    public static func makeSnapshot(project: Project, cursor: CursorAsset?, assetsDirectory: URL? = nil) -> Snapshot {
+    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil) -> Snapshot {
         let track = CameraTrack(project: project)
-        let compositor = FrameCompositor(project: project, layout: track.layout, cursor: cursor, assetsDirectory: assetsDirectory)
+        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory)
         return Snapshot(track: track, compositor: compositor)
     }
 

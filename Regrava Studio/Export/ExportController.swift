@@ -64,8 +64,9 @@ final class ExportController: ObservableObject {
         // The controller is main-actor isolated; holding it strongly for the export is fine.
         task = Task {
             do {
+                let cursors = CursorLibrary.make(project: project, bundle: videoURL.deletingLastPathComponent())
                 let files = try await ProjectExporter.export(
-                    project: project, videoURL: videoURL, settings: settings, target: target, to: outputURL
+                    project: project, videoURL: videoURL, settings: settings, target: target, to: outputURL, cursors: cursors
                 ) { value in
                     Task { @MainActor in self.update(progress: value) }
                 }

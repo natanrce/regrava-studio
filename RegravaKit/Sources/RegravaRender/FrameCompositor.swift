@@ -12,16 +12,16 @@ public final class FrameCompositor: @unchecked Sendable {
     private let style: StyleConfig
     private let cursorConfig: CursorConfig
     private let pointPixelScale: Double
-    private let cursor: CursorAsset?
+    private let cursors: CursorLibrary?
     private let background: CIImage
 
     /// `assetsDirectory` is the project folder (for background images).
-    public init(project: Project, layout: CanvasLayout, cursor: CursorAsset?, assetsDirectory: URL? = nil) {
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil) {
         self.layout = layout
         style = project.style
         cursorConfig = project.cursor
         pointPixelScale = project.recording.pointPixelScale
-        self.cursor = cursor
+        self.cursors = cursors
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
@@ -75,8 +75,9 @@ public final class FrameCompositor: @unchecked Sendable {
             output = Self.clickEffect(effect, center: center, progress: progress, maxRadius: 22 * pixelsPerPoint).composited(over: output)
         }
 
-        if !cursorConfig.hide, frame.cursorOpacity > 0, let cursor, let position = frame.cursor {
-            output = placedCursor(cursor, at: position, frame: frame, pixelsPerPoint: pixelsPerPoint).composited(over: output)
+        if !cursorConfig.hide, frame.cursorOpacity > 0, let cursors, let position = frame.cursor {
+            let cursor = cursors.asset(named: frame.cursorName)
+            output = placedCursor(cursor, at: position, frame: frame, pixelsPerPoint: pixelsPerPoint * frame.cursorScale).composited(over: output)
         }
 
         return output.cropped(to: canvasRect)

@@ -60,9 +60,16 @@ public struct CursorAsset: @unchecked Sendable {
     /// The system arrow, rasterized at high resolution so it stays sharp when zoomed.
     /// Returns nil when AppKit cannot provide it (e.g. outside a running application).
     public static func systemArrow(rasterScale: Double = 6) -> CursorAsset? {
-        let cursor = NSCursor.arrow
-        let source = cursor.image
-        let size = source.size
+        rasterized(NSCursor.arrow, rasterScale: rasterScale)
+    }
+
+    /// A system cursor drawn at `rasterScale` pixels per point.
+    public static func rasterized(_ cursor: NSCursor, rasterScale: Double = 6) -> CursorAsset? {
+        rasterized(cursor.image, hotSpot: Vec2(cursor.hotSpot.x, cursor.hotSpot.y), rasterScale: rasterScale)
+    }
+
+    static func rasterized(_ source: NSImage, hotSpot: Vec2, size: NSSize? = nil, rasterScale: Double = 6) -> CursorAsset? {
+        let size = size ?? source.size
         guard size.width > 0, size.height > 0 else { return nil }
         let pixelsWide = Int(size.width * rasterScale)
         let pixelsHigh = Int(size.height * rasterScale)
@@ -90,7 +97,93 @@ public struct CursorAsset: @unchecked Sendable {
         return CursorAsset(
             image: CIImage(cgImage: cgImage),
             sizePoints: Size2(width: size.width, height: size.height),
-            hotspotPoints: Vec2(cursor.hotSpot.x, cursor.hotSpot.y)
+            hotspotPoints: hotSpot
         )
+    }
+
+    /// System cursor for an image name of the cursor sets. nil for names without a
+    /// public AppKit cursor (they fall back to the pointer).
+    public static func systemCursor(named name: String) -> NSCursor? {
+        switch name {
+        case "pointer": return .arrow
+        case "ibeam", "ibeamstroke": return .iBeam
+        case "ibeamvertical", "ibeamverticalstroke": return .iBeamCursorForVerticalLayout
+        case "cross", "crosshair": return .crosshair
+        case "closedhand": return .closedHand
+        case "openhand": return .openHand
+        case "pointinghand": return .pointingHand
+        case "resizeleft": return .resizeLeft
+        case "resizeright": return .resizeRight
+        case "resizeleftright": return .resizeLeftRight
+        case "resizeup": return .resizeUp
+        case "resizedown": return .resizeDown
+        case "resizeupdown": return .resizeUpDown
+        case "poof": return .disappearingItem
+        case "notallowed": return .operationNotAllowed
+        case "makealias": return .dragLink
+        case "copy": return .dragCopy
+        case "contextualmenu": return .contextualMenu
+        default: break
+        }
+        if #available(macOS 15.0, *) {
+            switch name {
+            case "zoomin": return .zoomIn
+            case "zoomout": return .zoomOut
+            case "resizenorth": return .frameResize(position: .top, directions: .outward)
+            case "resizesouth": return .frameResize(position: .bottom, directions: .outward)
+            case "resizewest": return .frameResize(position: .left, directions: .outward)
+            case "resizeeast": return .frameResize(position: .right, directions: .outward)
+            case "resizenorthwest": return .frameResize(position: .topLeft, directions: .outward)
+            case "resizenortheast": return .frameResize(position: .topRight, directions: .outward)
+            case "resizesouthwest": return .frameResize(position: .bottomLeft, directions: .outward)
+            case "resizesoutheast": return .frameResize(position: .bottomRight, directions: .outward)
+            case "resizenorthsouth": return .frameResize(position: .top, directions: .all)
+            case "resizeeastwest": return .frameResize(position: .left, directions: .all)
+            case "resizenorthwestsoutheast": return .frameResize(position: .topLeft, directions: .all)
+            case "resizenortheastsouthwest": return .frameResize(position: .topRight, directions: .all)
+            default: break
+            }
+        }
+        return nil
+    }
+}
+
+/// Every cursor image a project can show, by image name ("pointer", "pointinghand",
+/// "ibeamstroke"… and "custom-N" recorded images).
+public struct CursorLibrary: @unchecked Sendable {
+    public let assets: [String: CursorAsset]
+    public let pointer: CursorAsset
+
+    public init(assets: [String: CursorAsset], pointer: CursorAsset) {
+        self.assets = assets
+        self.pointer = pointer
+    }
+
+    /// Only the default arrow.
+    public static func arrowOnly() -> CursorLibrary {
+        CursorLibrary(assets: [:], pointer: CursorAsset.defaultArrow())
+    }
+
+    /// The images a project's recording uses: system cursors for standard types and the saved
+    /// images of custom ones (`bundle/cursors/<id>.png`).
+    public static func make(project: Project, bundle: URL?) -> CursorLibrary {
+        let pointer = CursorAsset.defaultArrow()
+        var assets: [String: CursorAsset] = [CursorTypes.defaultName: pointer]
+        let names = Set(project.mouseEvents.map { CursorTypes.assetName(for: $0.cursorID) })
+        for name in names where assets[name] == nil {
+            if CursorTypes.isCustom(name) {
+                guard let bundle, let info = project.recording.cursors.first(where: { $0.id == name }),
+                      let image = NSImage(contentsOf: ProjectStore.cursorImageURL(bundle: bundle, id: name)) else { continue }
+                let size = NSSize(width: info.standardSize.width, height: info.standardSize.height)
+                assets[name] = CursorAsset.rasterized(image, hotSpot: info.hotSpot, size: size)
+            } else if let cursor = CursorAsset.systemCursor(named: name) {
+                assets[name] = CursorAsset.rasterized(cursor)
+            }
+        }
+        return CursorLibrary(assets: assets, pointer: pointer)
+    }
+
+    public func asset(named name: String) -> CursorAsset {
+        assets[name] ?? pointer
     }
 }

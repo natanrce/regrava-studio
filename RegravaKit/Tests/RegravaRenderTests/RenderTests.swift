@@ -55,7 +55,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
 
     @Test func composesFrameAtCanvasSize() {
         let project = sampleProject(duration: 2000)
-        let snapshot = RenderState.makeSnapshot(project: project, cursor: nil)
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: nil)
         let source = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
         let image = snapshot.compositor.compose(source: source, frame: snapshot.track.frame(at: 1000))
         #expect(image.extent == CGRect(x: 0, y: 0, width: 1920, height: 1080))
@@ -67,7 +67,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         var project = sampleProject(duration: 2000)
         project.style.inset = .enabledDefault
         project.cursor.clickEffect = .ripple
-        let snapshot = RenderState.makeSnapshot(project: project, cursor: CursorAsset.defaultArrow())
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: CursorLibrary.arrowOnly())
         let checker = CIFilter(name: "CICheckerboardGenerator", parameters: [
             "inputWidth": 40, "inputColor0": CIColor.white, "inputColor1": CIColor(red: 0.2, green: 0.4, blue: 0.8),
         ])!.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
@@ -80,7 +80,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         // Click effects in the middle of a resting screen.
         for effect in ClickEffect.allCases {
             project.cursor.clickEffect = effect
-            let effectSnapshot = RenderState.makeSnapshot(project: project, cursor: nil)
+            let effectSnapshot = RenderState.makeSnapshot(project: project, cursors: nil)
             var frame = effectSnapshot.track.frame(at: 0)
             frame.screenRect = effectSnapshot.track.layout.restScreen
             frame.clickProgress = 0.3
@@ -117,7 +117,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
             let output = dir.appendingPathComponent("export.mp4")
             var settings = ExportSettings.defaults(for: .mp4)
             settings.fps = 10
-            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, to: output, cursor: nil)
+            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, to: output, cursors: nil)
             let info = try await videoInfo(output)
             #expect(info.size == CGSize(width: 1280, height: 720))
             #expect(abs(info.duration - 2) < 0.2)
@@ -131,7 +131,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
             let output = dir.appendingPathComponent("export.mp4")
             var settings = ExportSettings.defaults(for: .mp4)
             settings.codec = .both
-            let files = try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, target: .file, to: output, cursor: nil)
+            let files = try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, target: .file, to: output, cursors: nil)
             #expect(files.count == 2)
             #expect(try await videoInfo(files[0]).codec == kCMVideoCodecType_H264)
             #expect(try await videoInfo(files[1]).codec == kCMVideoCodecType_HEVC)
@@ -143,7 +143,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
             let output = dir.appendingPathComponent("export.mov")
             var settings = ExportSettings.defaults(for: .prores)
             settings.height = 720
-            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, to: output, cursor: nil)
+            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, to: output, cursors: nil)
             #expect(try await videoInfo(output).codec == kCMVideoCodecType_AppleProRes422HQ)
         }
     }
@@ -158,7 +158,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
     @Test func exportsGIF() async throws {
         try await withTestVideo { source, dir in
             let output = dir.appendingPathComponent("export.gif")
-            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: .defaults(for: .gif), to: output, cursor: nil)
+            try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: .defaults(for: .gif), to: output, cursors: nil)
             let gif = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
             var totalDelay = 0.0
             for i in 0..<CGImageSourceGetCount(gif) {
@@ -176,7 +176,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         try await withTestVideo { source, dir in
             let output = dir.appendingPathComponent("export.mp4")
             let task = Task {
-                try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: .defaults(for: .mp4), to: output, cursor: nil)
+                try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: .defaults(for: .mp4), to: output, cursors: nil)
             }
             task.cancel()
             await #expect(throws: (any Error).self) { try await task.value }

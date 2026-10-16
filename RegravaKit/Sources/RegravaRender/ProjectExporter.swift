@@ -40,12 +40,12 @@ public enum ProjectExporter {
         settings rawSettings: ExportSettings,
         target: ExportTarget = .file,
         to outputURL: URL,
-        cursor: CursorAsset? = CursorAsset.defaultArrow(),
+        cursors: CursorLibrary? = CursorLibrary.arrowOnly(),
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> [URL] {
         let settings = rawSettings.normalized(target: target)
         let outputSize = settings.outputSize(canvas: project.canvasSize)
-        let state = RenderState(project: project, cursor: cursor, assetsDirectory: videoURL.deletingLastPathComponent())
+        let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent())
 
         switch settings.format {
         case .gif:
