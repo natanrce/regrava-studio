@@ -524,3 +524,58 @@ struct ZoomInspector: View {
         return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
+
+// MARK: - Slice inspector
+
+struct SliceInspector: View {
+    @ObservedObject var editor: EditorModel
+    var sliceID: UUID
+
+    private var slice: Slice? { editor.project.slices.first { $0.id == sliceID } }
+
+    var body: some View {
+        if let slice {
+            VStack(alignment: .leading, spacing: 0) {
+                // Per-source volume sliders need the recording's audio sources, which are not
+                // tracked separately yet.
+                SidebarSection {
+                    NamedField(name: "Speed") {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            SegmentedPicker(
+                                options: Slice.speedOptions,
+                                label: { String(format: "%gx", $0) },
+                                selection: Binding(get: { slice.speed }, set: { editor.setSliceSpeed(sliceID, $0) })
+                            )
+                            RSButton(title: "Apply speed to all slices", icon: "gauge.with.dots.needle.67percent", kind: .secondary) {
+                                editor.applySpeedToAllSlices(from: sliceID)
+                            }
+                            .disabled(!editor.canApplySpeedToAll(from: sliceID))
+                        }
+                    }
+                }
+                SidebarSection {
+                    NamedField(name: "Cursor settings", description: "Change appearance of mouse cursor in this part of the recording.", togglable: true) {
+                        ToggleRow(title: "Hide cursor", isOn: Binding(
+                            get: { slice.hideCursor },
+                            set: { v in editor.updateSlice(sliceID) { $0.hideCursor = v } }
+                        ))
+                        if !slice.hideCursor {
+                            ToggleRow(
+                                title: "Disable smooth mouse movement",
+                                description: "This is useful, for example, when recording drop-down menus, where precise alignment is required.",
+                                isOn: Binding(
+                                    get: { slice.disableSmoothMouseMovement },
+                                    set: { v in editor.updateSlice(sliceID) { $0.disableSmoothMouseMovement = v } }
+                                )
+                            )
+                        }
+                    }
+                }
+                SidebarSection(showsDivider: false) {
+                    RSButton(title: "Remove slice", icon: "trash", kind: .secondary) { editor.removeSlice(sliceID) }
+                        .disabled(editor.project.slices.count < 2)
+                }
+            }
+        }
+    }
+}
