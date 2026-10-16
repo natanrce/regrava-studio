@@ -341,7 +341,7 @@ struct AnimationsPanel: View {
     private let resetSpring = SpringConfig.screen
 
     var body: some View {
-        SidebarSection(showsDivider: false) {
+        SidebarSection {
             SpringEditor(
                 name: "Screen animation style",
                 presets: SpringPreset.screen,
@@ -353,6 +353,19 @@ struct AnimationsPanel: View {
                 presets: SpringPreset.cursor,
                 config: Binding(get: { editor.project.animation.mouseSpring }, set: { v in editor.change { $0.animation.mouseSpring = v } }),
                 resetConfig: resetSpring
+            )
+        }
+        // Section 2: 0–1, percent preview, no reset.
+        SidebarSection(showsDivider: false) {
+            SliderField(
+                name: "Motion blur",
+                description: "Elements that are moving will have a cinematic motion blur effect applied",
+                value: Binding(
+                    get: { editor.project.animation.motionBlurAmount },
+                    set: { v in editor.change(coalesce: "motion-blur") { $0.animation.motionBlurAmount = v } }
+                ),
+                range: 0...1,
+                preview: { "\(Int(($0 * 100).rounded()))%" }
             )
         }
     }
