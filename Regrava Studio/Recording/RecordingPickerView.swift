@@ -347,18 +347,19 @@ private struct RecentProjectsToggle: View {
 private struct RecordingOptionsButton: View {
     @ObservedObject var coordinator: RecordingCoordinator
     @State private var hovered = false
+    @State private var isMenuOpen = false
     private let anchor = AnchorHolder()
 
     var body: some View {
-        Button(action: showMenu) {
+        Button(action: openMenu) {
             HStack(spacing: Theme.gap(0)) {
                 Image(systemName: "gear").font(.system(size: 16))
                 Image(systemName: "chevron.down").font(.system(size: 12))
             }
             .padding(.horizontal, 14)
             .frame(height: 50)
-            .opacity(hovered ? 1 : Theme.secondaryOpacity)
-            .background(RoundedRectangle(cornerRadius: 9).fill(hovered ? Theme.Colors.hover : .clear))
+            .opacity(hovered || isMenuOpen ? 1 : Theme.secondaryOpacity)
+            .background(RoundedRectangle(cornerRadius: 9).fill(hovered || isMenuOpen ? Theme.Colors.hover : .clear))
             .contentShape(RoundedRectangle(cornerRadius: 9))
             .background(MenuAnchor(holder: anchor))
         }
@@ -367,9 +368,19 @@ private struct RecordingOptionsButton: View {
         .help("Recording options")
     }
 
-    private func showMenu() {
+    /// Shows the button as active, then opens the (modal) menu on the next run-loop turn.
+    private func openMenu() {
+        isMenuOpen = true
+        DispatchQueue.main.async {
+            buildMenu().popUp(below: anchor.view)
+            isMenuOpen = false
+        }
+    }
+
+    private func buildMenu() -> MenuBuilder {
         let preferences = coordinator.preferences
         let menu = MenuBuilder()
+        menu.group("before")
         menu.header("Before Recording")
         let durations: [Int?] = [nil, 3, 5, 10]
         menu.segmented(
@@ -377,15 +388,26 @@ private struct RecordingOptionsButton: View {
             options: ["Off", "3s", "5s", "10s"],
             selected: durations.firstIndex(of: preferences.recordingCountdownDuration) ?? 0
         ) { preferences.recordingCountdownDuration = durations[$0] }
+        menu.group("while")
         menu.header("While Recording")
         menu.toggle("Hide Desktop Icons", isOn: preferences.hideDesktopContentWhileRecording) { preferences.hideDesktopContentWhileRecording = $0 }
         menu.toggle("Hide Dock Icon", isOn: preferences.hideAppDockIconWhileRecording) { preferences.hideAppDockIconWhileRecording = $0 }
         menu.toggle("Highlight Recorded Area", isOn: preferences.recordingAreaCover) { preferences.recordingAreaCover = $0 }
+        menu.toggle("Show Speaker Notes", isOn: preferences.showSpeakerNotes) { preferences.showSpeakerNotes = $0 }
+        menu.group("after")
         menu.header("After Recording")
         menu.toggle("Open Quick Share Widget", isOn: preferences.showQuickExportWidget) { preferences.showQuickExportWidget = $0 }
+        menu.group("advanced")
+        menu.submenu("Advanced") { sub in
+            sub.header("Recording Engine")
+            sub.item("Use Modern Engine If Available", checked: preferences.recordingEngine == "auto") { preferences.recordingEngine = "auto" }
+            sub.item("Force Modern Engine", checked: preferences.recordingEngine == "modern") { preferences.recordingEngine = "modern" }
+            // Only ScreenCaptureKit is implemented in this app.
+            sub.item("Force Legacy Engine", enabled: false)
+        }
         menu.group("settings")
         menu.item("Settings…", shortcut: .make(",", keyCode: 43, "⌘")) { SettingsWindowController.shared.show() }
-        menu.popUp(below: anchor.view)
+        return menu
     }
 }
 

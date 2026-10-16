@@ -136,6 +136,8 @@ final class Preferences: ObservableObject {
     @Published var openRecentProjectsWithRecordingPicker: Bool
     @Published var webcamPreviewType: String
     @Published var showSpeakerNotes: Bool
+    /// Options ▸ Advanced ▸ Recording Engine: "auto" (Use Modern Engine If Available) or "modern".
+    @Published var recordingEngine: String
     /// Saved area dimensions ("Saved" menu of the area picker).
     @Published var recordingAreaCropPresets: [AreaSize]
     /// Last area selection, restored when "Area" is chosen (`lastPickedArea`).
@@ -178,6 +180,7 @@ final class Preferences: ObservableObject {
         openRecentProjectsWithRecordingPicker = bool("openRecentProjectsWithRecordingPicker", false)
         webcamPreviewType = store.string(forKey: "webcamPreviewType") ?? "square"
         showSpeakerNotes = bool("showSpeakerNotes", false)
+        recordingEngine = store.string(forKey: "recordingUseScreenCaptureKit") ?? "auto"
         recordingAreaCropPresets = decode("recordingAreaCropPresets") ?? []
         lastPickedArea = decode("lastPickedArea")
         recordingCameraID = store.string(forKey: "recordingCameraID")
@@ -223,6 +226,7 @@ final class Preferences: ObservableObject {
         set("openRecentProjectsWithRecordingPicker", openRecentProjectsWithRecordingPicker)
         set("webcamPreviewType", webcamPreviewType)
         set("showSpeakerNotes", showSpeakerNotes)
+        set("recordingUseScreenCaptureKit", recordingEngine)
         encode("recordingAreaCropPresets", recordingAreaCropPresets)
         encode("lastPickedArea", lastPickedArea)
         set("recordingCameraID", recordingCameraID)
@@ -257,6 +261,7 @@ final class Preferences: ObservableObject {
         openRecentProjectsWithRecordingPicker = false
         webcamPreviewType = "square"
         showSpeakerNotes = false
+        recordingEngine = "auto"
         recordingAreaCropPresets = []
         lastPickedArea = nil
         recordingCameraID = nil

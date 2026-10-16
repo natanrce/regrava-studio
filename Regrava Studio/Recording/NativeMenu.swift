@@ -8,6 +8,7 @@ import SwiftUI
 final class MenuBuilder {
     let menu = NSMenu()
     private var currentGroup: String?
+    private var hostedViews: [NSView] = []
 
     init() {
         menu.autoenablesItems = false
@@ -89,15 +90,37 @@ final class MenuBuilder {
         let item = NSMenuItem()
         item.view = host
         menu.addItem(item)
+        hostedViews.append(host)
     }
 
-    /// Shows the menu under a view (anchored) or at the mouse location.
+    /// Gives every custom row the menu's full width so trailing controls line up.
+    private func alignHostedRows() {
+        let width = max(menu.size.width, hostedViews.map(\.frame.width).max() ?? 0)
+        hostedViews.forEach { $0.frame.size.width = width }
+    }
+
+    /// Shows the menu under a view (anchored) or at the mouse location. Opens above the
+    /// anchor view, left-aligned with it; below it when there is no room above. Without an
+    /// anchor, opens at the mouse.
     func popUp(below view: NSView?) {
-        if let view {
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height + 4), in: view)
-        } else {
+        alignHostedRows()
+        guard let view, let window = view.window else {
             menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+            return
         }
+        let gap: CGFloat = 6
+        let menuHeight = menu.size.height
+        let onScreen = window.convertToScreen(view.convert(view.bounds, to: nil))
+        let roomAbove = (window.screen?.visibleFrame.maxY ?? .greatestFiniteMagnitude) - onScreen.maxY
+        let above = roomAbove >= menuHeight + gap
+        // `at` is the menu's top-left corner in the view's coordinate system.
+        let y: CGFloat
+        if view.isFlipped {
+            y = above ? -(menuHeight + gap) : view.bounds.height + gap
+        } else {
+            y = above ? view.bounds.height + menuHeight + gap : -gap
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: y), in: view)
     }
 }
 
@@ -152,14 +175,13 @@ private struct MenuToggleRow: View {
         HStack(spacing: 8) {
             if let icon { Image(systemName: icon).frame(width: 16) }
             Text(title).font(.system(size: 13))
-            Spacer(minLength: 16)
+            Spacer(minLength: 24)
             Toggle("", isOn: Binding(get: { isOn }, set: { isOn = $0; onChange($0) }))
                 .toggleStyle(.switch)
-                .controlSize(.mini)
                 .labelsHidden()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .frame(height: 28)
     }
 }
 
@@ -177,12 +199,11 @@ private struct MenuSegmentedRow: View {
                 ForEach(options.indices, id: \.self) { Text(options[$0]).tag($0) }
             }
             .pickerStyle(.segmented)
-            .controlSize(.small)
             .labelsHidden()
             .fixedSize()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .frame(height: 32)
     }
 }
 
