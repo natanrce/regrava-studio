@@ -41,6 +41,17 @@ enum UISnapshots {
             write(view, width: 1200, height: 900, to: directory.appendingPathComponent("export-picker-\(format.rawValue).png"))
         }
         Preferences.shared.exportSettings.select(format: .mp4)
+
+        // Recording flow. Panels use a HUD material that does not render offscreen, so the
+        // content is drawn on a dark backdrop instead.
+        let coordinator = RecordingCoordinator()
+        coordinator.refreshDevices()
+        func onBackdrop<V: View>(_ view: V) -> some View {
+            view.background(Color(hex: 0x2A2A2E)).clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        write(onBackdrop(RecordingPickerView(coordinator: coordinator)).fixedSize(), width: 1100, height: 64, to: directory.appendingPathComponent("recording-picker.png"))
+        write(onBackdrop(RecordingWidgetView(coordinator: coordinator).frame(width: 300)), width: 300, height: 48, to: directory.appendingPathComponent("recording-widget.png"))
+        write(StartRecordingButton(coordinator: coordinator).padding(20).background(Color.black.opacity(0.6)), width: 280, height: 90, to: directory.appendingPathComponent("start-button.png"))
     }
 
     private static func write<V: View>(_ view: V, width: CGFloat, height: CGFloat?, to url: URL) {
