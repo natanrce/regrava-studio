@@ -116,6 +116,8 @@ final class OnboardingWindowController: NSWindowController {
 
     private init() {
         let hosting = NSHostingController(rootView: OnboardingView(model: OnboardingModel.placeholder))
+        // Fixed window size; don't let the SwiftUI content resize the window.
+        hosting.sizingOptions = []
         let window = NSWindow(contentViewController: hosting)
         window.title = "New Recording"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]

@@ -11,6 +11,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     init(bundleURL: URL, project: Project) {
         model = EditorModel(bundleURL: bundleURL, project: project)
         let hosting = NSHostingController(rootView: EditorPlaceholder(editor: model))
+        // Fixed window size; don't let the SwiftUI content resize the window.
+        hosting.sizingOptions = []
         let window = NSWindow(contentViewController: hosting)
         window.title = model.projectName
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
