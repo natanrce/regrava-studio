@@ -91,7 +91,6 @@ public final class CameraTrack: @unchecked Sendable {
                 events: cleaned,
                 durationMs: duration,
                 loopMs: project.cursor.loopPositionBeforeEndMs,
-                stopMs: project.cursor.stopMovementInLastPartMs,
                 spring: project.animation.mouseSpring,
                 pointPixelScale: project.recording.pointPixelScale,
                 imageChangesMs: imageChanges
@@ -113,6 +112,8 @@ public final class CameraTrack: @unchecked Sendable {
 
         var screen = SpringRect(layout.restScreen)
         var press = SpringValue(1)
+        var opacity = SpringValue(1)
+        let pathEvents = Self.cursorPathEvents(events: cleaned, durationMs: durationMs, config: project.cursor)
         let pressSpring = project.animation.mouseSpring ?? .instant
         let buttonEvents = cleaned.filter(\.isClick)
         var frames: [CameraFrame] = []
@@ -136,7 +137,13 @@ public final class CameraTrack: @unchecked Sendable {
             var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursorPath?.position(at: t))
             frame.cursorScale = press.value
             frame.isInstantSnap = target.instant
-            frame.cursorOpacity = Self.cursorOpacity(at: t, events: cleaned, hideAfterMs: project.cursor.hideNotMovingAfterMs)
+            // Cursor opacity: fades out quickly while typing, otherwise follows visibility.
+            let typing = Typing.isActivelyTyping(at: t, keystrokes: project.keystrokes, mouseEvents: cleaned)
+            let visible = Self.isCursorVisible(at: t, pathEvents: pathEvents, hideAfterMs: project.cursor.hideNotMovingAfterMs)
+            let opacitySpring = typing ? Self.typingFadeSpring : Self.visibilitySpring
+            opacity.setTarget(typing || !visible ? 0 : 1, config: opacitySpring)
+            if i == 0 { opacity.snapToTarget() } else { opacity.advance(by: sampleIntervalMs, config: opacitySpring) }
+            frame.cursorOpacity = opacity.value
             frames.append(frame)
         }
         samples = frames
@@ -180,15 +187,11 @@ public final class CameraTrack: @unchecked Sendable {
         return frame
     }
 
-    /// Recorded positions the smoothed cursor follows: the first sample is moved to the start,
-    /// and with "Loop cursor position" the path ends early and returns to the starting position 1
-    /// ms after its last sample. "Stop cursor movement at the end of the video" ends the path
-    /// early so the cursor holds still.
-    public static func cursorPathPoints(events: [MouseEvent], durationMs: Double, config: CursorConfig) -> [CursorPathPoint] {
-        var endMs = max(0, durationMs - (config.loopPositionBeforeEndMs ?? 0))
-        if config.loopPositionBeforeEndMs == nil, config.stopMovementInLastPartMs > 0 {
-            endMs = max(0, durationMs - config.stopMovementInLastPartMs)
-        }
+    /// Mouse events the drawn cursor follows: the first one is moved to the start, and with
+    /// "Loop cursor position" they end early and return to the starting position 1 ms after
+    /// the last one.
+    public static func cursorPathEvents(events: [MouseEvent], durationMs: Double, config: CursorConfig) -> [MouseEvent] {
+        let endMs = max(0, durationMs - (config.loopPositionBeforeEndMs ?? 0))
         var inRange = events.filter { $0.timeMs >= 0 && $0.timeMs <= endMs }
         if inRange.isEmpty {
             let before = MouseProcessing.lastIndex(atOrBefore: 0, in: events).map { events[$0] }
@@ -196,11 +199,17 @@ public final class CameraTrack: @unchecked Sendable {
         }
         guard !inRange.isEmpty else { return [] }
         inRange[0].timeMs = 0
-        var points = inRange.map { CursorPathPoint(timeMs: $0.timeMs, position: $0.position) }
-        if config.loopPositionBeforeEndMs != nil, let first = points.first, let last = points.last {
-            points.append(CursorPathPoint(timeMs: last.timeMs + 1, position: first.position))
+        if config.loopPositionBeforeEndMs != nil, let first = inRange.first, let last = inRange.last {
+            var back = first
+            back.timeMs = last.timeMs + 1
+            inRange.append(back)
         }
-        return points
+        return inRange
+    }
+
+    public static func cursorPathPoints(events: [MouseEvent], durationMs: Double, config: CursorConfig) -> [CursorPathPoint] {
+        cursorPathEvents(events: events, durationMs: durationMs, config: config)
+            .map { CursorPathPoint(timeMs: $0.timeMs, position: $0.position) }
     }
 
     /// Moments the smoothed cursor must reach the recorded position: presses, releases and
@@ -221,12 +230,18 @@ public final class CameraTrack: @unchecked Sendable {
         return points.sorted { $0.timeMs < $1.timeMs }
     }
 
-    /// Fades the cursor out 300 ms after it stopped moving for `hideAfterMs`.
-    static func cursorOpacity(at t: Double, events: [MouseEvent], hideAfterMs: Double?) -> Double {
-        guard let hideAfterMs, let i = MouseProcessing.lastIndex(atOrBefore: t, in: events) else { return 1 }
-        let idle = t - events[i].timeMs
-        guard idle > hideAfterMs else { return 1 }
-        return clamp(1 - (idle - hideAfterMs) / 300, 0, 1)
+    /// Spring for the cursor fading while typing.
+    public static let typingFadeSpring = SpringConfig(stiffness: 600, damping: 50, mass: 1)
+    /// Spring for showing and hiding the cursor.
+    public static let visibilitySpring = SpringConfig(stiffness: 340, damping: 60, mass: 3)
+
+    /// Whether the cursor should be shown at `t`: once the path starts and, with "Hide cursor
+    /// if not moving", only while the last mouse event is at most that long ago.
+    static func isCursorVisible(at t: Double, pathEvents: [MouseEvent], hideAfterMs: Double?) -> Bool {
+        guard let first = pathEvents.first, t >= first.timeMs else { return false }
+        guard let hideAfterMs else { return true }
+        guard let i = floorSearch(count: pathEvents.count, value: t, key: { pathEvents[$0].timeMs }) else { return false }
+        return abs(pathEvents[i].timeMs - t) <= hideAfterMs
     }
 
     private func interpolate(_ a: Vec2?, _ b: Vec2?, _ t: Double) -> Vec2? {
@@ -318,7 +333,6 @@ final class CursorPathCache: @unchecked Sendable {
         var events: [MouseEvent]
         var durationMs: Double
         var loopMs: Double?
-        var stopMs: Double
         var spring: SpringConfig?
         var pointPixelScale: Double
         var imageChangesMs: [Double]

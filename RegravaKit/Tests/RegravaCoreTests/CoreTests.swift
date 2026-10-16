@@ -336,11 +336,12 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(early.map(\.timeMs) == [0, 1])
     }
 
-    @Test func stopMovementFreezesCursorNearTheEnd() {
+    @Test func stopMovementDoesNotChangeThePath() {
+        // StopMovementInLastPartMs is never read.
         var config = CursorConfig()
         config.stopMovementInLastPartMs = 600
         let points = CameraTrack.cursorPathPoints(events: events, durationMs: 1000, config: config)
-        #expect(points.map(\.timeMs) == [0])
+        #expect(points.map(\.timeMs) == [0, 1000])
     }
 
     @Test func firstSampleStartsThePath() {
@@ -350,11 +351,25 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(points.first?.position == Vec2(5, 5))
     }
 
-    @Test func idleCursorFadesOut() {
-        #expect(CameraTrack.cursorOpacity(at: 2500, events: events, hideAfterMs: 2000) == 1)
-        #expect(CameraTrack.cursorOpacity(at: 3150, events: events, hideAfterMs: 2000) == 0.5)
-        #expect(CameraTrack.cursorOpacity(at: 4000, events: events, hideAfterMs: 2000) == 0)
-        #expect(CameraTrack.cursorOpacity(at: 4000, events: events, hideAfterMs: nil) == 1)
+    @Test func idleCursorHidesAfterTheDelay() {
+        #expect(CameraTrack.isCursorVisible(at: 2900, pathEvents: events, hideAfterMs: 2000))
+        #expect(!CameraTrack.isCursorVisible(at: 3100, pathEvents: events, hideAfterMs: 2000))
+        #expect(CameraTrack.isCursorVisible(at: 9000, pathEvents: events, hideAfterMs: nil))
+    }
+
+    @Test func idleCursorFadesOnTheVisibilitySpring() {
+        var config = CursorConfig()
+        config.hideNotMovingAfterMs = 2000
+        let project = Project(
+            recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 6000, fps: 60),
+            mouseEvents: events,
+            cursor: config
+        )
+        let track = CameraTrack(project: project)
+        #expect(track.frame(at: 2900).cursorOpacity == 1)
+        let fading = track.frame(at: 3150).cursorOpacity
+        #expect(fading > 0 && fading < 1)
+        #expect(track.frame(at: 5500).cursorOpacity < 0.01)
     }
 
     @Test func loupeZoomsDoNotMoveTheScreen() {

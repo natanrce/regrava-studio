@@ -145,6 +145,8 @@ public struct Project: Codable, Hashable, Sendable {
     public var autoZoom: AutoZoomConfig
     /// Recording flags ("Add recording marker"), in milliseconds.
     public var markersMs: [Double]
+    /// Key presses and releases (`recording.keystrokes`); only their timing is kept.
+    public var keystrokes: [Keystroke]
 
     public init(
         recording: RecordingInfo,
@@ -154,7 +156,8 @@ public struct Project: Codable, Hashable, Sendable {
         cursor: CursorConfig = CursorConfig(),
         animation: AnimationConfig = AnimationConfig(),
         autoZoom: AutoZoomConfig = AutoZoomConfig(),
-        markersMs: [Double] = []
+        markersMs: [Double] = [],
+        keystrokes: [Keystroke] = []
     ) {
         self.formatVersion = 1
         self.recording = recording
@@ -165,6 +168,7 @@ public struct Project: Codable, Hashable, Sendable {
         self.animation = animation
         self.autoZoom = autoZoom
         self.markersMs = markersMs
+        self.keystrokes = keystrokes.sorted { $0.timeMs < $1.timeMs }
     }
 
     public init(from decoder: Decoder) throws {
@@ -178,6 +182,7 @@ public struct Project: Codable, Hashable, Sendable {
         animation = c.value(.animation, default: AnimationConfig())
         autoZoom = c.value(.autoZoom, default: AutoZoomConfig())
         markersMs = c.value(.markersMs, default: [])
+        keystrokes = c.value(.keystrokes, default: [])
     }
 
     /// Output canvas size in pixels (aspect ratio from `style`).
