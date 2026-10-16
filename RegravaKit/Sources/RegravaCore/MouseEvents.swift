@@ -14,12 +14,16 @@ public struct MouseEvent: Codable, Hashable, Sendable {
     public var timeMs: Double
     public var position: Vec2
     public var button: Int
+    /// System cursor shown at that moment, named ("arrow", "iBeam", "pointingHand"…, or
+    /// "custom-N" for a saved image). nil = unknown (arrow).
+    public var cursorID: String?
 
-    public init(kind: MouseEventKind, timeMs: Double, position: Vec2, button: Int = 0) {
+    public init(kind: MouseEventKind, timeMs: Double, position: Vec2, button: Int = 0, cursorID: String? = nil) {
         self.kind = kind
         self.timeMs = timeMs
         self.position = position
         self.button = button
+        self.cursorID = cursorID
     }
 
     /// Button press or release.

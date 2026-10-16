@@ -29,6 +29,8 @@ public struct CaptureOptions: Hashable, Sendable {
 public struct CaptureResult: Sendable {
     public var videoURL: URL
     public var mouseEvents: [MouseEvent]
+    /// Images of non-standard cursors referenced by `MouseEvent.cursorID` ("custom-N").
+    public var customCursors: [CapturedCursorImage]
     public var markersMs: [Double]
     public var videoSize: Size2
     public var pointPixelScale: Double
@@ -192,12 +194,14 @@ public final class ScreenRecorder: NSObject {
                     (sample.location.x - originInPoints.x) * pointPixelScale,
                     (sample.location.y - originInPoints.y) * pointPixelScale
                 ),
-                button: sample.button
+                button: sample.button,
+                cursorID: sample.cursorID
             )
         }
         return CaptureResult(
             videoURL: outputURL,
             mouseEvents: events.sorted { $0.timeMs < $1.timeMs },
+            customCursors: mouse.customCursors,
             markersMs: markerUptimes.compactMap(timelineMs),
             videoSize: videoSize,
             pointPixelScale: pointPixelScale,

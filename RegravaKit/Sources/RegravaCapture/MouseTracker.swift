@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import RegravaCore
 
-/// Records cursor position (polled) and button events (event monitors) while recording.
+/// Records cursor position and type (polled) and button events (event monitors) while recording.
 ///
 /// Times are `ProcessInfo.systemUptime` seconds, the same clock as `NSEvent.timestamp`,
 /// so they can be aligned with the moment the recording output started writing.
@@ -14,17 +14,27 @@ final class MouseTracker {
         /// Global display coordinates in points, top-left origin (Quartz space).
         var location: CGPoint
         var button: Int
+        var cursorID: String?
     }
 
     private var samples: [Sample] = []
     private var timer: Timer?
     private var monitors: [Any] = []
     private var lastLocation: CGPoint?
+    private var lastCursorID: String?
+    private var pollCount = 0
+    private let cursors = CursorIdentifier()
+
+    /// Cursor images that are not standard system cursors, by id.
+    var customCursors: [CapturedCursorImage] { cursors.customImages }
 
     func start(pollHz: Double = 120) {
         stop()
         samples.removeAll()
         lastLocation = nil
+        lastCursorID = nil
+        pollCount = 0
+        cursors.reset()
         poll()
 
         let timer = Timer(timeInterval: 1 / pollHz, repeats: true) { [weak self] _ in
@@ -58,9 +68,15 @@ final class MouseTracker {
 
     private func poll() {
         guard let location = CGEvent(source: nil)?.location else { return }
-        guard location != lastLocation else { return }
+        // The cursor type is sampled at 30 Hz; position at the poll rate.
+        if pollCount % 4 == 0 { lastCursorID = cursors.currentID() ?? lastCursorID }
+        pollCount += 1
+        let cursorChanged = samples.last.map { $0.cursorID != lastCursorID } ?? true
+        guard location != lastLocation || cursorChanged else { return }
         lastLocation = location
-        samples.append(Sample(kind: .move, uptime: ProcessInfo.processInfo.systemUptime, location: location, button: 0))
+        // Movement while a button is held is a drag ("mouseDragged").
+        let kind: MouseEventKind = NSEvent.pressedMouseButtons != 0 ? .drag : .move
+        samples.append(Sample(kind: kind, uptime: ProcessInfo.processInfo.systemUptime, location: location, button: 0, cursorID: lastCursorID))
     }
 
     private func record(_ event: NSEvent) {
@@ -71,6 +87,7 @@ final class MouseTracker {
         default: return
         }
         let location = event.cgEvent?.location ?? CGEvent(source: nil)?.location ?? .zero
-        samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber))
+        lastCursorID = cursors.currentID() ?? lastCursorID
+        samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber, cursorID: lastCursorID))
     }
 }

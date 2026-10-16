@@ -78,6 +78,21 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
     public static let initialDurationMs: Double = 3000
 }
 
+/// A non-standard cursor image saved with the recording, stored as `cursors/<id>.png` in the
+/// project bundle.
+public struct RecordedCursor: Codable, Hashable, Sendable {
+    public var id: String
+    /// Hotspot and size in points (top-left origin).
+    public var hotSpot: Vec2
+    public var standardSize: Size2
+
+    public init(id: String, hotSpot: Vec2, standardSize: Size2) {
+        self.id = id
+        self.hotSpot = hotSpot
+        self.standardSize = standardSize
+    }
+}
+
 public struct RecordingInfo: Codable, Hashable, Sendable {
     public var videoFileName: String
     /// Size of the recorded video in pixels.
@@ -87,6 +102,7 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
     public var durationMs: Double
     public var fps: Int
     public var createdAt: Date
+    public var cursors: [RecordedCursor]
 
     public init(
         videoFileName: String = "recording.mov",
@@ -94,7 +110,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         pointPixelScale: Double,
         durationMs: Double,
         fps: Int,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        cursors: [RecordedCursor] = []
     ) {
         self.videoFileName = videoFileName
         self.videoSize = videoSize
@@ -102,6 +119,18 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         self.durationMs = durationMs
         self.fps = fps
         self.createdAt = createdAt
+        self.cursors = cursors
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        videoFileName = c.value(.videoFileName, default: "recording.mov")
+        videoSize = try c.decode(Size2.self, forKey: .videoSize)
+        pointPixelScale = c.value(.pointPixelScale, default: 1)
+        durationMs = try c.decode(Double.self, forKey: .durationMs)
+        fps = c.value(.fps, default: 60)
+        createdAt = c.value(.createdAt, default: Date())
+        cursors = c.value(.cursors, default: [])
     }
 }
 
@@ -172,6 +201,11 @@ public enum ProjectStore {
 
     public static func videoURL(bundle: URL, project: Project) -> URL {
         bundle.appendingPathComponent(project.recording.videoFileName)
+    }
+
+    /// Image of a recorded custom cursor.
+    public static func cursorImageURL(bundle: URL, id: String) -> URL {
+        bundle.appendingPathComponent("cursors", isDirectory: true).appendingPathComponent("\(id).png")
     }
 
     public static func save(_ project: Project, to bundle: URL) throws {

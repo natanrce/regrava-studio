@@ -424,13 +424,21 @@ final class RecordingCoordinator: ObservableObject {
         do {
             let result = try await recorder.finish(to: bundleURL.appendingPathComponent("recording.mov"))
             try? FileManager.default.removeItem(at: bundleURL.appendingPathComponent("segments", isDirectory: true))
+            var cursors: [RecordedCursor] = []
+            for image in result.customCursors {
+                let url = ProjectStore.cursorImageURL(bundle: bundleURL, id: image.id)
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                guard (try? image.pngData.write(to: url)) != nil else { continue }
+                cursors.append(RecordedCursor(id: image.id, hotSpot: image.hotSpot, standardSize: image.size))
+            }
             var project = Project(
                 recording: RecordingInfo(
                     videoFileName: result.videoURL.lastPathComponent,
                     videoSize: result.videoSize,
                     pointPixelScale: result.pointPixelScale,
                     durationMs: result.durationMs,
-                    fps: result.fps
+                    fps: result.fps,
+                    cursors: cursors
                 ),
                 mouseEvents: result.mouseEvents,
                 markersMs: result.markersMs
