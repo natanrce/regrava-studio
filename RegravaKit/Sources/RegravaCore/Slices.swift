@@ -255,4 +255,21 @@ public extension Project {
     func slice(atSource t: Double) -> Slice? {
         slices.first { $0.contains(sourceTime: t) }
     }
+
+    /// "Speed up typing" ranges not applied or removed yet.
+    var pendingTypingSuggestions: [TimeRange] {
+        Typing.suggestions(keystrokes).filter { !resolvedTypingSuggestionsMs.contains($0.startMs) }
+    }
+
+    /// Applies a typing suggestion: splits the clips at both ends of the range and plays the
+    /// middle at `speed`. Nothing happens when either end cannot be split.
+    mutating func applyTypingSuggestion(_ range: TimeRange, speed: Double) {
+        guard canSplitSlice(at: range.startMs), canSplitSlice(at: range.endMs) else { return }
+        splitSlice(at: range.startMs)
+        guard splitSlice(at: range.endMs) else { return }
+        let middle = range.startMs + (range.endMs - range.startMs) / 2
+        guard let index = sliceIndex(at: middle) else { return }
+        slices[index].timeScale = 1 / speed
+        resolvedTypingSuggestionsMs.append(range.startMs)
+    }
 }

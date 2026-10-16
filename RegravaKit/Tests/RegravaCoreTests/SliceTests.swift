@@ -101,4 +101,17 @@ import Testing
         #expect(track.frame(at: 2000).cursorOpacity == 1)
         #expect(track.frame(at: 5900).cursorOpacity < 0.05)
     }
+
+    @Test func applyingATypingSuggestionSpeedsUpThatPart() {
+        var p = project(10_000)
+        p.keystrokes = stride(from: 2000.0, through: 4000, by: 150).flatMap {
+            [Keystroke(kind: .down, timeMs: $0), Keystroke(kind: .up, timeMs: $0 + 40)]
+        }
+        let range = p.pendingTypingSuggestions[0]
+        p.applyTypingSuggestion(range, speed: 3)
+        #expect(p.slices.count == 3)
+        #expect(p.slices[1].sourceStartMs == range.startMs && p.slices[1].sourceEndMs == range.endMs)
+        #expect(abs(p.slices[1].speed - 3) < 1e-9)
+        #expect(p.pendingTypingSuggestions.isEmpty)
+    }
 }

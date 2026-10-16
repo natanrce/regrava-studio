@@ -149,6 +149,9 @@ public struct Project: Codable, Hashable, Sendable {
     public var keystrokes: [Keystroke]
     /// Clips in source order (`scene.slices`).
     public var slices: [Slice]
+    /// Start times of "Speed up typing" suggestions that were applied or removed
+    /// (`resolved-typing-speed-increase-suggestions-v2`).
+    public var resolvedTypingSuggestionsMs: [Double] = []
 
     public init(
         recording: RecordingInfo,
@@ -189,6 +192,7 @@ public struct Project: Codable, Hashable, Sendable {
         keystrokes = c.value(.keystrokes, default: [])
         let stored: [Slice] = c.value(.slices, default: [])
         slices = stored.isEmpty ? Self.defaultSlices(durationMs: recording.durationMs) : stored.sorted { $0.sourceStartMs < $1.sourceStartMs }
+        resolvedTypingSuggestionsMs = c.value(.resolvedTypingSuggestionsMs, default: [])
     }
 
     /// Output canvas size in pixels (aspect ratio from `style`).
