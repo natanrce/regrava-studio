@@ -150,6 +150,12 @@ final class Preferences: ObservableObject {
     @Published var useLastProjectConfigForNewProjects: Bool
     @Published var autoSaveProject: Bool
     @Published var presetsFolderPath: String?
+    /// Preview quality factor: 1 (Full), 0.5 (Half), 0.25 (Quarter).
+    @Published var playbackPreviewResolution: Double
+    /// Preview size steps: 480, 720, 1080, 1440, 2160.
+    @Published var playbackPreviewMaxHeight: Int
+    /// Zoom level for new zooms (nil = 2).
+    @Published var defaultZoomLevel: Double?
     // Quick export
     @Published var showQuickExportWidget: Bool
     @Published var alwaysSaveProjectWhenUsingQuickExportWidget: Bool
@@ -189,6 +195,9 @@ final class Preferences: ObservableObject {
         useLastProjectConfigForNewProjects = bool("useLastProjectConfigForNewProjects", false)
         autoSaveProject = bool("autoSaveProject", true)
         presetsFolderPath = store.string(forKey: "presetsFolderPath")
+        playbackPreviewResolution = store.object(forKey: "playbackPreviewResolution") as? Double ?? 1
+        playbackPreviewMaxHeight = store.object(forKey: "playbackPreviewMaxHeight") as? Int ?? 1080
+        defaultZoomLevel = store.object(forKey: "defaultZoomLevel") as? Double
         showQuickExportWidget = bool("showQuickExportWidget", true)
         alwaysSaveProjectWhenUsingQuickExportWidget = bool("alwaysSaveProjectWhenUsingQuickExportWidget", false)
         editProjectTitleWhenUsingQuickExportWidget = bool("editProjectTitleWhenUsingQuickExportWidget", false)
@@ -235,6 +244,9 @@ final class Preferences: ObservableObject {
         set("useLastProjectConfigForNewProjects", useLastProjectConfigForNewProjects)
         set("autoSaveProject", autoSaveProject)
         set("presetsFolderPath", presetsFolderPath)
+        set("playbackPreviewResolution", playbackPreviewResolution)
+        set("playbackPreviewMaxHeight", playbackPreviewMaxHeight)
+        set("defaultZoomLevel", defaultZoomLevel)
         set("showQuickExportWidget", showQuickExportWidget)
         set("alwaysSaveProjectWhenUsingQuickExportWidget", alwaysSaveProjectWhenUsingQuickExportWidget)
         set("editProjectTitleWhenUsingQuickExportWidget", editProjectTitleWhenUsingQuickExportWidget)
@@ -270,6 +282,9 @@ final class Preferences: ObservableObject {
         useLastProjectConfigForNewProjects = false
         autoSaveProject = true
         presetsFolderPath = nil
+        playbackPreviewResolution = 1
+        playbackPreviewMaxHeight = 1080
+        defaultZoomLevel = nil
         showQuickExportWidget = true
         alwaysSaveProjectWhenUsingQuickExportWidget = false
         editProjectTitleWhenUsingQuickExportWidget = false
