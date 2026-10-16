@@ -47,7 +47,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
                 MouseEvent(kind: .down, timeMs: 400, position: Vec2(500, 300)),
                 MouseEvent(kind: .up, timeMs: 450, position: Vec2(500, 300)),
             ],
-            style: StyleConfig(canvas: Size2(width: 1280, height: 720))
+            style: StyleConfig(aspectRatio: 16.0 / 9)
         )
         project.zooms = [ZoomRange(startMs: 200, endMs: 1500, scale: 2)]
         return project
@@ -58,21 +58,35 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         let snapshot = RenderState.makeSnapshot(project: project, cursor: nil)
         let source = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
         let image = snapshot.compositor.compose(source: source, frame: snapshot.track.frame(at: 1000))
-        #expect(image.extent == CGRect(x: 0, y: 0, width: 1280, height: 720))
+        #expect(image.extent == CGRect(x: 0, y: 0, width: 1920, height: 1080))
     }
 
     /// Set REGRAVA_SNAPSHOT_DIR to write rest/zoomed PNG frames for visual inspection.
     @Test func writesSnapshotsWhenRequested() throws {
         guard let dir = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_DIR"] else { return }
-        let project = sampleProject(duration: 2000)
+        var project = sampleProject(duration: 2000)
+        project.style.inset = .enabledDefault
+        project.cursor.clickEffect = .ripple
         let snapshot = RenderState.makeSnapshot(project: project, cursor: CursorAsset.defaultArrow())
         let checker = CIFilter(name: "CICheckerboardGenerator", parameters: [
             "inputWidth": 40, "inputColor0": CIColor.white, "inputColor1": CIColor(red: 0.2, green: 0.4, blue: 0.8),
         ])!.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
         let context = CIContext()
-        for t in [0.0, 1400.0] {
+        for t in [0.0, 500.0, 1400.0] {
             let image = snapshot.compositor.compose(source: checker, frame: snapshot.track.frame(at: t))
             let url = URL(fileURLWithPath: dir).appendingPathComponent("frame-\(Int(t)).png")
+            try context.writePNGRepresentation(of: image, to: url, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        }
+        // Click effects in the middle of a resting screen.
+        for effect in ClickEffect.allCases {
+            project.cursor.clickEffect = effect
+            let effectSnapshot = RenderState.makeSnapshot(project: project, cursor: nil)
+            var frame = effectSnapshot.track.frame(at: 0)
+            frame.screenRect = effectSnapshot.track.layout.restScreen
+            frame.clickProgress = 0.3
+            frame.clickPosition = Vec2(320, 180)
+            let image = effectSnapshot.compositor.compose(source: checker, frame: frame)
+            let url = URL(fileURLWithPath: dir).appendingPathComponent("click-\(effect.rawValue).png")
             try context.writePNGRepresentation(of: image, to: url, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
         }
     }

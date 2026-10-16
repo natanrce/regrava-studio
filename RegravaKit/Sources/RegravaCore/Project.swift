@@ -7,6 +7,12 @@ public enum ZoomMode: String, Codable, Sendable, CaseIterable {
     case manual
 }
 
+/// "Zoom style": Classic (the screen zooms) or Glass Loupe.
+public enum ZoomPresentation: String, Codable, Sendable, CaseIterable {
+    case screen
+    case loupe
+}
+
 public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
     public var id: UUID
     public var startMs: Double
@@ -20,6 +26,7 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
     public var isInstant: Bool
     /// Created by the auto-zoom generator (as opposed to by the user).
     public var isGenerated: Bool
+    public var presentation: ZoomPresentation
 
     public init(
         id: UUID = UUID(),
@@ -30,7 +37,8 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
         manualTarget: Vec2 = .center01,
         isDisabled: Bool = false,
         isInstant: Bool = false,
-        isGenerated: Bool = false
+        isGenerated: Bool = false,
+        presentation: ZoomPresentation = .screen
     ) {
         self.id = id
         self.startMs = startMs
@@ -41,123 +49,33 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
         self.isDisabled = isDisabled
         self.isInstant = isInstant
         self.isGenerated = isGenerated
+        self.presentation = presentation
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        startMs = try c.decode(Double.self, forKey: .startMs)
+        endMs = try c.decode(Double.self, forKey: .endMs)
+        scale = c.value(.scale, default: 2)
+        mode = c.value(.mode, default: .auto)
+        manualTarget = c.value(.manualTarget, default: .center01)
+        isDisabled = c.value(.isDisabled, default: false)
+        isInstant = c.value(.isInstant, default: false)
+        isGenerated = c.value(.isGenerated, default: false)
+        presentation = c.value(.presentation, default: .screen)
+    }
+
+    /// Zoom level 1 with the classic style changes nothing on screen.
+    public var hasNoVisualEffect: Bool { isDisabled || (scale <= 1 && presentation == .screen) }
 
     public var durationMs: Double { endMs - startMs }
 
     public func contains(_ timeMs: Double) -> Bool { timeMs >= startMs && timeMs <= endMs }
 
     public static let minimumDurationMs: Double = 100
-}
-
-public struct RGBA: Codable, Hashable, Sendable {
-    public var r: Double
-    public var g: Double
-    public var b: Double
-    public var a: Double
-
-    public init(_ r: Double, _ g: Double, _ b: Double, _ a: Double = 1) {
-        self.r = r
-        self.g = g
-        self.b = b
-        self.a = a
-    }
-
-    public init(hex: UInt32, alpha: Double = 1) {
-        self.init(
-            Double((hex >> 16) & 0xFF) / 255,
-            Double((hex >> 8) & 0xFF) / 255,
-            Double(hex & 0xFF) / 255,
-            alpha
-        )
-    }
-}
-
-public enum BackgroundStyle: Codable, Hashable, Sendable {
-    case solid(RGBA)
-    case linearGradient(from: RGBA, to: RGBA, angleDegrees: Double)
-
-    public static let presets: [(name: String, style: BackgroundStyle)] = [
-        ("Dusk", .linearGradient(from: RGBA(hex: 0x6A11CB), to: RGBA(hex: 0x2575FC), angleDegrees: 135)),
-        ("Peach", .linearGradient(from: RGBA(hex: 0xFF9A8B), to: RGBA(hex: 0xFF6A88), angleDegrees: 135)),
-        ("Mint", .linearGradient(from: RGBA(hex: 0x0BA360), to: RGBA(hex: 0x3CBA92), angleDegrees: 120)),
-        ("Ocean", .linearGradient(from: RGBA(hex: 0x1E3C72), to: RGBA(hex: 0x2A5298), angleDegrees: 160)),
-        ("Sunset", .linearGradient(from: RGBA(hex: 0xF7971E), to: RGBA(hex: 0xFFD200), angleDegrees: 135)),
-        ("Graphite", .solid(RGBA(hex: 0x1C1C1E))),
-        ("Paper", .solid(RGBA(hex: 0xF2F2F7))),
-    ]
-}
-
-public struct StyleConfig: Codable, Hashable, Sendable {
-    /// Output frame size in pixels.
-    public var canvas: Size2
-    /// Padding around the screen as a fraction of the canvas' shortest side.
-    public var paddingRatio: Double
-    /// Corner radius of the screen, in canvas pixels at rest.
-    public var cornerRadius: Double
-    public var shadowRadius: Double
-    public var shadowOpacity: Double
-    public var background: BackgroundStyle
-    /// When zoomed, the screen may grow over the padding until it fills the whole canvas.
-    public var zoomFillsCanvas: Bool
-
-    public init(
-        canvas: Size2 = Size2(width: 1920, height: 1080),
-        paddingRatio: Double = 0.08,
-        cornerRadius: Double = 14,
-        shadowRadius: Double = 36,
-        shadowOpacity: Double = 0.45,
-        background: BackgroundStyle = BackgroundStyle.presets[0].style,
-        zoomFillsCanvas: Bool = true
-    ) {
-        self.canvas = canvas
-        self.paddingRatio = paddingRatio
-        self.cornerRadius = cornerRadius
-        self.shadowRadius = shadowRadius
-        self.shadowOpacity = shadowOpacity
-        self.background = background
-        self.zoomFillsCanvas = zoomFillsCanvas
-    }
-}
-
-public struct CursorConfig: Codable, Hashable, Sendable {
-    public var isVisible: Bool
-    /// Multiplier over the system cursor size.
-    public var sizeMultiplier: Double
-    public var isSmoothingEnabled: Bool
-    public var spring: SpringConfig
-    public var showsClickRipple: Bool
-    /// Distance in video pixels used to drop single-sample jumps (0 disables).
-    public var spikeThreshold: Double
-
-    public init(
-        isVisible: Bool = true,
-        sizeMultiplier: Double = 1.5,
-        isSmoothingEnabled: Bool = true,
-        spring: SpringConfig = .cursor,
-        showsClickRipple: Bool = true,
-        spikeThreshold: Double = 500
-    ) {
-        self.isVisible = isVisible
-        self.sizeMultiplier = sizeMultiplier
-        self.isSmoothingEnabled = isSmoothingEnabled
-        self.spring = spring
-        self.showsClickRipple = showsClickRipple
-        self.spikeThreshold = spikeThreshold
-    }
-}
-
-public struct AnimationConfig: Codable, Hashable, Sendable {
-    public var screenSpring: SpringConfig
-    /// Start moving the camera slightly before a zoom begins.
-    public var startsZoomEarly: Bool
-
-    public init(screenSpring: SpringConfig = .screen, startsZoomEarly: Bool = false) {
-        self.screenSpring = screenSpring
-        self.startsZoomEarly = startsZoomEarly
-    }
-
-    public var leadInMs: Double { startsZoomEarly ? 350 : 0 }
+    /// Duration of a zoom added on the timeline.
+    public static let initialDurationMs: Double = 3000
 }
 
 public struct RecordingInfo: Codable, Hashable, Sendable {
@@ -196,6 +114,8 @@ public struct Project: Codable, Hashable, Sendable {
     public var cursor: CursorConfig
     public var animation: AnimationConfig
     public var autoZoom: AutoZoomConfig
+    /// Recording flags ("Add recording marker"), in milliseconds.
+    public var markersMs: [Double]
 
     public init(
         recording: RecordingInfo,
@@ -204,7 +124,8 @@ public struct Project: Codable, Hashable, Sendable {
         style: StyleConfig = StyleConfig(),
         cursor: CursorConfig = CursorConfig(),
         animation: AnimationConfig = AnimationConfig(),
-        autoZoom: AutoZoomConfig = AutoZoomConfig()
+        autoZoom: AutoZoomConfig = AutoZoomConfig(),
+        markersMs: [Double] = []
     ) {
         self.formatVersion = 1
         self.recording = recording
@@ -214,7 +135,24 @@ public struct Project: Codable, Hashable, Sendable {
         self.cursor = cursor
         self.animation = animation
         self.autoZoom = autoZoom
+        self.markersMs = markersMs
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = c.value(.formatVersion, default: 1)
+        recording = try c.decode(RecordingInfo.self, forKey: .recording)
+        mouseEvents = c.value(.mouseEvents, default: [])
+        zooms = c.value(.zooms, default: [])
+        style = c.value(.style, default: StyleConfig())
+        cursor = c.value(.cursor, default: CursorConfig())
+        animation = c.value(.animation, default: AnimationConfig())
+        autoZoom = c.value(.autoZoom, default: AutoZoomConfig())
+        markersMs = c.value(.markersMs, default: [])
+    }
+
+    /// Output canvas size in pixels (aspect ratio from `style`).
+    public var canvasSize: Size2 { style.canvasSize(videoSize: recording.videoSize) }
 
     /// Replaces generated zooms with a fresh set derived from the clicks, keeping user-made ones.
     public mutating func regenerateAutomaticZooms() {

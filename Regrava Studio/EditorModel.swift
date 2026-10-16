@@ -41,7 +41,7 @@ final class EditorModel: ObservableObject {
     func prepare() async {
         let asset = AVURLAsset(url: ProjectStore.videoURL(bundle: bundleURL, project: project))
         do {
-            let composition = try await CompositionFactory.make(asset: asset, state: renderState, canvas: project.style.canvas)
+            let composition = try await CompositionFactory.make(asset: asset, state: renderState, canvas: project.canvasSize)
             baseComposition = composition
             let item = AVPlayerItem(asset: asset)
             item.videoComposition = composition
@@ -137,7 +137,7 @@ final class EditorModel: ObservableObject {
     private func applyComposition() {
         guard let base = baseComposition, let item = player.currentItem,
               let copy = base.mutableCopy() as? AVMutableVideoComposition else { return }
-        copy.renderSize = CGSize(width: project.style.canvas.width.rounded(), height: project.style.canvas.height.rounded())
+        copy.renderSize = CGSize(width: project.canvasSize.width.rounded(), height: project.canvasSize.height.rounded())
         item.videoComposition = copy
         if player.rate == 0 { seek(to: currentTimeMs) }
     }

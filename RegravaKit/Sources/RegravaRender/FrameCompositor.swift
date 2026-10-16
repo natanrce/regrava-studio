@@ -1,9 +1,9 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
-import RegravaCore
 import Foundation
+import RegravaCore
 
-/// Builds one output frame: background, shadow, rounded screen, click ripple and cursor.
+/// Builds one output frame: background, shadow, rounded screen with inset, click effect and cursor.
 ///
 /// Inputs use top-left coordinates (like the rest of the project); Core Image uses
 /// bottom-left, so every rectangle is flipped through `ciRect`.
@@ -15,13 +15,14 @@ public final class FrameCompositor: @unchecked Sendable {
     private let cursor: CursorAsset?
     private let background: CIImage
 
-    public init(project: Project, layout: CanvasLayout, cursor: CursorAsset?) {
+    /// `assetsDirectory` is the project folder (for background images).
+    public init(project: Project, layout: CanvasLayout, cursor: CursorAsset?, assetsDirectory: URL? = nil) {
         self.layout = layout
         style = project.style
         cursorConfig = project.cursor
         pointPixelScale = project.recording.pointPixelScale
         self.cursor = cursor
-        background = Self.makeBackground(project.style.background, canvas: layout.canvas)
+        background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
     private var canvasHeight: Double { layout.canvas.height }
@@ -38,100 +39,190 @@ public final class FrameCompositor: @unchecked Sendable {
         let canvasRect = ciRect(layout.canvas)
         let screen = ciRect(frame.screenRect)
         let zoomFactor = frame.screenRect.width / max(layout.restScreen.width, 1)
+        let radius = min(style.cornerRadius * zoomFactor, min(screen.width, screen.height) / 2)
 
-        // Screen image placed into its rectangle.
+        // Screen image placed into its rectangle, with rounded corners.
         let src = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
         let scaled = src
             .transformed(by: CGAffineTransform(scaleX: screen.width / max(src.extent.width, 1), y: screen.height / max(src.extent.height, 1)))
             .transformed(by: CGAffineTransform(translationX: screen.minX, y: screen.minY))
+        var screenImage = masked(scaled, to: screen, radius: radius)
 
-        let radius = style.cornerRadius * zoomFactor
-        let mask = CIFilter.roundedRectangleGenerator()
-        mask.extent = screen
-        mask.radius = Float(radius)
-        mask.color = .white
-        let blend = CIFilter.blendWithMask()
-        blend.inputImage = scaled
-        blend.backgroundImage = CIImage.empty()
-        blend.maskImage = mask.outputImage
-        let roundedScreen = blend.outputImage ?? scaled
-
-        var output = background
-
-        if style.shadowOpacity > 0, style.shadowRadius > 0 {
-            let shadowRadius = style.shadowRadius * zoomFactor
-            let shape = CIFilter.roundedRectangleGenerator()
-            shape.extent = screen.offsetBy(dx: 0, dy: -shadowRadius * 0.3)
-            shape.radius = Float(radius)
-            shape.color = CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(style.shadowOpacity))
-            if let shadow = shape.outputImage?.applyingGaussianBlur(sigma: shadowRadius / 2) {
-                output = shadow.composited(over: output)
-            }
+        // Inset: a colored border inside the screen edge.
+        if style.inset.isOn {
+            let width = style.inset.size * zoomFactor
+            let ring = CIFilter.blendWithMask()
+            ring.inputImage = roundedRect(screen, radius: radius, color: Self.ciColor(style.inset.color, alpha: style.inset.alpha))
+            ring.backgroundImage = CIImage.empty()
+            ring.maskImage = roundedRect(screen, radius: radius, color: .white)
+                .applyingFilter("CISourceOutCompositing", parameters: [
+                    kCIInputBackgroundImageKey: roundedRect(screen.insetBy(dx: width, dy: width), radius: max(radius - width, 0), color: .white),
+                ])
+            if let ringImage = ring.outputImage { screenImage = ringImage.composited(over: screenImage) }
         }
 
-        output = roundedScreen.composited(over: output)
+        var output = background
+        if style.shadow.intensity > 0 {
+            output = shadow(for: screen, radius: radius, zoomFactor: zoomFactor).composited(over: output)
+        }
+        output = screenImage.composited(over: output)
 
         let videoToCanvas = frame.screenRect.width / max(layout.videoSize.width, 1)
         let pixelsPerPoint = pointPixelScale * cursorConfig.sizeMultiplier * videoToCanvas
 
-        if cursorConfig.showsClickRipple, let progress = frame.clickProgress, let position = frame.clickPosition {
+        if let effect = cursorConfig.clickEffect, let progress = frame.clickProgress, let position = frame.clickPosition {
             let center = ciPoint(layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect))
-            output = Self.ripple(center: center, progress: progress, maxRadius: 22 * pixelsPerPoint).composited(over: output)
+            output = Self.clickEffect(effect, center: center, progress: progress, maxRadius: 22 * pixelsPerPoint).composited(over: output)
         }
 
-        if cursorConfig.isVisible, let cursor, let position = frame.cursor {
-            let tip = layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect)
-            let width = cursor.sizePoints.width * pixelsPerPoint
-            let height = cursor.sizePoints.height * pixelsPerPoint
-            let topLeft = Vec2(tip.x - cursor.hotspotPoints.x * pixelsPerPoint, tip.y - cursor.hotspotPoints.y * pixelsPerPoint)
-            let target = ciRect(Rect2(x: topLeft.x, y: topLeft.y, width: width, height: height))
-            let image = cursor.image
-            let placed = image
-                .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-                .transformed(by: CGAffineTransform(scaleX: target.width / image.extent.width, y: target.height / image.extent.height))
-                .transformed(by: CGAffineTransform(translationX: target.minX, y: target.minY))
-            output = placed.composited(over: output)
+        if !cursorConfig.hide, frame.cursorOpacity > 0, let cursor, let position = frame.cursor {
+            output = placedCursor(cursor, at: position, frame: frame, pixelsPerPoint: pixelsPerPoint).composited(over: output)
         }
 
         return output.cropped(to: canvasRect)
     }
 
-    static func ripple(center: CGPoint, progress: Double, maxRadius: Double) -> CIImage {
+    // MARK: Pieces
+
+    private func roundedRect(_ rect: CGRect, radius: Double, color: CIColor) -> CIImage {
+        let generator = CIFilter.roundedRectangleGenerator()
+        generator.extent = rect
+        generator.radius = Float(max(radius, 0))
+        generator.color = color
+        return generator.outputImage ?? CIImage.empty()
+    }
+
+    private func masked(_ image: CIImage, to rect: CGRect, radius: Double) -> CIImage {
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = image
+        blend.backgroundImage = CIImage.empty()
+        blend.maskImage = roundedRect(rect, radius: radius, color: .white)
+        return blend.outputImage ?? image
+    }
+
+    /// Classic: centered soft shadow. Directional: offset by `distance` along `angle`
+    /// (0° = straight down, growing clockwise), blurred by `blur`.
+    private func shadow(for screen: CGRect, radius: Double, zoomFactor: Double) -> CIImage {
+        let s = style.shadow
+        let scale = layout.canvas.height / 1080 * zoomFactor
+        var offset = CGSize.zero
+        if s.isDirectional {
+            let angle = (s.angle - 90) * .pi / 180
+            offset = CGSize(width: cos(angle) * s.distance * scale, height: sin(angle) * s.distance * scale)
+        }
+        let blur = (s.isDirectional ? s.blur : 30) * scale
+        let opacity = min(s.intensity / 0.6, 1) * 0.85
+        let shape = roundedRect(screen.offsetBy(dx: offset.width, dy: offset.height), radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(opacity)))
+        return shape.applyingGaussianBlur(sigma: max(blur, 0.1))
+    }
+
+    private func placedCursor(_ cursor: CursorAsset, at position: Vec2, frame: CameraFrame, pixelsPerPoint: Double) -> CIImage {
+        let tip = layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect)
+        let width = cursor.sizePoints.width * pixelsPerPoint
+        let height = cursor.sizePoints.height * pixelsPerPoint
+        let topLeft = Vec2(tip.x - cursor.hotspotPoints.x * pixelsPerPoint, tip.y - cursor.hotspotPoints.y * pixelsPerPoint)
+        let target = ciRect(Rect2(x: topLeft.x, y: topLeft.y, width: width, height: height))
+        let image = cursor.image
+        var placed = image
+            .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: target.width / image.extent.width, y: target.height / image.extent.height))
+            .transformed(by: CGAffineTransform(translationX: target.minX, y: target.minY))
+        if cursorConfig.baseRotation != 0 {
+            // Rotate around the hotspot; positive = clockwise.
+            let pivot = ciPoint(tip)
+            let rotation = CGAffineTransform(translationX: pivot.x, y: pivot.y)
+                .rotated(by: -cursorConfig.baseRotation * .pi / 180)
+                .translatedBy(x: -pivot.x, y: -pivot.y)
+            placed = placed.transformed(by: rotation)
+        }
+        if frame.cursorOpacity < 1 {
+            placed = placed.applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(frame.cursorOpacity)),
+            ])
+        }
+        return placed
+    }
+
+    /// Circle: a filled disc that grows and fades. Ripple: an expanding ring.
+    static func clickEffect(_ effect: ClickEffect, center: CGPoint, progress: Double, maxRadius: Double) -> CIImage {
         let eased = 1 - pow(1 - progress, 3)
         let radius = max(maxRadius * (0.35 + 0.65 * eased), 1)
         let alpha = 0.45 * (1 - progress)
+        let white = CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(alpha))
+        let clear = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
         let gradient = CIFilter.radialGradient()
         gradient.center = center
-        gradient.radius0 = Float(radius * 0.55)
-        gradient.radius1 = Float(radius)
-        gradient.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(alpha))
-        gradient.color1 = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
+        switch effect {
+        case .circle:
+            gradient.radius0 = Float(radius * 0.85)
+            gradient.radius1 = Float(radius)
+            gradient.color0 = white
+            gradient.color1 = clear
+        case .ripple:
+            // Bright edge fading inward; the outside is cropped by the circle mask below.
+            gradient.radius0 = Float(radius * 0.55)
+            gradient.radius1 = Float(radius)
+            gradient.color0 = clear
+            gradient.color1 = white
+        }
+        var image = gradient.outputImage ?? CIImage.empty()
+        if effect == .ripple {
+            let disc = CIFilter.radialGradient()
+            disc.center = center
+            disc.radius0 = Float(radius)
+            disc.radius1 = Float(radius + 1)
+            disc.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 1)
+            disc.color1 = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
+            let blend = CIFilter.blendWithAlphaMask()
+            blend.inputImage = image
+            blend.backgroundImage = CIImage.empty()
+            blend.maskImage = disc.outputImage
+            image = blend.outputImage ?? image
+        }
         let box = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-        return (gradient.outputImage ?? CIImage.empty()).cropped(to: box)
+        return image.cropped(to: box)
     }
 
-    static func makeBackground(_ style: BackgroundStyle, canvas: Rect2) -> CIImage {
+    static func makeBackground(_ config: BackgroundConfig, canvas: Rect2, assetsDirectory: URL?) -> CIImage {
         let rect = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
-        switch style {
-        case .solid(let color):
-            return CIImage(color: ciColor(color)).cropped(to: rect)
-        case let .linearGradient(from, to, angleDegrees):
-            // Angle measured like ° = bottom→top, 90° = left→right.
-            let radians = angleDegrees * .pi / 180
-            let direction = CGPoint(x: sin(radians), y: cos(radians))
-            let halfLength = (abs(direction.x) * rect.width + abs(direction.y) * rect.height) / 2
-            let mid = CGPoint(x: rect.midX, y: rect.midY)
-            let gradient = CIFilter.linearGradient()
-            // In Core Image y points up; CSS "up" is +y here as well.
-            gradient.point0 = CGPoint(x: mid.x - direction.x * halfLength, y: mid.y - direction.y * halfLength)
-            gradient.point1 = CGPoint(x: mid.x + direction.x * halfLength, y: mid.y + direction.y * halfLength)
-            gradient.color0 = ciColor(from)
-            gradient.color1 = ciColor(to)
-            return (gradient.outputImage ?? CIImage(color: ciColor(from))).cropped(to: rect)
+        switch config.kind {
+        case .color:
+            return CIImage(color: ciColor(config.color)).cropped(to: rect)
+        case .image:
+            if let name = config.imageFileName, let directory = assetsDirectory,
+               let image = CIImage(contentsOf: directory.appendingPathComponent(name)) {
+                // Aspect-fill, then blur (clamped so edges stay opaque).
+                let scale = max(rect.width / image.extent.width, rect.height / image.extent.height)
+                var filled = image
+                    .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                filled = filled.transformed(by: CGAffineTransform(
+                    translationX: (rect.width - filled.extent.width) / 2,
+                    y: (rect.height - filled.extent.height) / 2
+                ))
+                if config.blur > 0 {
+                    filled = filled.clampedToExtent().applyingGaussianBlur(sigma: config.blur / 2)
+                }
+                return filled.cropped(to: rect)
+            }
+            return gradient(config, rect: rect)
+        case .gradient, .wallpaper, .unsplash:
+            // Wallpapers and Unsplash photos are not bundled; they fall back to the gradient.
+            return gradient(config, rect: rect)
         }
     }
 
-    static func ciColor(_ c: RGBA) -> CIColor {
-        CIColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: CGFloat(c.a))
+    /// Two-stop gradient from the top-left corner (0,0) to the bottom-right corner (1,1).
+    static func gradient(_ config: BackgroundConfig, rect: CGRect) -> CIImage {
+        let filter = CIFilter.linearGradient()
+        filter.point0 = CGPoint(x: rect.minX, y: rect.maxY)
+        filter.point1 = CGPoint(x: rect.maxX, y: rect.minY)
+        filter.color0 = ciColor(config.gradientFrom)
+        filter.color1 = ciColor(config.gradientTo)
+        return (filter.outputImage ?? CIImage(color: ciColor(config.gradientFrom))).cropped(to: rect)
+    }
+
+    static func ciColor(_ c: RGBA, alpha: Double? = nil) -> CIColor {
+        CIColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: CGFloat(alpha ?? c.a))
     }
 }

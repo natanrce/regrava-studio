@@ -432,7 +432,8 @@ final class RecordingCoordinator: ObservableObject {
                     durationMs: result.durationMs,
                     fps: result.fps
                 ),
-                mouseEvents: result.mouseEvents
+                mouseEvents: result.mouseEvents,
+                markersMs: result.markersMs
             )
             project.autoZoom.isEnabled = preferences.createAutomaticZooms
             project.regenerateAutomaticZooms()

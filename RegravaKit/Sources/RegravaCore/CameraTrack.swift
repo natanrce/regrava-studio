@@ -10,7 +10,7 @@ public struct CanvasLayout: Hashable, Sendable {
     public let videoSize: Size2
 
     public init(style: StyleConfig, videoSize: Size2) {
-        canvas = Rect2(size: style.canvas)
+        canvas = Rect2(size: style.canvasSize(videoSize: videoSize))
         let padding = min(canvas.width, canvas.height) * style.paddingRatio
         restScreen = Rect2.aspectFit(videoSize, in: canvas.insetBy(padding))
         zoomArea = style.zoomFillsCanvas ? canvas : restScreen
@@ -33,7 +33,9 @@ public struct CameraFrame: Hashable, Sendable {
     public var screenRect: Rect2
     /// Smoothed cursor position in video pixels.
     public var cursor: Vec2?
-    /// Click ripple: 0...1 progress and position in video pixels.
+    /// 1 = visible; fades to 0 with "Hide cursor if not moving".
+    public var cursorOpacity: Double = 1
+    /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
 }
@@ -58,7 +60,7 @@ public final class CameraTrack: @unchecked Sendable {
         sampleIntervalMs = 1000 / sampleRateHz
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
-        let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.spikeThreshold)
+        let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.removeShakeThreshold)
         let sparse = MouseProcessing.downsample(cleaned, minDistance: 10 * project.recording.pointPixelScale)
         clicks = cleaned.filter { $0.kind == .down }
 
@@ -81,16 +83,18 @@ public final class CameraTrack: @unchecked Sendable {
             }
 
             var cursor: Vec2?
-            if let raw = MouseProcessing.position(at: t, in: cleaned) {
-                if project.cursor.isSmoothingEnabled {
+            if let raw = Self.cursorTarget(at: t, events: cleaned, duration: durationMs, config: project.cursor) {
+                if let spring = project.animation.mouseSpring {
                     if cursorSpring == nil { cursorSpring = SpringPoint(raw) }
-                    cursorSpring!.advance(toward: raw, config: project.cursor.spring, milliseconds: i == 0 ? 0 : sampleIntervalMs)
+                    cursorSpring!.advance(toward: raw, config: spring, milliseconds: i == 0 ? 0 : sampleIntervalMs)
                     cursor = cursorSpring!.point
                 } else {
                     cursor = raw
                 }
             }
-            frames.append(CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursor))
+            var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursor)
+            frame.cursorOpacity = Self.cursorOpacity(at: t, events: cleaned, hideAfterMs: project.cursor.hideNotMovingAfterMs)
+            frames.append(frame)
         }
         samples = frames
     }
@@ -109,6 +113,7 @@ public final class CameraTrack: @unchecked Sendable {
             screenRect: a.screenRect.lerp(to: b.screenRect, f),
             cursor: interpolate(a.cursor, b.cursor, f) ?? first.cursor
         )
+        frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         if let i = MouseProcessing.lastIndex(atOrBefore: timeMs, in: clicks) {
             let age = timeMs - clicks[i].timeMs
             if age >= 0 && age < Self.clickRippleMs {
@@ -117,6 +122,29 @@ public final class CameraTrack: @unchecked Sendable {
             }
         }
         return frame
+    }
+
+    /// Where the cursor should be before smoothing, applying "Loop cursor position" and
+    /// "Stop cursor movement at the end of the video".
+    static func cursorTarget(at t: Double, events: [MouseEvent], duration: Double, config: CursorConfig) -> Vec2? {
+        if let loop = config.loopPositionBeforeEndMs, loop > 0, t > duration - loop,
+           let start = events.first?.position,
+           let from = MouseProcessing.position(at: duration - loop, in: events) {
+            let p = clamp((t - (duration - loop)) / loop, 0, 1)
+            return from.lerp(to: start, p * p * (3 - 2 * p))
+        }
+        if config.stopMovementInLastPartMs > 0, t > duration - config.stopMovementInLastPartMs {
+            return MouseProcessing.position(at: duration - config.stopMovementInLastPartMs, in: events)
+        }
+        return MouseProcessing.position(at: t, in: events)
+    }
+
+    /// Fades the cursor out 300 ms after it stopped moving for `hideAfterMs`.
+    static func cursorOpacity(at t: Double, events: [MouseEvent], hideAfterMs: Double?) -> Double {
+        guard let hideAfterMs, let i = MouseProcessing.lastIndex(atOrBefore: t, in: events) else { return 1 }
+        let idle = t - events[i].timeMs
+        guard idle > hideAfterMs else { return 1 }
+        return clamp(1 - (idle - hideAfterMs) / 300, 0, 1)
     }
 
     private func interpolate(_ a: Vec2?, _ b: Vec2?, _ t: Double) -> Vec2? {
@@ -142,7 +170,7 @@ struct CameraPlanner {
         self.layout = layout
         self.cleaned = cleaned
         zooms = project.zooms
-            .filter { !$0.isDisabled && $0.scale > 1 && $0.endMs > $0.startMs }
+            .filter { !$0.isDisabled && $0.presentation == .screen && $0.scale > 1 && $0.endMs > $0.startMs }
             .sorted { $0.startMs < $1.startMs }
 
         let video = project.recording.videoSize

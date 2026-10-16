@@ -44,8 +44,8 @@ public enum ProjectExporter {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> [URL] {
         let settings = rawSettings.normalized(target: target)
-        let outputSize = settings.outputSize(canvas: project.style.canvas)
-        let state = RenderState(project: project, cursor: cursor)
+        let outputSize = settings.outputSize(canvas: project.canvasSize)
+        let state = RenderState(project: project, cursor: cursor, assetsDirectory: videoURL.deletingLastPathComponent())
 
         switch settings.format {
         case .gif:
@@ -116,7 +116,7 @@ public enum ProjectExporter {
         guard !videoTracks.isEmpty else { throw ExportError.cannotRead("no video track") }
 
         let composition = try await CompositionFactory.make(
-            asset: asset, state: state, canvas: project.style.canvas, outputSize: outputSize
+            asset: asset, state: state, canvas: project.canvasSize, outputSize: outputSize
         )
 
         let reader: AVAssetReader
@@ -260,7 +260,7 @@ public enum ProjectExporter {
         guard !kept.isEmpty else { throw ExportError.cannotRead("no frames") }
 
         let composition = try await CompositionFactory.make(
-            asset: asset, state: state, canvas: project.style.canvas, outputSize: outputSize
+            asset: asset, state: state, canvas: project.canvasSize, outputSize: outputSize
         )
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [

@@ -177,7 +177,7 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
             recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 10000, fps: 60),
             mouseEvents: events,
             zooms: zooms,
-            style: StyleConfig(canvas: Size2(width: 1920, height: 1080), paddingRatio: 0.1)
+            style: StyleConfig(aspectRatio: 16.0 / 9, paddingRatio: 0.1)
         )
     }
 
@@ -236,8 +236,85 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
             ),
             mouseEvents: [click(10)]
         )
-        p.style.background = .solid(RGBA(1, 0, 0))
+        p.style.background = BackgroundConfig(kind: .color, color: RGBA(1, 0, 0))
         try ProjectStore.save(p, to: dir)
         #expect(try ProjectStore.load(from: dir) == p)
+    }
+}
+
+
+@Suite struct StyleAndCursorTests {
+    @Test func autoCanvasIsRecordingPlusPadding() {
+        let style = StyleConfig(aspectRatio: nil, paddingRatio: 0.1)
+        let canvas = style.canvasSize(videoSize: Size2(width: 1600, height: 1000))
+        let layout = CanvasLayout(style: style, videoSize: Size2(width: 1600, height: 1000))
+        #expect(canvas.width == 1920)
+        // Equal padding on every side.
+        #expect(abs(layout.restScreen.minX - layout.restScreen.minY) < 1.5)
+        #expect(abs((layout.canvas.width - layout.restScreen.maxX) - layout.restScreen.minX) < 1.5)
+    }
+
+    @Test func fixedAspectCanvas() {
+        let vertical = StyleConfig(aspectRatio: 9.0 / 16).canvasSize(videoSize: Size2(width: 1920, height: 1080))
+        #expect(vertical == Size2(width: 1080, height: 1920))
+    }
+
+    @Test func decodesProjectsSavedBeforeTheNewStyleModel() throws {
+        let json = """
+        {"formatVersion":1,"recording":{"videoFileName":"recording.mov","videoSize":{"width":100,"height":50},
+        "pointPixelScale":2,"durationMs":1000,"fps":60,"createdAt":"2026-11-04T00:00:00Z"},
+        "mouseEvents":[],"zooms":[{"id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF","startMs":0,"endMs":500,"scale":2,
+        "mode":"auto","manualTarget":{"x":0.5,"y":0.5},"isDisabled":false,"isInstant":false,"isGenerated":true}],
+        "style":{"canvas":{"width":1920,"height":1080},"paddingRatio":0.08,"background":{"solid":{"_0":{"r":1,"g":0,"b":0,"a":1}}}},
+        "cursor":{"isVisible":true,"sizeMultiplier":1.5},"animation":{"screenSpring":{"stiffness":125,"damping":12,"mass":1.5,"clampOvershoot":true,"precision":0.01},"startsZoomEarly":false},
+        "autoZoom":{"leadMs":300,"holdMs":2500,"ignoreClicksInLastMs":1000,"endMarginMs":800,"mergeGapMs":2500,"scale":2,"isEnabled":true}}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let project = try decoder.decode(Project.self, from: Data(json.utf8))
+        #expect(project.style.paddingRatio == 0.08)
+        #expect(project.style.background.kind == .gradient)
+        #expect(project.cursor.size == 48)
+        #expect(project.zooms.first?.presentation == .screen)
+        #expect(project.markersMs.isEmpty)
+    }
+
+    private let events = [
+        MouseEvent(kind: .move, timeMs: 0, position: Vec2(10, 10)),
+        MouseEvent(kind: .move, timeMs: 1000, position: Vec2(500, 500)),
+    ]
+
+    @Test func loopReturnsCursorToStart() {
+        var config = CursorConfig()
+        config.loopPositionBeforeEndMs = 1000
+        let end = CameraTrack.cursorTarget(at: 5000, events: events, duration: 5000, config: config)
+        #expect(end == Vec2(10, 10))
+        let before = CameraTrack.cursorTarget(at: 3900, events: events, duration: 5000, config: config)
+        #expect(before == Vec2(500, 500))
+    }
+
+    @Test func stopMovementFreezesCursorNearTheEnd() {
+        var config = CursorConfig()
+        config.stopMovementInLastPartMs = 600
+        // Frozen where it was 600 ms before the end (t = 400 → halfway).
+        let p = CameraTrack.cursorTarget(at: 950, events: events, duration: 1000, config: config)
+        #expect(abs(p!.x - 206) < 0.01)
+    }
+
+    @Test func idleCursorFadesOut() {
+        #expect(CameraTrack.cursorOpacity(at: 2500, events: events, hideAfterMs: 2000) == 1)
+        #expect(CameraTrack.cursorOpacity(at: 3150, events: events, hideAfterMs: 2000) == 0.5)
+        #expect(CameraTrack.cursorOpacity(at: 4000, events: events, hideAfterMs: 2000) == 0)
+        #expect(CameraTrack.cursorOpacity(at: 4000, events: events, hideAfterMs: nil) == 1)
+    }
+
+    @Test func loupeZoomsDoNotMoveTheScreen() {
+        let project = Project(
+            recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 4000, fps: 60),
+            mouseEvents: events,
+            zooms: [ZoomRange(startMs: 0, endMs: 3900, presentation: .loupe)]
+        )
+        let track = CameraTrack(project: project)
+        #expect(track.frame(at: 2000).screenRect == track.layout.restScreen)
     }
 }

@@ -40,7 +40,7 @@ struct ExportPickerOverlay: View {
 
     private var card: some View {
         VStack(alignment: .leading, spacing: Theme.gap(3.5)) {
-            ExportSettingsForm(store: store, target: target, canvas: project.style.canvas)
+            ExportSettingsForm(store: store, target: target, canvas: project.canvasSize)
             NamedField(name: "Export to") {
                 HStack(spacing: Theme.gap(1)) {
                     SegmentedPicker(
@@ -86,7 +86,7 @@ struct ExportPickerOverlay: View {
 
     private var footer: some View {
         let settings = preferences.exportSettings.current
-        let estimate = ExportController.estimate(settings: settings, canvas: project.style.canvas, durationMs: project.recording.durationMs)
+        let estimate = ExportController.estimate(settings: settings, canvas: project.canvasSize, durationMs: project.recording.durationMs)
         return HStack(alignment: .top, spacing: Theme.gap(0.5)) {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
