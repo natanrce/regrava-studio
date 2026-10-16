@@ -52,6 +52,20 @@ enum UISnapshots {
         write(onBackdrop(RecordingPickerView(coordinator: coordinator)).fixedSize(), width: 1100, height: 64, to: directory.appendingPathComponent("recording-picker.png"))
         write(onBackdrop(RecordingWidgetView(coordinator: coordinator).frame(width: 300)), width: 300, height: 48, to: directory.appendingPathComponent("recording-widget.png"))
         write(StartRecordingButton(coordinator: coordinator).padding(20).background(Color.black.opacity(0.6)), width: 280, height: 90, to: directory.appendingPathComponent("start-button.png"))
+
+        // Onboarding through its real window controller, so the window size is checked too.
+        if let window = OnboardingWindowController.shared.window, let view = window.contentView {
+            window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+            window.orderFrontRegardless()
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            let size = window.frame.size
+            try? "\(Int(size.width))x\(Int(size.height))\n".write(to: directory.appendingPathComponent("onboarding-window-size.txt"), atomically: true, encoding: .utf8)
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("onboarding.png"))
+            }
+            window.orderOut(nil)
+        }
     }
 
     private static func write<V: View>(_ view: V, width: CGFloat, height: CGFloat?, to url: URL) {
