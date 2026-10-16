@@ -41,7 +41,8 @@ public final class FrameCompositor: @unchecked Sendable {
 
     public func compose(source: CIImage, frame: CameraFrame) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
-        let src = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
+        // Masks act on the recording itself, so they follow zoom and motion blur.
+        let src = MaskRenderer.apply(frame.mask, to: source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)))
         let strength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: frame.isInstantSnap)
 
         // Screen trail: from lerp(now, before, strength) to now (`rf.trailStart`).
