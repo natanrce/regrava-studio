@@ -75,4 +75,30 @@ import Testing
         let decoded = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: json))
         #expect(decoded.slices.count == 1)
     }
+
+    @Test func trackRunsInPlaybackTime() {
+        var p = project(10_000)
+        p.mouseEvents = [
+            MouseEvent(kind: .move, timeMs: 0, position: Vec2(0, 0)),
+            MouseEvent(kind: .move, timeMs: 6000, position: Vec2(600, 0)),
+        ]
+        p.animation.mouseSpring = nil
+        p.splitSlice(at: 4000)
+        p.slices[1].timeScale = 0.5               // 4–10 s at 2× → 3 s
+        let track = CameraTrack(project: p)
+        #expect(track.durationMs == 7000)
+        // Source 6 s is playback 5 s: the cursor already jumped there.
+        #expect(track.frame(at: 5100).cursor == Vec2(600, 0))
+        #expect(track.frame(at: 4900).cursor == Vec2(0, 0))
+    }
+
+    @Test func hiddenCursorClipsFadeTheCursor() {
+        var p = project(6000)
+        p.mouseEvents = [MouseEvent(kind: .move, timeMs: 0, position: Vec2(10, 10))]
+        p.splitSlice(at: 3000)
+        p.slices[1].hideCursor = true
+        let track = CameraTrack(project: p)
+        #expect(track.frame(at: 2000).cursorOpacity == 1)
+        #expect(track.frame(at: 5900).cursorOpacity < 0.05)
+    }
 }

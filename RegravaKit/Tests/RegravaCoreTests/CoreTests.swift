@@ -329,10 +329,10 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
     @Test func loopReturnsCursorToStart() {
         var config = CursorConfig()
         config.loopPositionBeforeEndMs = 1000
-        let points = CameraTrack.cursorPathPoints(events: events, durationMs: 5000, config: config)
+        let points = CameraTrack.cursorPathEvents(events: events, resolver: TimeResolver(slices: Project.defaultSlices(durationMs: 5000)), config: config)
         #expect(points.map(\.timeMs) == [0, 1000, 1001])
         #expect(points.last?.position == Vec2(10, 10))
-        let early = CameraTrack.cursorPathPoints(events: events, durationMs: 1500, config: config)
+        let early = CameraTrack.cursorPathEvents(events: events, resolver: TimeResolver(slices: Project.defaultSlices(durationMs: 1500)), config: config)
         #expect(early.map(\.timeMs) == [0, 1])
     }
 
@@ -340,13 +340,13 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         // StopMovementInLastPartMs is never read.
         var config = CursorConfig()
         config.stopMovementInLastPartMs = 600
-        let points = CameraTrack.cursorPathPoints(events: events, durationMs: 1000, config: config)
+        let points = CameraTrack.cursorPathEvents(events: events, resolver: TimeResolver(slices: Project.defaultSlices(durationMs: 1000)), config: config)
         #expect(points.map(\.timeMs) == [0, 1000])
     }
 
     @Test func firstSampleStartsThePath() {
         let late = [MouseEvent(kind: .move, timeMs: 700, position: Vec2(5, 5))]
-        let points = CameraTrack.cursorPathPoints(events: late, durationMs: 2000, config: CursorConfig())
+        let points = CameraTrack.cursorPathEvents(events: late, resolver: TimeResolver(slices: Project.defaultSlices(durationMs: 2000)), config: CursorConfig())
         #expect(points.first?.timeMs == 0)
         #expect(points.first?.position == Vec2(5, 5))
     }

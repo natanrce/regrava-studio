@@ -53,11 +53,15 @@ public struct CameraFrame: Hashable, Sendable {
 /// Precomputed, deterministic camera and cursor animation for a whole project.
 ///
 /// Springs are stateful, so the track simulates the full timeline once, advancing them one
-/// project frame at a time. Frames for any time (scrubbing, export) are interpolated between them.
+/// project frame at a time. the simulation runs in playback time (clips sped up, slowed down
+/// or cut) while zooms, mouse and keyboard data are looked up in source time (`Dd.timeMs =
+/// resolver.playbackToSourceTime(playbackMs)`).
 public final class CameraTrack: @unchecked Sendable {
     public let layout: CanvasLayout
+    /// Playback duration.
     public let durationMs: Double
     public let sampleIntervalMs: Double
+    public let resolver: TimeResolver
     public static let clickRippleMs: Double = 450
 
     /// Scale of the cursor while a button is held.
@@ -71,7 +75,9 @@ public final class CameraTrack: @unchecked Sendable {
     public init(project: Project, sampleRateHz: Double? = nil) {
         let layout = CanvasLayout(style: project.style, videoSize: project.recording.videoSize)
         self.layout = layout
-        durationMs = max(project.recording.durationMs, 0)
+        let resolver = project.resolver
+        self.resolver = resolver
+        durationMs = max(resolver.playbackDurationMs, 0)
         sampleIntervalMs = 1000 / (sampleRateHz ?? Double(max(project.recording.fps, 1)))
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
@@ -82,47 +88,43 @@ public final class CameraTrack: @unchecked Sendable {
         let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)
         self.typeEvents = typeEvents
         let imageChanges = CursorTypes.imageChangeTimes(typeEvents, config: project.cursor)
+        let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
 
         let planner = CameraPlanner(project: project, layout: layout, cleaned: cleaned, sparse: sparse)
 
-        let duration = durationMs
         let cursorPath = CursorPathCache.shared.path(
             for: CursorPathCache.Key(
                 events: cleaned,
-                durationMs: duration,
+                slices: project.slices,
                 loopMs: project.cursor.loopPositionBeforeEndMs,
                 spring: project.animation.mouseSpring,
                 pointPixelScale: project.recording.pointPixelScale,
                 imageChangesMs: imageChanges
             )
         ) {
-            let pathPoints = Self.cursorPathPoints(events: cleaned, durationMs: duration, config: project.cursor)
-            guard let endMs = pathPoints.last?.timeMs else { return nil }
-            return SmoothedCursorPath.plan(
-                points: pathPoints,
-                syncPoints: Self.cursorSyncPoints(
-                    events: cleaned.filter { $0.timeMs >= 0 && $0.timeMs <= endMs },
-                    pointPixelScale: project.recording.pointPixelScale,
-                    cursorImageChangesMs: imageChanges.filter { $0 >= 0 && $0 <= endMs }
-                ),
+            Self.planCursor(
+                pathEvents: pathEvents,
+                imageChangesMs: imageChanges,
+                slices: project.slices,
+                resolver: resolver,
                 spring: project.animation.mouseSpring,
-                durationMs: duration
+                pointPixelScale: project.recording.pointPixelScale
             )
         }
 
         var screen = SpringRect(layout.restScreen)
         var press = SpringValue(1)
         var opacity = SpringValue(1)
-        let pathEvents = Self.cursorPathEvents(events: cleaned, durationMs: durationMs, config: project.cursor)
-        let pressSpring = project.animation.mouseSpring ?? .instant
-        let buttonEvents = cleaned.filter(\.isClick)
+        let buttonEvents = pathEvents.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
         frames.reserveCapacity(count)
 
         for i in 0..<count {
             let t = Double(i) * sampleIntervalMs
-            let target = planner.target(at: t)
+            let source = resolver.playbackToSource(t)
+            let slice = project.slice(atSource: source)
+            let target = planner.target(at: source)
             let screenConfig = target.instant ? SpringConfig.instant : project.animation.screenSpring
             if i == 0 {
                 if target.instant { screen = SpringRect(target.rect) }
@@ -130,7 +132,10 @@ public final class CameraTrack: @unchecked Sendable {
                 screen.advance(toward: target.rect, config: screenConfig, milliseconds: sampleIntervalMs)
             }
 
-            let pressed = CursorTypes.isPressed(at: t, events: cleaned, clicks: buttonEvents, smoothed: project.animation.mouseSpring != nil)
+            // Press scale (`pressSpring`): instant without smooth movement or in clips without it.
+            let smooth = project.animation.mouseSpring != nil
+            let pressSpring = !smooth || slice?.disableSmoothMouseMovement == true ? SpringConfig.instant : project.animation.mouseSpring!
+            let pressed = CursorTypes.isPressed(at: source, events: pathEvents, clicks: buttonEvents, smoothed: smooth)
             press.setTarget(pressed ? Self.pressedCursorScale : 1, config: pressSpring)
             if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
 
@@ -138,8 +143,9 @@ public final class CameraTrack: @unchecked Sendable {
             frame.cursorScale = press.value
             frame.isInstantSnap = target.instant
             // Cursor opacity: fades out quickly while typing, otherwise follows visibility.
-            let typing = Typing.isActivelyTyping(at: t, keystrokes: project.keystrokes, mouseEvents: cleaned)
-            let visible = Self.isCursorVisible(at: t, pathEvents: pathEvents, hideAfterMs: project.cursor.hideNotMovingAfterMs)
+            let typing = Typing.isActivelyTyping(at: source, keystrokes: project.keystrokes, mouseEvents: cleaned)
+            let visible = slice?.hideCursor != true
+                && Self.isCursorVisible(at: source, pathEvents: pathEvents, hideAfterMs: project.cursor.hideNotMovingAfterMs)
             let opacitySpring = typing ? Self.typingFadeSpring : Self.visibilitySpring
             opacity.setTarget(typing || !visible ? 0 : 1, config: opacitySpring)
             if i == 0 { opacity.snapToTarget() } else { opacity.advance(by: sampleIntervalMs, config: opacitySpring) }
@@ -149,7 +155,7 @@ public final class CameraTrack: @unchecked Sendable {
         samples = frames
     }
 
-    /// The frame at `timeMs`, with the previous project frame attached for motion blur.
+    /// The frame at playback time `timeMs`, with the previous project frame attached for motion blur.
     public func frame(at timeMs: Double) -> CameraFrame {
         var frame = interpolatedFrame(at: timeMs)
         let before = interpolatedFrame(at: max(0, timeMs - sampleIntervalMs))
@@ -176,9 +182,10 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
         frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
-        frame.cursorName = CursorTypes.assetName(at: timeMs, typeEvents: typeEvents, config: cursorConfig)
-        if let i = MouseProcessing.lastIndex(atOrBefore: timeMs, in: clicks) {
-            let age = timeMs - clicks[i].timeMs
+        let source = resolver.playbackToSource(timeMs)
+        frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
+        if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {
+            let age = source - clicks[i].timeMs
             if age >= 0 && age < Self.clickRippleMs {
                 frame.clickProgress = age / Self.clickRippleMs
                 frame.clickPosition = clicks[i].position
@@ -187,18 +194,19 @@ public final class CameraTrack: @unchecked Sendable {
         return frame
     }
 
-    /// Mouse events the drawn cursor follows: the first one is moved to the start, and with
-    /// "Loop cursor position" they end early and return to the starting position 1 ms after
-    /// the last one.
-    public static func cursorPathEvents(events: [MouseEvent], durationMs: Double, config: CursorConfig) -> [MouseEvent] {
-        let endMs = max(0, durationMs - (config.loopPositionBeforeEndMs ?? 0))
-        var inRange = events.filter { $0.timeMs >= 0 && $0.timeMs <= endMs }
+    /// Mouse events the drawn cursor follows, in source time: those between the start of the
+    /// video and its end (minus "Loop cursor position"), the first moved to the start, and
+    /// with looping the starting position again 1 ms after the last one.
+    public static func cursorPathEvents(events: [MouseEvent], resolver: TimeResolver, config: CursorConfig) -> [MouseEvent] {
+        let startMs = resolver.playbackToSource(0)
+        let endMs = resolver.playbackToSource(max(0, resolver.playbackDurationMs - (config.loopPositionBeforeEndMs ?? 0)))
+        var inRange = events.filter { $0.timeMs >= startMs && $0.timeMs <= endMs }
         if inRange.isEmpty {
-            let before = MouseProcessing.lastIndex(atOrBefore: 0, in: events).map { events[$0] }
+            let before = MouseProcessing.lastIndex(atOrBefore: startMs, in: events).map { events[$0] }
             if let fallback = before ?? events.first { inRange = [fallback] }
         }
         guard !inRange.isEmpty else { return [] }
-        inRange[0].timeMs = 0
+        inRange[0].timeMs = startMs
         if config.loopPositionBeforeEndMs != nil, let first = inRange.first, let last = inRange.last {
             var back = first
             back.timeMs = last.timeMs + 1
@@ -207,9 +215,52 @@ public final class CameraTrack: @unchecked Sendable {
         return inRange
     }
 
-    public static func cursorPathPoints(events: [MouseEvent], durationMs: Double, config: CursorConfig) -> [CursorPathPoint] {
-        cursorPathEvents(events: events, durationMs: durationMs, config: config)
-            .map { CursorPathPoint(timeMs: $0.timeMs, position: $0.position) }
+    /// Plans the drawn cursor in playback time: per clip, the position at its start plus its
+    /// events mapped to playback time; sync points likewise; clips that follow a cut reset
+    /// the lead, and clips without smooth movement are instant.
+    static func planCursor(
+        pathEvents: [MouseEvent],
+        imageChangesMs: [Double],
+        slices: [Slice],
+        resolver: TimeResolver,
+        spring: SpringConfig?,
+        pointPixelScale: Double
+    ) -> SmoothedCursorPath? {
+        guard !pathEvents.isEmpty else { return nil }
+        var points: [CursorPathPoint] = []
+        var syncEvents: [MouseEvent] = []
+        var imageChanges: [Double] = []
+        var cuts: [Double] = []
+        var instant: [TimeRange] = []
+        for (index, link) in resolver.links.enumerated() {
+            let atStart = MouseProcessing.lastIndex(atOrBefore: link.sourceStartMs, in: pathEvents).map { pathEvents[$0] } ?? pathEvents[0]
+            points.append(CursorPathPoint(timeMs: link.playbackStartMs, position: atStart.position))
+            for event in pathEvents where event.timeMs >= link.sourceStartMs && event.timeMs <= link.sourceEndMs {
+                let t = link.sourceToPlayback(event.timeMs)
+                points.append(CursorPathPoint(timeMs: t, position: event.position))
+                var mapped = event
+                mapped.timeMs = t
+                syncEvents.append(mapped)
+            }
+            for change in imageChangesMs where change >= link.sourceStartMs && change <= link.sourceEndMs {
+                imageChanges.append(link.sourceToPlayback(change))
+            }
+            if index > 0, resolver.links[index - 1].sourceEndMs != link.sourceStartMs {
+                cuts.append(link.playbackStartMs)
+            }
+            if slices.indices.contains(index), slices[index].disableSmoothMouseMovement {
+                instant.append(TimeRange(startMs: link.playbackStartMs, endMs: link.playbackEndMs))
+            }
+        }
+        points.sort { $0.timeMs < $1.timeMs }
+        return SmoothedCursorPath.plan(
+            points: points,
+            syncPoints: cursorSyncPoints(events: syncEvents, pointPixelScale: pointPixelScale, cursorImageChangesMs: imageChanges),
+            spring: spring,
+            durationMs: resolver.playbackDurationMs,
+            instantRanges: instant,
+            cutTimesMs: cuts
+        )
     }
 
     /// Moments the smoothed cursor must reach the recorded position: presses, releases and
@@ -331,7 +382,7 @@ struct CameraPlanner {
 final class CursorPathCache: @unchecked Sendable {
     struct Key: Equatable {
         var events: [MouseEvent]
-        var durationMs: Double
+        var slices: [Slice]
         var loopMs: Double?
         var spring: SpringConfig?
         var pointPixelScale: Double
