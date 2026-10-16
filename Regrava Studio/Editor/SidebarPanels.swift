@@ -227,6 +227,11 @@ struct CursorPanel: View {
             } else {
                 SidebarSection {
                     SliderField(name: "Cursor size", value: editor.binding(\.cursor.size), range: 16...128, preview: { String(format: "%.1f", $0) }, resetValue: 48)
+                    ToggleRow(
+                        title: "Always use pointer cursor",
+                        description: "Don't change cursor, even if selecting text, etc.",
+                        isOn: editor.binding(\.cursor.alwaysUseDefault)
+                    )
                 }
                 SidebarSection {
                     ToggleRow(title: "Hide cursor if not moving", isOn: Binding(
@@ -304,6 +309,18 @@ struct CursorPanel: View {
                         if cursor.removeShakeThreshold != 0 {
                             RSSlider(value: editor.binding(\.cursor.removeShakeThreshold), range: 100...2000, step: 20, preview: { String(Int($0)) }, resetValue: 500)
                         }
+                        ToggleRow(
+                            title: "Optimize cursor changes",
+                            description: "Regrava Studio will try to minimize rapid cursor changes (eg when quickly moving over some elements) when this option is enabled.",
+                            isOn: editor.binding(\.cursor.optimizeOriginalTypes)
+                        )
+                        // Needs hover detection in recordings, which is not implemented yet.
+                        ToggleRow(
+                            title: "Keep cursor in sync with hovers",
+                            description: "When something lights up under the moving mouse, like a menu item or a button, the cursor gets there just in time, setting off a little earlier or moving a little faster, so the highlight never shows before the cursor does.",
+                            isOn: editor.binding(\.cursor.followRecordedPositionOnHover)
+                        )
+                        .disabled(true)
                     }
                 }
             }
