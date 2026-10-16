@@ -53,6 +53,23 @@ struct EditorView: View {
         .overlay {
             if exports.isExporting { ExportStatusOverlay(exports: exports) }
         }
+        .overlay(alignment: .top) {
+            if let message = editor.toast {
+                Text(message)
+                    .font(Theme.Typo.copy)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 14)
+                    .background(Capsule().fill(Theme.Colors.background.opacity(0.92)))
+                    .overlay(Capsule().strokeBorder(Theme.Colors.systemBorder))
+                    .padding(.top, 72)
+                    .transition(.opacity)
+                    .task(id: message) {
+                        // Info toasts last 2 s.
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        if editor.toast == message { editor.toast = nil }
+                    }
+            }
+        }
     }
 }
 
@@ -192,7 +209,7 @@ private struct PreviewSpace: View {
                             .onTapGesture { location in
                                 // "Click the canvas to place a zoom".
                                 let target = Vec2(clamp(location.x / size.width, 0, 1), clamp(location.y / size.height, 0, 1))
-                                editor.addZoom(startMs: editor.currentTimeMs, manualTarget: target)
+                                editor.addZoom(startMs: editor.currentSourceTimeMs, manualTarget: target)
                                 editor.isAddZoomToolArmed = false
                             }
                         Text("Click the canvas to place a zoom")

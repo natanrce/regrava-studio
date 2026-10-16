@@ -13,6 +13,7 @@ enum SidebarRoot: String, CaseIterable {
 /// A timeline item opened in the sidebar.
 enum SidebarItem: Equatable {
     case zoom(UUID)
+    case slice(UUID)
 }
 
 /// `view.layoutType`.
@@ -57,6 +58,8 @@ final class EditorModel: ObservableObject {
     /// "zooms" track is focused by default; nil = none.
     @Published var focusedTrack: String? = "zooms"
     @Published var errorMessage: String?
+    /// Short message shown over the editor (e.g. "Copied to clipboard").
+    @Published var toast: String?
 
     private let cursors: CursorLibrary
     private let renderState: RenderState
@@ -146,6 +149,7 @@ final class EditorModel: ObservableObject {
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
         if case .zoom(let id) = sidebarItem, !project.zooms.contains(where: { $0.id == id }) { sidebarItem = nil }
+        if case .slice(let id) = sidebarItem, !project.slices.contains(where: { $0.id == id }) { sidebarItem = nil }
         selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
         isDirty = true
         scheduleAutosave()
@@ -282,7 +286,7 @@ final class EditorModel: ObservableObject {
     var maxVisibleDurationMs: Double { max(min(durationMs, 600_000), 1000) }
 
     func clampVisibleDuration(_ value: Double) -> Double {
-        clamp(value, max(min(max(min(project.recording.durationMs, 600_000), 1000) - 1, 2000), 1000), max(min(project.recording.durationMs, 600_000), 1000))
+        clamp(value, max(min(max(min(durationMs, 600_000), 1000) - 1, 2000), 1000), max(min(durationMs, 600_000), 1000))
     }
 
     func setVisibleDuration(_ value: Double, anchorMs: Double? = nil) {
@@ -345,6 +349,122 @@ final class EditorModel: ObservableObject {
         return nil
     }
 
+    var openSliceID: UUID? {
+        if case .slice(let id) = sidebarItem { return id }
+        return nil
+    }
+
+    /// Clicking a clip opens the slice editor.
+    func openSlice(_ id: UUID) {
+        sidebarItem = .slice(id)
+        selectedZoomIDs = []
+    }
+
+    /// Recording time at the playhead.
+    var currentSourceTimeMs: Double { project.resolver.playbackToSource(currentTimeMs) }
+
+    // MARK: Clips
+
+    /// Splits the clip at a playback time; "The part you want to cut is too short" otherwise.
+    func splitSlice(atPlayback playbackMs: Double) {
+        let source = project.resolver.playbackToSource(playbackMs)
+        guard project.canSplitSlice(at: source) else {
+            toast = "The part you want to cut is too short"
+            return
+        }
+        change { $0.splitSlice(at: source) }
+    }
+
+    /// Trim by dragging an edge (playback time), moving the playhead to the trimmed edge.
+    func trimSlice(_ id: UUID, edge: Project.SliceEdge, toSource sourceMs: Double) {
+        change(coalesce: "trim-\(id)") { project in
+            switch edge {
+            case .start: project.updateSlice(id, sourceStartMs: sourceMs)
+            case .end: project.updateSlice(id, sourceEndMs: sourceMs)
+            }
+        }
+        guard let slice = project.slices.first(where: { $0.id == id }) else { return }
+        seek(to: project.resolver.sourceToPlayback(edge == .start ? slice.sourceStartMs : slice.sourceEndMs))
+    }
+
+    func updateSlice(_ id: UUID, coalesce: String? = nil, _ body: (inout Slice) -> Void) {
+        change(coalesce: coalesce) { project in
+            guard let index = project.slices.firstIndex(where: { $0.id == id }) else { return }
+            body(&project.slices[index])
+        }
+    }
+
+    func setSliceSpeed(_ id: UUID, _ speed: Double) {
+        updateSlice(id) { $0.timeScale = 1 / speed }
+    }
+
+    /// "Apply speed to all slices".
+    func applySpeedToAllSlices(from id: UUID) {
+        guard let scale = project.slices.first(where: { $0.id == id })?.timeScale else { return }
+        change { project in
+            for index in project.slices.indices { project.slices[index].timeScale = scale }
+        }
+    }
+
+    func canApplySpeedToAll(from id: UUID) -> Bool {
+        guard let scale = project.slices.first(where: { $0.id == id })?.timeScale else { return false }
+        return project.slices.contains { $0.timeScale != scale }
+    }
+
+    func mergeSlice(_ id: UUID, with neighbour: Project.SliceNeighbour) {
+        change { $0.mergeSlice(id, with: neighbour) }
+    }
+
+    func removeSlice(_ id: UUID) {
+        change { $0.removeSlice(id) }
+    }
+
+    func removeSliceTrim(_ id: UUID, edge: Project.SliceEdge? = nil) {
+        change { $0.removeSliceTrim(id, edge: edge) }
+    }
+
+    /// "Reset trims and cuts for all slices", after confirmation.
+    func resetAllSlices() {
+        let alert = NSAlert()
+        alert.messageText = "Reset trims and cuts for all slices"
+        alert.informativeText = "Are you sure you want to reset trims and cuts for all slices"
+        alert.addButton(withTitle: "Reset all cuts and trims for all slices")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        change { $0.resetSlices() }
+    }
+
+    // MARK: Typing suggestions
+
+    /// "recording-typing-suggestion-preferred-speed-v2", 1.5–8, default 3.
+    var preferredTypingSpeed: Double {
+        get {
+            let stored = UserDefaults.standard.double(forKey: "recording-typing-suggestion-preferred-speed-v2")
+            return stored > 0 ? stored : 3
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "recording-typing-suggestion-preferred-speed-v2")
+            objectWillChange.send()
+        }
+    }
+
+    func applyTypingSuggestion(_ range: TimeRange) {
+        let speed = preferredTypingSpeed
+        change { $0.applyTypingSuggestion(range, speed: speed) }
+    }
+
+    func applyAllTypingSuggestions() {
+        let speed = preferredTypingSpeed
+        change { project in
+            for range in project.pendingTypingSuggestions { project.applyTypingSuggestion(range, speed: speed) }
+        }
+    }
+
+    func removeTypingSuggestion(_ range: TimeRange) {
+        change { $0.resolvedTypingSuggestionsMs.append(range.startMs) }
+    }
+
     // MARK: Zooms
 
     var sortedZooms: [ZoomRange] { project.zooms.sorted { $0.startMs < $1.startMs } }
@@ -354,7 +474,7 @@ final class EditorModel: ObservableObject {
         let others = sortedZooms.filter { $0.id != id }
         if others.contains(where: { $0.contains(timeMs) && $0.endMs > timeMs }) { return nil }
         let start = others.last(where: { $0.endMs <= timeMs })?.endMs ?? 0
-        let end = others.first(where: { $0.startMs >= timeMs })?.startMs ?? durationMs
+        let end = others.first(where: { $0.startMs >= timeMs })?.startMs ?? project.recording.durationMs
         return (start, end)
     }
 
@@ -391,7 +511,7 @@ final class EditorModel: ObservableObject {
         guard let zoom = project.zooms.first(where: { $0.id == id }) else { return }
         let others = sortedZooms.filter { $0.id != id }
         let lower = others.last(where: { $0.endMs <= zoom.startMs + 0.5 })?.endMs ?? 0
-        let upper = others.first(where: { $0.startMs >= zoom.endMs - 0.5 })?.startMs ?? durationMs
+        let upper = others.first(where: { $0.startMs >= zoom.endMs - 0.5 })?.startMs ?? project.recording.durationMs
         let newStart = clamp(start, lower, upper - zoom.durationMs)
         updateZoom(id, coalesce: "drag-\(id)") {
             $0.startMs = newStart
@@ -408,7 +528,7 @@ final class EditorModel: ObservableObject {
                 let lower = others.last(where: { $0.endMs <= zoom.startMs + 0.5 })?.endMs ?? 0
                 $0.startMs = clamp(time, lower, zoom.endMs - minimum)
             } else {
-                let upper = others.first(where: { $0.startMs >= zoom.endMs - 0.5 })?.startMs ?? durationMs
+                let upper = others.first(where: { $0.startMs >= zoom.endMs - 0.5 })?.startMs ?? project.recording.durationMs
                 $0.endMs = clamp(time, zoom.startMs + minimum, upper)
             }
         }

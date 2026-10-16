@@ -118,6 +118,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         case (124, [.command]): editor.seek(to: editor.durationMs)
         case (53, []): editor.closeCurrentSidebarPanel() // Esc
         case (51, []), (117, []): // Delete
+            if let slice = editor.openSliceID {
+                editor.removeSlice(slice)
+                return true
+            }
             let ids = editor.selectedZoomIDs.isEmpty ? Set([openZoom].compactMap { $0 }) : editor.selectedZoomIDs
             guard !ids.isEmpty else { return false }
             editor.removeZooms(ids)
@@ -136,9 +140,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 guard let openZoom else { return false }
                 editor.updateZoom(openZoom) { $0.isDisabled.toggle() }
             case ("c", []):
-                let target = openZoom ?? editor.project.zooms.first { $0.contains(editor.currentTimeMs) }?.id
-                guard let target else { return false }
-                editor.splitZoom(target, at: editor.currentTimeMs)
+                // Zoom variant when a zoom is open or under the playhead, otherwise the clip.
+                let source = editor.currentSourceTimeMs
+                if let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id {
+                    editor.splitZoom(target, at: source)
+                } else {
+                    editor.splitSlice(atPlayback: editor.currentTimeMs)
+                }
             case ("a", []):
                 guard let openZoom else { return false }
                 editor.updateZoom(openZoom) { $0.mode = .auto }

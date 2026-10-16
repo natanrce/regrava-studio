@@ -25,14 +25,14 @@ struct EditorTimeline: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let geo = TimelineGeometry(width: geometry.size.width, scrollOffsetMs: editor.scrollOffsetMs, pxPerMs: max(geometry.size.width - 40, 1) / editor.visibleDurationMs)
+            let geo = TimelineGeometry(width: geometry.size.width, scrollOffsetMs: editor.scrollOffsetMs, pxPerMs: max(geometry.size.width - 40, 1) / editor.visibleDurationMs, resolver: editor.project.resolver)
             ZStack(alignment: .topLeading) {
                 GridLines(geometry: geo, duration: editor.durationMs).padding(.top, 32)
                 VStack(alignment: .leading, spacing: 11.3) {
                     Ruler(geometry: geo, duration: editor.durationMs).frame(height: 20)
                     VStack(alignment: .leading, spacing: 12) {
-                        ClipTrack(editor: editor, geometry: geo)
-                        ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { time($0) })
+                        ClipTrack(editor: editor, geometry: geo, hoverPlaybackMs: hoverX.map { time($0) })
+                        ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
                     }
                 }
                 .padding(.top, 25 - 20)
@@ -98,13 +98,25 @@ struct EditorTimeline: View {
     }
 }
 
+/// The timeline is laid out in playback time (`playbackTimeToPxPosition`); items stored in
+/// source time are placed through the resolver.
 struct TimelineGeometry {
     var width: CGFloat
     var scrollOffsetMs: Double
     var pxPerMs: CGFloat
+    var resolver: TimeResolver
 
     func x(_ ms: Double) -> CGFloat { EditorTimeline.horizontalPadding + (ms - scrollOffsetMs) * pxPerMs }
     func time(_ x: CGFloat) -> Double { scrollOffsetMs + (x - EditorTimeline.horizontalPadding) / pxPerMs }
+
+    /// Position of a source time.
+    func sx(_ sourceMs: Double) -> CGFloat { x(resolver.sourceToPlayback(sourceMs)) }
+    /// Source time under a position.
+    func sourceTime(_ x: CGFloat) -> Double { resolver.playbackToSource(time(x)) }
+    /// Source time after moving `fromSource` by `dx` points along the timeline.
+    func sourceTime(from sourceMs: Double, movedBy dx: CGFloat) -> Double {
+        resolver.playbackToSource(resolver.sourceToPlayback(sourceMs) + dx / pxPerMs)
+    }
 
     /// Marks 100–200 px apart, snapped to the intervals.
     var marksIntervalMs: Double {
@@ -259,23 +271,26 @@ struct TrackItemLabels: View {
 private struct ClipTrack: View {
     @ObservedObject var editor: EditorModel
     var geometry: TimelineGeometry
+    var hoverPlaybackMs: Double?
 
     var body: some View {
-        let start = geometry.x(0)
-        let width = max(editor.durationMs * geometry.pxPerMs - 1, 2)
+        let slices = editor.project.slices
         ZStack(alignment: .topLeading) {
-            TrackItemBody(color: TrackColors.clip, isPlayed: true, isActive: false, isSelected: false)
-                .frame(width: width, height: 48)
-                .overlay(
-                    TrackItemLabels(kind: "Clip", chips: [("clock", Self.duration(editor.durationMs)), ("gauge.with.dots.needle.67percent", "1×")], width: width)
-                )
-                .offset(x: start + 1)
-            // Recording flags above the track.
-            ForEach(editor.project.markersMs, id: \.self) { marker in
+            ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
+                SliceItem(editor: editor, slice: slice, index: index, geometry: geometry, hoverPlaybackMs: hoverPlaybackMs)
+            }
+            // Marks above the track: cut and trim pins, typing suggestions, recording flags.
+            ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
+                CutPins(editor: editor, slices: slices, index: index, geometry: geometry)
+            }
+            ForEach(editor.project.pendingTypingSuggestions, id: \.startMs) { range in
+                TypingSuggestionChip(editor: editor, range: range, geometry: geometry)
+            }
+            ForEach(editor.project.markersMs.filter { geometry.resolver.isSourceTimePresent($0) }, id: \.self) { marker in
                 Image(systemName: "flag.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(TrackColors.clip.mix(with: .white, by: 0.4))
-                    .offset(x: geometry.x(marker) - 3, y: -14)
+                    .offset(x: geometry.sx(marker) - 3, y: -14)
                     .help("Recording flag")
             }
         }
@@ -288,6 +303,246 @@ private struct ClipTrack: View {
         if s < 60 { return "\(s)s" }
         if s % 60 == 0 { return "\(s / 60)min" }
         return "\(s / 60)m \(s % 60)s"
+    }
+
+    /// Speed chip: "1.5×"; below 1× with two decimals.
+    static func speed(_ speed: Double) -> String {
+        let text = speed >= 1 ? String(format: "%g", (speed * 10).rounded() / 10) : String(format: "%g", (speed * 100).rounded() / 100)
+        return text + "×"
+    }
+}
+
+/// One clip: duration, speed and cursor chips; click opens the slice editor; edges trim.
+private struct SliceItem: View {
+    @ObservedObject var editor: EditorModel
+    var slice: Slice
+    var index: Int
+    var geometry: TimelineGeometry
+    var hoverPlaybackMs: Double?
+    @State private var hovered = false
+    @State private var dragOrigin: Slice?
+
+    private var isOpen: Bool { editor.openSliceID == slice.id }
+
+    var body: some View {
+        let start = geometry.sx(slice.sourceStartMs)
+        let width = max(geometry.sx(slice.sourceEndMs) - start - 1, 2)
+        let handle = floor(min(16, width / 3))
+        var chips: [(icon: String, text: String)] = [
+            ("clock", ClipTrack.duration(slice.sourceDurationMs)),
+            ("gauge.with.dots.needle.67percent", ClipTrack.speed(slice.speed)),
+        ]
+        if slice.hideCursor {
+            chips.append(("cursorarrow", "Hide"))
+        } else if slice.disableSmoothMouseMovement {
+            chips.append(("cursorarrow.motionlines", ""))
+        }
+        return TrackItemBody(
+            color: TrackColors.clip,
+            isPlayed: slice.contains(sourceTime: editor.currentSourceTimeMs),
+            isActive: isOpen,
+            isSelected: isOpen
+        )
+        .overlay { TrackItemLabels(kind: "Clip", chips: chips, width: width) }
+        .overlay(alignment: .leading) { if handle >= 16 { trimHandle(.start, width: handle) } }
+        .overlay(alignment: .trailing) { if handle >= 16 { trimHandle(.end, width: handle) } }
+        .frame(width: width, height: 48)
+        .opacity(editor.openSliceID != nil && !isOpen ? 0.6 : 1)
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .onHover { hovered = $0 }
+        .onTapGesture {
+            if editor.isSplitToolActive, let hoverPlaybackMs {
+                editor.splitSlice(atPlayback: hoverPlaybackMs)
+            } else {
+                editor.openSlice(slice.id)
+            }
+        }
+        .contextMenu { SliceMenu(editor: editor, slice: slice, index: index) }
+        .offset(x: start + 1)
+    }
+
+    /// Dragging an edge trims the clip; source time moves at the clip's speed.
+    private func trimHandle(_ edge: Project.SliceEdge, width: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: width)
+            .overlay {
+                Capsule().fill(Color.white).frame(width: 3).padding(.vertical, 9).opacity(hovered ? 1 : 0)
+            }
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let origin = dragOrigin ?? slice
+                        if dragOrigin == nil { dragOrigin = slice }
+                        let delta = Double(value.translation.width / geometry.pxPerMs) * origin.speed
+                        let edgeMs = edge == .start ? origin.sourceStartMs : origin.sourceEndMs
+                        editor.trimSlice(slice.id, edge: edge, toSource: edgeMs + delta)
+                    }
+                    .onEnded { _ in dragOrigin = nil }
+            )
+    }
+}
+
+/// Clip context menu.
+private struct SliceMenu: View {
+    @ObservedObject var editor: EditorModel
+    var slice: Slice
+    var index: Int
+
+    var body: some View {
+        let slices = editor.project.slices
+        Button("Split at current time") { editor.splitSlice(atPlayback: editor.currentTimeMs) }
+            .keyboardShortcut("c", modifiers: [])
+        if index > 0 { Button("Merge slice with previous") { editor.mergeSlice(slice.id, with: .previous) } }
+        if index + 1 < slices.count { Button("Merge slice with next") { editor.mergeSlice(slice.id, with: .next) } }
+        if editor.project.sliceHasStartTrim(index) || editor.project.sliceHasEndTrim(index) {
+            Button("Reset slice trim") { editor.removeSliceTrim(slice.id) }
+        }
+        Divider()
+        Menu("Set slice speed") {
+            ForEach(Slice.speedOptions, id: \.self) { speed in
+                Button(ClipTrack.speed(speed)) { editor.setSliceSpeed(slice.id, speed) }
+            }
+        }
+        Button("Apply speed to all slices") { editor.applySpeedToAllSlices(from: slice.id) }
+            .disabled(!editor.canApplySpeedToAll(from: slice.id))
+        Divider()
+        Toggle("Hide mouse cursor", isOn: Binding(
+            get: { slice.hideCursor },
+            set: { v in editor.updateSlice(slice.id) { $0.hideCursor = v } }
+        ))
+        Toggle("Disable smooth mouse movement", isOn: Binding(
+            get: { slice.disableSmoothMouseMovement },
+            set: { v in editor.updateSlice(slice.id) { $0.disableSmoothMouseMovement = v } }
+        ))
+        if slices.count > 1 {
+            Divider()
+            Button("Remove slice", role: .destructive) { editor.removeSlice(slice.id) }
+                .keyboardShortcut(.delete, modifiers: [])
+        }
+        Divider()
+        Button("Reset trims and cuts for all slices", role: .destructive) { editor.resetAllSlices() }
+    }
+}
+
+/// Cut and trim pins: a 24 px teardrop with scissors and the cut length; "Undo trim"
+/// restores the trimmed time, "Join clips" merges two clips split without a gap.
+private struct CutPins: View {
+    @ObservedObject var editor: EditorModel
+    var slices: [Slice]
+    var index: Int
+    var geometry: TimelineGeometry
+
+    var body: some View {
+        let slice = slices[index]
+        let startGap: Double? = index == 0 && slice.sourceStartMs > 0 ? slice.sourceStartMs : nil
+        let endGap: Double? = index + 1 < slices.count
+            ? max(0, slices[index + 1].sourceStartMs - slice.sourceEndMs)
+            : (slice.sourceEndMs < editor.project.recording.durationMs ? editor.project.recording.durationMs - slice.sourceEndMs : nil)
+        ZStack(alignment: .topLeading) {
+            if let startGap {
+                pin(gap: startGap, showsLabel: startGap > 0, at: slice.sourceStartMs) {
+                    startGap > 1 ? editor.removeSliceTrim(slice.id, edge: .start) : editor.mergeSlice(slice.id, with: .previous)
+                }
+            }
+            if let endGap {
+                pin(gap: endGap, showsLabel: endGap > 1, at: slice.sourceEndMs) {
+                    endGap > 1 ? editor.removeSliceTrim(slice.id, edge: .end) : editor.mergeSlice(slice.id, with: .next)
+                }
+            }
+        }
+    }
+
+    private func pin(gap: Double, showsLabel: Bool, at sourceMs: Double, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack {
+                UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 12, bottomTrailingRadius: 1.5, topTrailingRadius: 12)
+                    .fill(TrackColors.clip)
+                    .overlay(
+                        UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 12, bottomTrailingRadius: 1.5, topTrailingRadius: 12)
+                            .strokeBorder(Theme.Colors.background, lineWidth: 1)
+                    )
+                    .rotationEffect(.degrees(45))
+                VStack(spacing: 1) {
+                    if showsLabel {
+                        Text(Self.gapLabel(gap)).font(.system(size: 7, weight: .heavy)).padding(.top, 5)
+                    }
+                    Image(systemName: "scissors").font(.system(size: gap > 1 ? 8 : 9))
+                }
+                .foregroundStyle(.white)
+            }
+            .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .help(gap > 1 ? "Undo trim" : "Join clips")
+        .offset(x: geometry.sx(sourceMs) - 12, y: -30)
+    }
+
+    /// "0.4s", "12s", "3m", "1h".
+    static func gapLabel(_ ms: Double) -> String {
+        let s = ms / 1000
+        if s < 1 { return String(format: "%.1fs", s) }
+        if s < 60 { return String(format: "%.0fs", s) }
+        let m = Int(s / 60)
+        return m < 60 ? "\(m)m" : "\(m / 60)h"
+    }
+}
+
+/// Keyboard chip over a fast-typing range with the "Speed up typing" popover.
+private struct TypingSuggestionChip: View {
+    @ObservedObject var editor: EditorModel
+    var range: TimeRange
+    var geometry: TimelineGeometry
+    @State private var isOpen = false
+
+    var body: some View {
+        let start = geometry.sx(range.startMs)
+        let width = max(geometry.sx(range.endMs) - start, 22)
+        Button { isOpen = true } label: {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(TrackColors.clip.mix(with: .black, by: 0.3))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(TrackColors.clip.mix(with: .white, by: 0.3), lineWidth: 1))
+                .overlay(Image(systemName: "keyboard").font(.system(size: 10)).foregroundStyle(.white.opacity(0.9)))
+                .frame(width: width, height: 16)
+        }
+        .buttonStyle(.plain)
+        .help("Speed up typing")
+        .offset(x: start, y: -22)
+        .popover(isPresented: $isOpen, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: Theme.gap(2)) {
+                SliderField(
+                    name: "Speed up typing",
+                    icon: "keyboard",
+                    description: "You are typing during this part of the recording. Speed it up using options below.",
+                    value: Binding(get: { editor.preferredTypingSpeed }, set: { editor.preferredTypingSpeed = $0 }),
+                    range: 1.5...8,
+                    preview: { String(format: "%.1f×", $0) },
+                    resetValue: 3
+                )
+                VStack(spacing: Theme.gap(1)) {
+                    HStack(spacing: Theme.gap(1)) {
+                        RSButton(title: "Apply all suggestions", kind: .subtle, isWide: true) {
+                            editor.applyAllTypingSuggestions()
+                            isOpen = false
+                        }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        RSButton(title: "Apply suggestion", kind: .primary, isWide: true) {
+                            editor.applyTypingSuggestion(range)
+                            isOpen = false
+                        }
+                        .keyboardShortcut(.return, modifiers: [])
+                    }
+                    RSButton(title: "Remove suggestion", kind: .secondary, isWide: true) {
+                        editor.removeTypingSuggestion(range)
+                        isOpen = false
+                    }
+                }
+            }
+            .padding(Theme.gap(2))
+            .frame(maxWidth: 360)
+            .environment(\.colorScheme, .dark)
+        }
     }
 }
 
@@ -312,7 +567,7 @@ private struct ZoomTrack: View {
                 .fill(Color.white.opacity(0.001))
                 .frame(height: height)
                 .onContinuousHover { phase in
-                    if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.time(location.x) } else { ghostTimeMs = nil }
+                    if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.sourceTime(location.x) } else { ghostTimeMs = nil }
                 }
                 .gesture(createGesture)
                 .contextMenu { trackMenu }
@@ -366,7 +621,7 @@ private struct ZoomTrack: View {
     @ViewBuilder
     private var ghost: some View {
         if let range = creation ?? ghostRange {
-            let width = max((range.end - range.start) * geometry.pxPerMs - 1, 1)
+            let width = max(geometry.sx(range.end) - geometry.sx(range.start) - 1, 1)
             TrackItemBody(color: TrackColors.zoom, isPlayed: false, isActive: false, isSelected: false)
                 .opacity(0.5)
                 .overlay { if width > 20 { Image(systemName: "plus").foregroundStyle(.white) } }
@@ -376,13 +631,13 @@ private struct ZoomTrack: View {
                         BobbingHint(text: "Click or drag to create zoom").offset(y: -38).fixedSize()
                     }
                 }
-                .offset(x: geometry.x(range.start) + 1)
+                .offset(x: geometry.sx(range.start) + 1)
                 .allowsHitTesting(false)
         }
     }
 
     private var ghostRange: (start: Double, end: Double)? {
-        guard let ghostTimeMs, ghostTimeMs >= 0, ghostTimeMs <= editor.durationMs,
+        guard let ghostTimeMs, ghostTimeMs >= 0, ghostTimeMs <= editor.project.recording.durationMs,
               let gap = editor.freeRange(around: ghostTimeMs) else { return nil }
         let start = clamp(ghostTimeMs, gap.start, gap.end)
         let end = min(start + ZoomRange.initialDurationMs, gap.end)
@@ -393,8 +648,8 @@ private struct ZoomTrack: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 guard isFocused else { return }
-                let a = geometry.time(value.startLocation.x)
-                let b = geometry.time(value.location.x)
+                let a = geometry.sourceTime(value.startLocation.x)
+                let b = geometry.sourceTime(value.location.x)
                 if abs(value.translation.width) > 3, let gap = editor.freeRange(around: a) {
                     creation = (clamp(min(a, b), gap.start, gap.end), clamp(max(a, b), gap.start, gap.end))
                 }
@@ -421,8 +676,8 @@ private struct ZoomTrack: View {
             ForEach(editor.project.zooms.filter { !$0.isDisabled && !$0.isInstant }) { zoom in
                 UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10, bottomTrailingRadius: 0, topTrailingRadius: 0)
                     .fill(LinearGradient(colors: [TrackColors.zoom.opacity(0), TrackColors.zoom.opacity(0.45)], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: lead * geometry.pxPerMs, height: 48)
-                    .offset(x: geometry.x(zoom.startMs - lead))
+                    .frame(width: max(geometry.sx(zoom.startMs) - geometry.sx(zoom.startMs - lead), 0), height: 48)
+                    .offset(x: geometry.sx(zoom.startMs - lead))
                     .allowsHitTesting(false)
             }
         }
@@ -471,11 +726,11 @@ private struct ZoomItem: View {
     private var isDimmed: Bool { editor.openZoomID != nil && !isOpen }
 
     var body: some View {
-        let width = max(zoom.durationMs * geometry.pxPerMs - 1, 1)
+        let width = max(geometry.sx(zoom.endMs) - geometry.sx(zoom.startMs) - 1, 1)
         let handle = floor(min(16, width / 3))
         TrackItemBody(
             color: TrackColors.zoom,
-            isPlayed: zoom.contains(editor.currentTimeMs),
+            isPlayed: zoom.contains(editor.currentSourceTimeMs),
             isActive: isOpen,
             isSelected: isSelected
         )
@@ -500,7 +755,7 @@ private struct ZoomItem: View {
         .gesture(moveGesture)
         .simultaneousGesture(TapGesture().onEnded { tap() })
         .contextMenu { itemMenu }
-        .offset(x: geometry.x(zoom.startMs) + 1)
+        .offset(x: geometry.sx(zoom.startMs) + 1)
     }
 
     private func tap() {
@@ -521,7 +776,7 @@ private struct ZoomItem: View {
                 guard !editor.isSplitToolActive else { return }
                 let origin = dragOrigin ?? zoom
                 if dragOrigin == nil { dragOrigin = zoom }
-                editor.moveZoom(zoom.id, toStart: origin.startMs + value.translation.width / geometry.pxPerMs)
+                editor.moveZoom(zoom.id, toStart: geometry.sourceTime(from: origin.startMs, movedBy: value.translation.width))
             }
             .onEnded { _ in dragOrigin = nil }
     }
@@ -541,7 +796,7 @@ private struct ZoomItem: View {
                         let origin = dragOrigin ?? zoom
                         if dragOrigin == nil { dragOrigin = zoom }
                         let edge = leading ? origin.startMs : origin.endMs
-                        editor.resizeZoom(zoom.id, leading: leading, to: edge + value.translation.width / geometry.pxPerMs)
+                        editor.resizeZoom(zoom.id, leading: leading, to: geometry.sourceTime(from: edge, movedBy: value.translation.width))
                     }
                     .onEnded { _ in dragOrigin = nil }
             )
@@ -562,7 +817,7 @@ private struct ZoomItem: View {
         }
         Button("Apply zoom level to all other zooms") { editor.applyZoomLevelToAll(from: zoom.id) }
         Divider()
-        Button("Split zoom at current time") { editor.splitZoom(zoom.id, at: editor.currentTimeMs) }
+        Button("Split zoom at current time") { editor.splitZoom(zoom.id, at: editor.currentSourceTimeMs) }
             .keyboardShortcut("c", modifiers: [])
         Button("Duplicate zoom") { editor.duplicateZoom(zoom.id) }
             .keyboardShortcut("d", modifiers: .command)
