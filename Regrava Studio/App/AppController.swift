@@ -87,6 +87,20 @@ final class AppController {
         openProject(at: url)
     }
 
+    /// Closes the window of a project (e.g. after it was deleted).
+    func closeEditor(for model: EditorModel) {
+        guard let controller = editors.first(where: { $0.model === model }) else { return }
+        controller.window?.delegate = nil
+        controller.close()
+        model.tearDown()
+        editorClosed(controller)
+    }
+
+    func editorRenamed(_ model: EditorModel) {
+        editors.first { $0.model === model }?.updateTitle()
+        rememberRecent(model.bundleURL)
+    }
+
     func editorClosed(_ editor: EditorWindowController) {
         editors.removeAll { $0 === editor }
         applyDockIconPolicy()
