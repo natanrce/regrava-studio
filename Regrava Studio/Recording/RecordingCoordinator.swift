@@ -441,7 +441,8 @@ final class RecordingCoordinator: ObservableObject {
                     cursors: cursors
                 ),
                 mouseEvents: result.mouseEvents,
-                markersMs: result.markersMs
+                markersMs: result.markersMs,
+                keystrokes: result.keystrokes
             )
             project.autoZoom.isEnabled = preferences.createAutomaticZooms
             project.regenerateAutomaticZooms()

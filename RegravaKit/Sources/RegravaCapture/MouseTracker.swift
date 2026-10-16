@@ -17,7 +17,14 @@ final class MouseTracker {
         var cursorID: String?
     }
 
+    struct KeySample {
+        var kind: Keystroke.Kind
+        var uptime: TimeInterval
+    }
+
     private var samples: [Sample] = []
+    /// Key presses and releases; which key is not recorded, only when.
+    private(set) var keySamples: [KeySample] = []
     private var timer: Timer?
     private var monitors: [Any] = []
     private var lastLocation: CGPoint?
@@ -31,6 +38,7 @@ final class MouseTracker {
     func start(pollHz: Double = 120) {
         stop()
         samples.removeAll()
+        keySamples.removeAll()
         lastLocation = nil
         lastCursorID = nil
         pollCount = 0
@@ -51,6 +59,20 @@ final class MouseTracker {
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.record(event) }
+            return event
+        }) {
+            monitors.append(local)
+        }
+
+        // Keystrokes (global monitoring needs the Accessibility permission from onboarding).
+        let keys: NSEvent.EventTypeMask = [.keyDown, .keyUp]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: keys, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.recordKey(event) }
+        }) {
+            monitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: keys, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.recordKey(event) }
             return event
         }) {
             monitors.append(local)
@@ -89,5 +111,9 @@ final class MouseTracker {
         let location = event.cgEvent?.location ?? CGEvent(source: nil)?.location ?? .zero
         lastCursorID = cursors.currentID() ?? lastCursorID
         samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber, cursorID: lastCursorID))
+    }
+
+    private func recordKey(_ event: NSEvent) {
+        keySamples.append(KeySample(kind: event.type == .keyDown ? .down : .up, uptime: event.timestamp))
     }
 }

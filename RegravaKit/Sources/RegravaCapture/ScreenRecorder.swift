@@ -31,6 +31,7 @@ public struct CaptureResult: Sendable {
     public var mouseEvents: [MouseEvent]
     /// Images of non-standard cursors referenced by `MouseEvent.cursorID` ("custom-N").
     public var customCursors: [CapturedCursorImage]
+    public var keystrokes: [Keystroke]
     public var markersMs: [Double]
     public var videoSize: Size2
     public var pointPixelScale: Double
@@ -202,6 +203,9 @@ public final class ScreenRecorder: NSObject {
             videoURL: outputURL,
             mouseEvents: events.sorted { $0.timeMs < $1.timeMs },
             customCursors: mouse.customCursors,
+            keystrokes: mouse.keySamples.compactMap { sample in
+                timelineMs(sample.uptime).map { Keystroke(kind: sample.kind, timeMs: $0) }
+            }.sorted { $0.timeMs < $1.timeMs },
             markersMs: markerUptimes.compactMap(timelineMs),
             videoSize: videoSize,
             pointPixelScale: pointPixelScale,
