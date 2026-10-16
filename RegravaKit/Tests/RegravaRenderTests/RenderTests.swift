@@ -126,6 +126,35 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    @Test func exportFollowsClipSpeedAndCuts() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("clips.mp4")
+            var project = sampleProject(duration: 2000)
+            project.splitSlice(at: 1000)
+            project.slices[1].timeScale = 0.5                          // 1–2 s at 2× → 0.5 s
+            project.updateSlice(project.slices[0].id, sourceEndMs: 600) // cut 0.6–1 s
+            #expect(abs(project.playbackDurationMs - 1100) < 1)
+            try await ProjectExporter.export(project: project, videoURL: source, settings: .defaults(for: .mp4), to: output, cursors: nil)
+            let info = try await videoInfo(output)
+            #expect(abs(info.duration - 1.1) < 0.15)
+        }
+    }
+
+    @Test func gifExportFollowsClips() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("clips.gif")
+            var project = sampleProject(duration: 2000)
+            project.splitSlice(at: 1000)
+            project.slices[1].timeScale = 0.5
+            var settings = ExportSettings.defaults(for: .gif)
+            settings.fps = 10
+            try await ProjectExporter.export(project: project, videoURL: source, settings: settings, to: output, cursors: nil)
+            let gif = CGImageSourceCreateWithURL(output as CFURL, nil)
+            // 1.5 s of playback at 10 fps.
+            #expect(abs(Double(gif.map(CGImageSourceGetCount) ?? 0) - 15) <= 2)
+        }
+    }
+
     @Test func exportsBothCodecsAsTwoFiles() async throws {
         try await withTestVideo { source, dir in
             let output = dir.appendingPathComponent("export.mp4")

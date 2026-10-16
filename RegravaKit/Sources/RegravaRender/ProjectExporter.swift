@@ -109,7 +109,7 @@ public enum ProjectExporter {
         to outputURL: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
-        let asset = AVURLAsset(url: videoURL)
+        let asset = try await PlaybackComposition.make(asset: AVURLAsset(url: videoURL), slices: project.slices)
         let duration = try await asset.load(.duration)
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
@@ -131,6 +131,7 @@ public enum ProjectExporter {
         var audioOutput: AVAssetReaderAudioMixOutput?
         if !audioTracks.isEmpty {
             let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [AVFormatIDKey: kAudioFormatLinearPCM])
+            output.audioTimePitchAlgorithm = .spectral
             reader.add(output)
             audioOutput = output
         }
@@ -249,7 +250,7 @@ public enum ProjectExporter {
         to outputURL: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
-        let asset = AVURLAsset(url: videoURL)
+        let asset = try await PlaybackComposition.make(asset: AVURLAsset(url: videoURL), slices: project.slices)
         let duration = try await asset.load(.duration).seconds
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         guard let firstTrack = videoTracks.first else { throw ExportError.cannotRead("no video track") }

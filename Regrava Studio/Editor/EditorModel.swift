@@ -86,7 +86,8 @@ final class EditorModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    var durationMs: Double { project.recording.durationMs }
+    /// Playback duration (clips sped up, slowed down or cut).
+    var durationMs: Double { project.playbackDurationMs }
     var projectName: String { bundleURL.deletingPathExtension().lastPathComponent }
     var videoURL: URL { ProjectStore.videoURL(bundle: bundleURL, project: project) }
 
@@ -140,6 +141,7 @@ final class EditorModel: ObservableObject {
 
     private func apply(_ updated: Project) {
         let canvasChanged = updated.canvasSize != project.canvasSize
+        let slicesChanged = updated.slices != project.slices
         project = updated
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
@@ -147,8 +149,8 @@ final class EditorModel: ObservableObject {
         selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
         isDirty = true
         scheduleAutosave()
-        if canvasChanged {
-            Task { await rebuildComposition() }
+        if canvasChanged || slicesChanged {
+            Task { await rebuildComposition(replacingItem: slicesChanged) }
         } else {
             scheduleRefresh()
         }
@@ -163,25 +165,27 @@ final class EditorModel: ObservableObject {
         return Size2(width: width, height: (height / 2).rounded() * 2)
     }
 
-    /// New composition (canvas or preview size changed); keeps the playhead.
-    func rebuildComposition() async {
+    /// New composition (canvas or preview size changed); keeps the playhead. With
+    /// `replacingItem` the player gets a new item, needed when clips change the timing.
+    func rebuildComposition(replacingItem: Bool = false) async {
         let snapshot = RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundleURL)
         renderState.replace(with: snapshot)
-        let asset = AVURLAsset(url: videoURL)
         do {
+            let asset = try await PlaybackComposition.make(asset: AVURLAsset(url: videoURL), slices: project.slices)
             let output = previewOutputSize
             let composition = try await CompositionFactory.make(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output)
             baseComposition = composition
             compositionCanvas = project.canvasSize
             compositionOutput = output
-            if let item = player.currentItem {
+            if let item = player.currentItem, !replacingItem {
                 item.videoComposition = composition
             } else {
                 let item = AVPlayerItem(asset: asset)
+                item.audioTimePitchAlgorithm = .spectral
                 item.videoComposition = composition
                 player.replaceCurrentItem(with: item)
             }
-            if !isPlaying { seek(to: currentTimeMs) }
+            if !isPlaying { seek(to: min(currentTimeMs, durationMs)) }
         } catch {
             errorMessage = "Could not load the recording: \(error.localizedDescription)"
         }

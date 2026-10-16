@@ -72,3 +72,37 @@ public enum CompositionFactory {
         return composition
     }
 }
+
+/// The recording rearranged into playback time: each clip's source range, in order, scaled
+/// to its speed (gaps between clips are left out). Composition time is playback time.
+public enum PlaybackComposition {
+    public static func make(asset: AVAsset, slices: [Slice]) async throws -> AVAsset {
+        let duration = try await asset.load(.duration)
+        let durationMs = duration.seconds * 1000
+        // One untouched clip: play the file directly.
+        if slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
+            return asset
+        }
+        let composition = AVMutableComposition()
+        for type in [AVMediaType.video, .audio] {
+            for track in try await asset.loadTracks(withMediaType: type) {
+                guard let target = composition.addMutableTrack(withMediaType: type, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                target.preferredTransform = try await track.load(.preferredTransform)
+                var cursor = CMTime.zero
+                for slice in slices {
+                    let start = CMTime(seconds: max(slice.sourceStartMs, 0) / 1000, preferredTimescale: 600)
+                    let end = CMTime(seconds: min(slice.sourceEndMs, durationMs) / 1000, preferredTimescale: 600)
+                    guard end > start else { continue }
+                    let range = CMTimeRange(start: start, end: end)
+                    try target.insertTimeRange(range, of: track, at: cursor)
+                    let scaled = CMTime(seconds: range.duration.seconds * slice.timeScale, preferredTimescale: 600)
+                    if scaled != range.duration {
+                        target.scaleTimeRange(CMTimeRange(start: cursor, duration: range.duration), toDuration: scaled)
+                    }
+                    cursor = cursor + scaled
+                }
+            }
+        }
+        return composition
+    }
+}
