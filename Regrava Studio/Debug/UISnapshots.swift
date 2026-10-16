@@ -75,12 +75,22 @@ enum UISnapshots {
         let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("Snapshot Demo.\(ProjectStore.fileExtension)")
         try? FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
         let clicks = [3000.0, 5200, 14000, 26000, 31000].map { MouseEvent(kind: .down, timeMs: $0, position: Vec2(800, 500)) }
+        // A typing run (fast keys 16–19 s) shows a "Speed up typing" chip.
+        let keys = stride(from: 16_000.0, through: 19_000, by: 150).flatMap {
+            [Keystroke(kind: .down, timeMs: $0), Keystroke(kind: .up, timeMs: $0 + 40)]
+        }
         var project = Project(
             recording: RecordingInfo(videoSize: Size2(width: 3024, height: 1964), pointPixelScale: 2, durationMs: 42_000, fps: 60),
             mouseEvents: [MouseEvent(kind: .move, timeMs: 0, position: Vec2(100, 100))] + clicks,
-            markersMs: [9000, 20000]
+            markersMs: [9000, 20000],
+            keystrokes: keys
         )
         project.regenerateAutomaticZooms()
+        // × between 30 and 36 s, and 36–38 s cut out.
+        project.splitSlice(at: 30_000)
+        project.splitSlice(at: 36_000)
+        project.slices[1].timeScale = 0.5
+        project.updateSlice(project.slices[2].id, sourceStartMs: 38_000)
         let controller = EditorWindowController(bundleURL: bundle, project: project)
         guard let window = controller.window, let view = window.contentView else { return }
         window.setFrame(NSRect(x: -10_000, y: -10_000, width: 1440, height: 860), display: true)
@@ -90,6 +100,7 @@ enum UISnapshots {
             ("cursor", { controller.model.openSidebar(.cursor) }),
             ("animations", { controller.model.openSidebar(.animation) }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
+            ("slice", { if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
         ]
         for (name, apply) in states {
             apply()
