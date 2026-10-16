@@ -66,8 +66,31 @@ public final class CameraTrack: @unchecked Sendable {
 
         let planner = CameraPlanner(project: project, layout: layout, cleaned: cleaned, sparse: sparse)
 
+        let duration = durationMs
+        let cursorPath = CursorPathCache.shared.path(
+            for: CursorPathCache.Key(
+                events: cleaned,
+                durationMs: duration,
+                loopMs: project.cursor.loopPositionBeforeEndMs,
+                stopMs: project.cursor.stopMovementInLastPartMs,
+                spring: project.animation.mouseSpring,
+                pointPixelScale: project.recording.pointPixelScale
+            )
+        ) {
+            let pathPoints = Self.cursorPathPoints(events: cleaned, durationMs: duration, config: project.cursor)
+            guard !pathPoints.isEmpty else { return nil }
+            return SmoothedCursorPath.plan(
+                points: pathPoints,
+                syncPoints: Self.cursorSyncPoints(
+                    events: cleaned.filter { $0.timeMs >= 0 && $0.timeMs <= (pathPoints.last?.timeMs ?? 0) },
+                    pointPixelScale: project.recording.pointPixelScale
+                ),
+                spring: project.animation.mouseSpring,
+                durationMs: duration
+            )
+        }
+
         var screen = SpringRect(layout.restScreen)
-        var cursorSpring: SpringPoint?
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
         frames.reserveCapacity(count)
@@ -82,17 +105,7 @@ public final class CameraTrack: @unchecked Sendable {
                 screen.advance(toward: target.rect, config: screenConfig, milliseconds: sampleIntervalMs)
             }
 
-            var cursor: Vec2?
-            if let raw = Self.cursorTarget(at: t, events: cleaned, duration: durationMs, config: project.cursor) {
-                if let spring = project.animation.mouseSpring {
-                    if cursorSpring == nil { cursorSpring = SpringPoint(raw) }
-                    cursorSpring!.advance(toward: raw, config: spring, milliseconds: i == 0 ? 0 : sampleIntervalMs)
-                    cursor = cursorSpring!.point
-                } else {
-                    cursor = raw
-                }
-            }
-            var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursor)
+            var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursorPath?.position(at: t))
             frame.cursorOpacity = Self.cursorOpacity(at: t, events: cleaned, hideAfterMs: project.cursor.hideNotMovingAfterMs)
             frames.append(frame)
         }
@@ -124,19 +137,45 @@ public final class CameraTrack: @unchecked Sendable {
         return frame
     }
 
-    /// Where the cursor should be before smoothing, applying "Loop cursor position" and
-    /// "Stop cursor movement at the end of the video".
-    static func cursorTarget(at t: Double, events: [MouseEvent], duration: Double, config: CursorConfig) -> Vec2? {
-        if let loop = config.loopPositionBeforeEndMs, loop > 0, t > duration - loop,
-           let start = events.first?.position,
-           let from = MouseProcessing.position(at: duration - loop, in: events) {
-            let p = clamp((t - (duration - loop)) / loop, 0, 1)
-            return from.lerp(to: start, p * p * (3 - 2 * p))
+    /// Recorded positions the smoothed cursor follows: the first sample is moved to the start,
+    /// and with "Loop cursor position" the path ends early and returns to the starting position 1
+    /// ms after its last sample. "Stop cursor movement at the end of the video" ends the path
+    /// early so the cursor holds still.
+    public static func cursorPathPoints(events: [MouseEvent], durationMs: Double, config: CursorConfig) -> [CursorPathPoint] {
+        var endMs = max(0, durationMs - (config.loopPositionBeforeEndMs ?? 0))
+        if config.loopPositionBeforeEndMs == nil, config.stopMovementInLastPartMs > 0 {
+            endMs = max(0, durationMs - config.stopMovementInLastPartMs)
         }
-        if config.stopMovementInLastPartMs > 0, t > duration - config.stopMovementInLastPartMs {
-            return MouseProcessing.position(at: duration - config.stopMovementInLastPartMs, in: events)
+        var inRange = events.filter { $0.timeMs >= 0 && $0.timeMs <= endMs }
+        if inRange.isEmpty {
+            let before = MouseProcessing.lastIndex(atOrBefore: 0, in: events).map { events[$0] }
+            if let fallback = before ?? events.first { inRange = [fallback] }
         }
-        return MouseProcessing.position(at: t, in: events)
+        guard !inRange.isEmpty else { return [] }
+        inRange[0].timeMs = 0
+        var points = inRange.map { CursorPathPoint(timeMs: $0.timeMs, position: $0.position) }
+        if config.loopPositionBeforeEndMs != nil, let first = points.first, let last = points.last {
+            points.append(CursorPathPoint(timeMs: last.timeMs + 1, position: first.position))
+        }
+        return points
+    }
+
+    /// Moments the smoothed cursor must reach the recorded position: presses, releases and
+    /// drags. Tolerances are in points, converted to video pixels.
+    public static func cursorSyncPoints(events: [MouseEvent], pointPixelScale: Double, cursorImageChangesMs: [Double] = []) -> [CursorSyncPoint] {
+        var points: [CursorSyncPoint] = []
+        func add(_ t: Double, _ reason: CursorSyncReason) {
+            points.append(CursorSyncPoint(timeMs: t, reason: reason, tolerance: reason.tolerancePoints * pointPixelScale))
+        }
+        for event in events {
+            switch event.kind {
+            case .down, .up: add(event.timeMs, .click)
+            case .drag: add(event.timeMs, .drag)
+            case .move: break
+            }
+        }
+        for t in cursorImageChangesMs { add(t, .cursorImage) }
+        return points.sorted { $0.timeMs < $1.timeMs }
     }
 
     /// Fades the cursor out 300 ms after it stopped moving for `hideAfterMs`.
@@ -226,5 +265,36 @@ struct CameraPlanner {
             area: layout.zoomArea
         )
         return (rect, instant)
+    }
+}
+
+/// Planning the cursor is the expensive part of a track and does not depend on zooms or styles,
+/// so the last result is reused while the inputs stay the same.
+final class CursorPathCache: @unchecked Sendable {
+    struct Key: Equatable {
+        var events: [MouseEvent]
+        var durationMs: Double
+        var loopMs: Double?
+        var stopMs: Double
+        var spring: SpringConfig?
+        var pointPixelScale: Double
+    }
+
+    static let shared = CursorPathCache()
+    private let lock = NSLock()
+    private var entry: (key: Key, path: SmoothedCursorPath?)?
+
+    func path(for key: Key, make: () -> SmoothedCursorPath?) -> SmoothedCursorPath? {
+        lock.lock()
+        if let entry, entry.key == key {
+            lock.unlock()
+            return entry.path
+        }
+        lock.unlock()
+        let path = make()
+        lock.lock()
+        entry = (key, path)
+        lock.unlock()
+        return path
     }
 }

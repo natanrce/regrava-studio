@@ -329,18 +329,25 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
     @Test func loopReturnsCursorToStart() {
         var config = CursorConfig()
         config.loopPositionBeforeEndMs = 1000
-        let end = CameraTrack.cursorTarget(at: 5000, events: events, duration: 5000, config: config)
-        #expect(end == Vec2(10, 10))
-        let before = CameraTrack.cursorTarget(at: 3900, events: events, duration: 5000, config: config)
-        #expect(before == Vec2(500, 500))
+        let points = CameraTrack.cursorPathPoints(events: events, durationMs: 5000, config: config)
+        #expect(points.map(\.timeMs) == [0, 1000, 1001])
+        #expect(points.last?.position == Vec2(10, 10))
+        let early = CameraTrack.cursorPathPoints(events: events, durationMs: 1500, config: config)
+        #expect(early.map(\.timeMs) == [0, 1])
     }
 
     @Test func stopMovementFreezesCursorNearTheEnd() {
         var config = CursorConfig()
         config.stopMovementInLastPartMs = 600
-        // Frozen where it was 600 ms before the end (t = 400 → halfway).
-        let p = CameraTrack.cursorTarget(at: 950, events: events, duration: 1000, config: config)
-        #expect(abs(p!.x - 206) < 0.01)
+        let points = CameraTrack.cursorPathPoints(events: events, durationMs: 1000, config: config)
+        #expect(points.map(\.timeMs) == [0])
+    }
+
+    @Test func firstSampleStartsThePath() {
+        let late = [MouseEvent(kind: .move, timeMs: 700, position: Vec2(5, 5))]
+        let points = CameraTrack.cursorPathPoints(events: late, durationMs: 2000, config: CursorConfig())
+        #expect(points.first?.timeMs == 0)
+        #expect(points.first?.position == Vec2(5, 5))
     }
 
     @Test func idleCursorFadesOut() {

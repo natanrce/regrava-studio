@@ -4,6 +4,8 @@ public enum MouseEventKind: String, Codable, Sendable {
     case move
     case down
     case up
+    /// Movement while a button is held ("mouseDragged").
+    case drag
 }
 
 /// A mouse sample in recorded-video pixel space (top-left origin), relative to recording start.
@@ -20,7 +22,8 @@ public struct MouseEvent: Codable, Hashable, Sendable {
         self.button = button
     }
 
-    public var isClick: Bool { kind != .move }
+    /// Button press or release.
+    public var isClick: Bool { kind == .down || kind == .up }
 }
 
 public enum MouseProcessing {
