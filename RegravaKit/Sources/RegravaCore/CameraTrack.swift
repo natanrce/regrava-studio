@@ -39,6 +39,12 @@ public struct CameraFrame: Hashable, Sendable {
     public var cursorName: String = CursorTypes.defaultName
     /// Spring-animated press scale: 0.9 while pressed.
     public var cursorScale: Double = 1
+    /// Inside an instant zoom's snap window (motion blur is off there).
+    public var isInstantSnap = false
+    /// The same values one project frame earlier, for motion blur.
+    public var previousScreenRect: Rect2?
+    public var previousCursor: Vec2?
+    public var previousCursorScale: Double = 1
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -129,13 +135,24 @@ public final class CameraTrack: @unchecked Sendable {
 
             var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursorPath?.position(at: t))
             frame.cursorScale = press.value
+            frame.isInstantSnap = target.instant
             frame.cursorOpacity = Self.cursorOpacity(at: t, events: cleaned, hideAfterMs: project.cursor.hideNotMovingAfterMs)
             frames.append(frame)
         }
         samples = frames
     }
 
+    /// The frame at `timeMs`, with the previous project frame attached for motion blur.
     public func frame(at timeMs: Double) -> CameraFrame {
+        var frame = interpolatedFrame(at: timeMs)
+        let before = interpolatedFrame(at: max(0, timeMs - sampleIntervalMs))
+        frame.previousScreenRect = before.screenRect
+        frame.previousCursor = before.cursor
+        frame.previousCursorScale = before.cursorScale
+        return frame
+    }
+
+    private func interpolatedFrame(at timeMs: Double) -> CameraFrame {
         guard let first = samples.first else {
             return CameraFrame(timeMs: timeMs, screenRect: layout.restScreen)
         }
@@ -151,6 +168,7 @@ public final class CameraTrack: @unchecked Sendable {
         )
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
+        frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
         frame.cursorName = CursorTypes.assetName(at: timeMs, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: timeMs, in: clicks) {
             let age = timeMs - clicks[i].timeMs

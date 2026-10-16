@@ -14,6 +14,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let pointPixelScale: Double
     private let cursors: CursorLibrary?
     private let background: CIImage
+    private let motionBlurAmount: Double
+    private let fps: Int
 
     /// `assetsDirectory` is the project folder (for background images).
     public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil) {
@@ -22,6 +24,8 @@ public final class FrameCompositor: @unchecked Sendable {
         cursorConfig = project.cursor
         pointPixelScale = project.recording.pointPixelScale
         self.cursors = cursors
+        motionBlurAmount = project.animation.motionBlurAmount
+        fps = project.recording.fps
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
@@ -37,33 +41,31 @@ public final class FrameCompositor: @unchecked Sendable {
 
     public func compose(source: CIImage, frame: CameraFrame) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
-        let screen = ciRect(frame.screenRect)
-        let zoomFactor = frame.screenRect.width / max(layout.restScreen.width, 1)
-        let radius = min(style.cornerRadius * zoomFactor, min(screen.width, screen.height) / 2)
-
-        // Screen image placed into its rectangle, with rounded corners.
         let src = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
-        let scaled = src
-            .transformed(by: CGAffineTransform(scaleX: screen.width / max(src.extent.width, 1), y: screen.height / max(src.extent.height, 1)))
-            .transformed(by: CGAffineTransform(translationX: screen.minX, y: screen.minY))
-        var screenImage = masked(scaled, to: screen, radius: radius)
+        let strength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: frame.isInstantSnap)
 
-        // Inset: a colored border inside the screen edge.
-        if style.inset.isOn {
-            let width = style.inset.size * zoomFactor
-            let ring = CIFilter.blendWithMask()
-            ring.inputImage = roundedRect(screen, radius: radius, color: Self.ciColor(style.inset.color, alpha: style.inset.alpha))
-            ring.backgroundImage = CIImage.empty()
-            ring.maskImage = roundedRect(screen, radius: radius, color: .white)
-                .applyingFilter("CISourceOutCompositing", parameters: [
-                    kCIInputBackgroundImageKey: roundedRect(screen.insetBy(dx: width, dy: width), radius: max(radius - width, 0), color: .white),
-                ])
-            if let ringImage = ring.outputImage { screenImage = ringImage.composited(over: screenImage) }
-        }
+        // Screen trail: from lerp(now, before, strength) to now (`rf.trailStart`).
+        let now = frame.screenRect
+        let trailStart = strength > 0 ? now.lerp(to: frame.previousScreenRect ?? now, strength) : now
+        let isStatic = strength == 0 || now.isClose(to: trailStart, tolerance: 1)
 
         var output = background
         if style.shadow.intensity > 0 {
+            let middle = isStatic ? now : trailStart.lerp(to: now, 0.5)
+            let screen = ciRect(middle)
+            let zoomFactor = middle.width / max(layout.restScreen.width, 1)
+            let radius = min(style.cornerRadius * zoomFactor, min(screen.width, screen.height) / 2)
             output = shadow(for: screen, radius: radius, zoomFactor: zoomFactor).composited(over: output)
+        }
+        var screenImage = screenLayer(src, rect: now)
+        if !isStatic {
+            let bounds = ciRect(now).union(ciRect(trailStart)).integral
+            let samples = MotionBlur.sampleCount(travel: now.cornerTravel(to: trailStart))
+            if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in
+                self.screenLayer(src, rect: trailStart.lerp(to: now, t))
+            }) {
+                screenImage = blurred
+            }
         }
         output = screenImage.composited(over: output)
 
@@ -77,10 +79,61 @@ public final class FrameCompositor: @unchecked Sendable {
 
         if !cursorConfig.hide, frame.cursorOpacity > 0, let cursors, let position = frame.cursor {
             let cursor = cursors.asset(named: frame.cursorName)
-            output = placedCursor(cursor, at: position, frame: frame, pixelsPerPoint: pixelsPerPoint * frame.cursorScale).composited(over: output)
+            let tip = layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect)
+            var tipBefore = tip
+            if let previous = frame.previousCursor {
+                tipBefore = layout.canvasPoint(videoPoint: previous, screenRect: frame.previousScreenRect ?? frame.screenRect)
+            }
+            let cursorStrength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false)
+            let trailTip = tip.lerp(to: tipBefore, cursorStrength)
+            let scaleNow = frame.cursorScale
+            let trailScale = scaleNow + (frame.previousCursorScale - scaleNow) * cursorStrength
+            let travel = tip.distance(to: trailTip)
+            var cursorImage = placedCursor(cursor, tip: tip, frame: frame, pixelsPerPoint: pixelsPerPoint * scaleNow)
+            if cursorStrength > 0 && travel >= 1 {
+                let bounds = cursorImage.extent
+                    .union(placedCursor(cursor, tip: trailTip, frame: frame, pixelsPerPoint: pixelsPerPoint * trailScale).extent)
+                    .integral
+                if let blurred = MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel), bounds: bounds, layer: { t in
+                    self.placedCursor(
+                        cursor,
+                        tip: trailTip.lerp(to: tip, t),
+                        frame: frame,
+                        pixelsPerPoint: pixelsPerPoint * (trailScale + (scaleNow - trailScale) * t)
+                    )
+                }) {
+                    cursorImage = blurred
+                }
+            }
+            output = cursorImage.composited(over: output)
         }
 
         return output.cropped(to: canvasRect)
+    }
+
+    /// The recording placed into `rect` with rounded corners and the inset border.
+    private func screenLayer(_ src: CIImage, rect: Rect2) -> CIImage {
+        let screen = ciRect(rect)
+        let zoomFactor = rect.width / max(layout.restScreen.width, 1)
+        let radius = min(style.cornerRadius * zoomFactor, min(screen.width, screen.height) / 2)
+        let scaled = src
+            .transformed(by: CGAffineTransform(scaleX: screen.width / max(src.extent.width, 1), y: screen.height / max(src.extent.height, 1)))
+            .transformed(by: CGAffineTransform(translationX: screen.minX, y: screen.minY))
+        var image = masked(scaled, to: screen, radius: radius)
+
+        // Inset: a colored border inside the screen edge.
+        if style.inset.isOn {
+            let width = style.inset.size * zoomFactor
+            let ring = CIFilter.blendWithMask()
+            ring.inputImage = roundedRect(screen, radius: radius, color: Self.ciColor(style.inset.color, alpha: style.inset.alpha))
+            ring.backgroundImage = CIImage.empty()
+            ring.maskImage = roundedRect(screen, radius: radius, color: .white)
+                .applyingFilter("CISourceOutCompositing", parameters: [
+                    kCIInputBackgroundImageKey: roundedRect(screen.insetBy(dx: width, dy: width), radius: max(radius - width, 0), color: .white),
+                ])
+            if let ringImage = ring.outputImage { image = ringImage.composited(over: image) }
+        }
+        return image
     }
 
     // MARK: Pieces
@@ -117,8 +170,8 @@ public final class FrameCompositor: @unchecked Sendable {
         return shape.applyingGaussianBlur(sigma: max(blur, 0.1))
     }
 
-    private func placedCursor(_ cursor: CursorAsset, at position: Vec2, frame: CameraFrame, pixelsPerPoint: Double) -> CIImage {
-        let tip = layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect)
+    /// The cursor drawn with its hotspot at `tip` (canvas pixels).
+    private func placedCursor(_ cursor: CursorAsset, tip: Vec2, frame: CameraFrame, pixelsPerPoint: Double) -> CIImage {
         let width = cursor.sizePoints.width * pixelsPerPoint
         let height = cursor.sizePoints.height * pixelsPerPoint
         let topLeft = Vec2(tip.x - cursor.hotspotPoints.x * pixelsPerPoint, tip.y - cursor.hotspotPoints.y * pixelsPerPoint)
