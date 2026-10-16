@@ -209,20 +209,33 @@ struct SegmentedPicker<Value: Hashable>: View {
     var isDisabled: (Value) -> Bool = { _ in false }
     var size: RSButtonSize = .regular
     var descriptionMinLines: Int = 1
+    /// Options share the full width equally (`isWide`); otherwise the row scrolls
+    /// horizontally instead of truncating labels (`isScrollable`).
+    var isWide = false
     @Binding var selection: Value
+
+    private var row: some View {
+        HStack(spacing: Theme.gap(0)) {
+            ForEach(options, id: \.self) { option in
+                SegmentOption(
+                    title: label(option),
+                    icon: icon?(option) ?? nil,
+                    isSelected: option == selection,
+                    isDisabled: isDisabled(option),
+                    height: size.box.height ?? 38,
+                    isWide: isWide
+                ) { selection = option }
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.gap(1)) {
-            HStack(spacing: Theme.gap(0)) {
-                ForEach(options, id: \.self) { option in
-                    SegmentOption(
-                        title: label(option),
-                        icon: icon?(option) ?? nil,
-                        isSelected: option == selection,
-                        isDisabled: isDisabled(option),
-                        height: size.box.height ?? 38
-                    ) { selection = option }
-                }
+            if isWide {
+                row.frame(maxWidth: .infinity)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) { row.fixedSize() }
+                    .frame(height: size.box.height ?? 38)
             }
             if let description {
                 ZStack(alignment: .topLeading) {
@@ -249,6 +262,7 @@ private struct SegmentOption: View {
     var isSelected: Bool
     var isDisabled: Bool
     var height: CGFloat
+    var isWide = false
     var action: () -> Void
     @State private var hovered = false
 
@@ -259,6 +273,7 @@ private struct SegmentOption: View {
                 Text(title).font(Theme.Typo.controlCopy).lineLimit(1)
             }
             .padding(.horizontal, 12)
+            .frame(maxWidth: isWide ? .infinity : nil)
             .frame(height: height)
             .background(
                 RoundedRectangle(cornerRadius: 10)
