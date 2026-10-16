@@ -45,6 +45,8 @@ public struct CameraFrame: Hashable, Sendable {
     public var previousScreenRect: Rect2?
     public var previousCursor: Vec2?
     public var previousCursorScale: Double = 1
+    /// Mask applied to the recording.
+    public var mask: MaskFrame = .none
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -113,6 +115,7 @@ public final class CameraTrack: @unchecked Sendable {
         }
 
         var screen = SpringRect(layout.restScreen)
+        var maskAnimator = MaskAnimator(masks: project.masks, recordingSize: project.recording.videoSize)
         var press = SpringValue(1)
         var opacity = SpringValue(1)
         let buttonEvents = pathEvents.filter(\.isClick)
@@ -150,6 +153,7 @@ public final class CameraTrack: @unchecked Sendable {
             opacity.setTarget(typing || !visible ? 0 : 1, config: opacitySpring)
             if i == 0 { opacity.snapToTarget() } else { opacity.advance(by: sampleIntervalMs, config: opacitySpring) }
             frame.cursorOpacity = opacity.value
+            frame.mask = maskAnimator.frame(at: source, stepMs: sampleIntervalMs, first: i == 0)
             frames.append(frame)
         }
         samples = frames
@@ -182,6 +186,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
         frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
+        frame.mask = Self.interpolate(a.mask, b.mask, f)
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {
@@ -293,6 +298,17 @@ public final class CameraTrack: @unchecked Sendable {
         guard let hideAfterMs else { return true }
         guard let i = floorSearch(count: pathEvents.count, value: t, key: { pathEvents[$0].timeMs }) else { return false }
         return abs(pathEvents[i].timeMs - t) <= hideAfterMs
+    }
+
+    private static func interpolate(_ a: MaskFrame, _ b: MaskFrame, _ t: Double) -> MaskFrame {
+        var m = t < 0.5 ? a : b
+        if a.type == b.type && a.active == b.active {
+            m.bounds01 = a.bounds01.lerp(to: b.bounds01, t)
+            m.borderRadius01 = a.borderRadius01 + (b.borderRadius01 - a.borderRadius01) * t
+            m.highlightOpacity = a.highlightOpacity + (b.highlightOpacity - a.highlightOpacity) * t
+        }
+        m.opacity = a.opacity + (b.opacity - a.opacity) * t
+        return m
     }
 
     private func interpolate(_ a: Vec2?, _ b: Vec2?, _ t: Double) -> Vec2? {

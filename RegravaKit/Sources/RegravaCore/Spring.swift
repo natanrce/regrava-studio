@@ -109,6 +109,19 @@ public enum SpringMath {
         return frame / 1000 * max(omega, ratio) <= 0.5 ? frame : 1
     }
 
+    /// A spring that settles within `durationMs`: unchanged when it already does, instant
+    /// below two 60 fps frames, otherwise stiffness × r² and damping × r with r = settle time / duration.
+    public static func limited(toDurationMs durationMs: Double, _ config: SpringConfig) -> SpringConfig {
+        let settle = settleTime(config)
+        if settle <= durationMs { return config }
+        if durationMs <= 2 * (1000.0 / 60) { return .instant }
+        let ratio = settle / durationMs
+        var scaled = config
+        scaled.stiffness = config.stiffness * ratio * ratio
+        scaled.damping = config.damping * ratio
+        return scaled
+    }
+
     private static let settleCache = SettleTimeCache()
 
     /// Time a spring needs to travel 1000 units and come to rest, capped at 20 s.
