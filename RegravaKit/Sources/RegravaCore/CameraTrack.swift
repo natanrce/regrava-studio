@@ -42,8 +42,8 @@ public struct CameraFrame: Hashable, Sendable {
 
 /// Precomputed, deterministic camera and cursor animation for a whole project.
 ///
-/// Springs are stateful, so the track simulates the full timeline once and stores samples.
-/// Frames for any time (scrubbing, export) are then interpolated from those samples.
+/// Springs are stateful, so the track simulates the full timeline once, advancing them one
+/// project frame at a time. Frames for any time (scrubbing, export) are interpolated between them.
 public final class CameraTrack: @unchecked Sendable {
     public let layout: CanvasLayout
     public let durationMs: Double
@@ -53,11 +53,11 @@ public final class CameraTrack: @unchecked Sendable {
     private let samples: [CameraFrame]
     private let clicks: [MouseEvent]
 
-    public init(project: Project, sampleRateHz: Double = 120) {
+    public init(project: Project, sampleRateHz: Double? = nil) {
         let layout = CanvasLayout(style: project.style, videoSize: project.recording.videoSize)
         self.layout = layout
         durationMs = max(project.recording.durationMs, 0)
-        sampleIntervalMs = 1000 / sampleRateHz
+        sampleIntervalMs = 1000 / (sampleRateHz ?? Double(max(project.recording.fps, 1)))
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
         let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.removeShakeThreshold)

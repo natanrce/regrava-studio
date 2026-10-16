@@ -133,14 +133,56 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(s.velocity == 0)
     }
 
-    @Test func clampedSpringNeverOvershoots() {
+    @Test func clampedSpringBarelyOvershootsAndKeepsVelocityContinuous() {
         var s = SpringValue(0)
         var peak = 0.0
-        for _ in 0..<3000 {
-            s.advance(toward: 100, config: .screen, milliseconds: 1)
+        var velocityBeforeRest = 0.0
+        for _ in 0..<300 {
+            let before = s.velocity
+            s.advance(toward: 100, config: .screen, milliseconds: 1000.0 / 60)
+            peak = max(peak, s.value)
+            if s.velocity == 0 && before != 0 { velocityBeforeRest = abs(before) }
+        }
+        #expect(peak <= 100.5)
+        // The old "stop at the target" clamp zeroed hundreds of units/s in one frame; now the
+        // spring eases in and only snaps once it is practically still.
+        #expect(velocityBeforeRest < 1)
+        #expect(s.value == 100)
+    }
+
+    @Test func unclampedSpringOvershoots() {
+        var config = SpringConfig.screen
+        config.clampOvershoot = false
+        var s = SpringValue(0)
+        var peak = 0.0
+        for _ in 0..<300 {
+            s.advance(toward: 100, config: config, milliseconds: 1000.0 / 60)
             peak = max(peak, s.value)
         }
-        #expect(peak <= 100)
+        #expect(peak > 101)
+    }
+
+    @Test func clampRaisesDampingToCriticalOnlyWhenOvershooting() {
+        let critical = 2 * (1.5 * 125.0).squareRoot()
+        #expect(SpringMath.clampedDamping(stiffness: 125, mass: 1.5, damping: 12, value: 0, velocity: 5, target: 100) == 12)
+        #expect(SpringMath.clampedDamping(stiffness: 125, mass: 1.5, damping: 12, value: 99, velocity: 500, target: 100) == critical)
+        #expect(SpringMath.clampedDamping(stiffness: 125, mass: 1.5, damping: 12, value: 99, velocity: -500, target: 100) == 12)
+    }
+
+    @Test func precisionIsRelativeToTheMove() {
+        #expect(SpringMath.relativePrecision(from: 0, to: 1000, precision: 0.002) == 2)
+        #expect(SpringMath.relativePrecision(from: 0, to: 0.5, precision: 0.002) == 0.002)
+        var tiny = SpringValue(0)
+        for _ in 0..<600 { tiny.advance(toward: 0.5, config: .screen, milliseconds: 1000.0 / 60) }
+        #expect(tiny.value == 0.5)
+    }
+
+    @Test func longStepsSnapAfterSettleTime() {
+        let settle = SpringMath.settleTime(.screen)
+        #expect(settle > 500 && settle < 20_000)
+        var s = SpringValue(0)
+        s.advance(toward: 100, config: .screen, milliseconds: settle)
+        #expect(s.value == 100 && s.velocity == 0)
     }
 
     @Test func instantJumps() {
