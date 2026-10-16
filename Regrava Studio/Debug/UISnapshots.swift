@@ -66,6 +66,42 @@ enum UISnapshots {
             }
             window.orderOut(nil)
         }
+
+        renderEditor(to: directory)
+    }
+
+    /// The real editor window with a demo project (no video: the preview stays empty).
+    private static func renderEditor(to directory: URL) {
+        let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("Snapshot Demo.\(ProjectStore.fileExtension)")
+        try? FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        let clicks = [3000.0, 5200, 14000, 26000, 31000].map { MouseEvent(kind: .down, timeMs: $0, position: Vec2(800, 500)) }
+        var project = Project(
+            recording: RecordingInfo(videoSize: Size2(width: 3024, height: 1964), pointPixelScale: 2, durationMs: 42_000, fps: 60),
+            mouseEvents: [MouseEvent(kind: .move, timeMs: 0, position: Vec2(100, 100))] + clicks,
+            markersMs: [9000, 20000]
+        )
+        project.regenerateAutomaticZooms()
+        let controller = EditorWindowController(bundleURL: bundle, project: project)
+        guard let window = controller.window, let view = window.contentView else { return }
+        window.setFrame(NSRect(x: -10_000, y: -10_000, width: 1440, height: 860), display: true)
+        window.orderFrontRegardless()
+        let states: [(String, () -> Void)] = [
+            ("general", { controller.model.openSidebar(.background) }),
+            ("cursor", { controller.model.openSidebar(.cursor) }),
+            ("animations", { controller.model.openSidebar(.animation) }),
+            ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
+        ]
+        for (name, apply) in states {
+            apply()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("editor-\(name).png"))
+            }
+        }
+        controller.window?.delegate = nil
+        window.orderOut(nil)
+        try? FileManager.default.removeItem(at: bundle)
     }
 
     private static func write<V: View>(_ view: V, width: CGFloat, height: CGFloat?, to url: URL) {
