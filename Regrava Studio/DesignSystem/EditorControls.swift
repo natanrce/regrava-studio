@@ -50,6 +50,8 @@ struct RSSlider: View {
     var resetValue: Double?
     var suggestedValues: [Double] = []
     var inverted = false
+    /// `primary` (default) or `secondary` (#888) colours.
+    var isSecondary = false
     var onEditingChanged: (Bool) -> Void = { _ in }
 
     @State private var hovered = false
@@ -74,9 +76,11 @@ struct RSSlider: View {
                     let f = fraction(value)
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.white.opacity(0.1)).frame(height: hovered || dragging ? 5 : 3)
-                        Capsule().fill(Color.white.opacity(0.75)).frame(width: max(width * f, 0), height: hovered || dragging ? 5 : 3)
+                        // Range in primary, thumb in primary.activeText (kind primary).
+                        Capsule().fill(isSecondary ? Color(hex: 0x888888) : Theme.Colors.primary).frame(width: max(width * f, 0), height: hovered || dragging ? 5 : 3)
                         Circle()
-                            .fill(Color.white)
+                            // activeText of #888 is lightness −20 → #555.
+                            .fill(isSecondary ? Color(hex: 0x555555) : Theme.Colors.primaryActiveText)
                             .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
                             .frame(width: 20, height: 20)
                             .offset(x: (width - 20) * f)

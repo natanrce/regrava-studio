@@ -17,6 +17,8 @@ enum Theme {
         static let backgroundAccent = Color(hex: 0x13151B)
         static let systemBorder = Color.white.opacity(0x2E / 255)
         static let primary = Color(hex: 0x4D2FF5)
+        /// `primary.activeText`: lightness +20.
+        static let primaryActiveText = Color(hex: 0xA090FA)
         static let warning = Color(hex: 0xFF9800)
         static let danger = Color(hex: 0xFF453A)
         static let success = Color(hex: 0x057C31)

@@ -13,10 +13,11 @@ enum RSButtonKind {
         case .primary: return Theme.Colors.primary.opacity(pressed ? 0.85 : 1)
         case .secondary: return Color.white.opacity(0x05 / 255 + boost)
         case .secondaryInline: return Color.white.opacity(0.06 + boost)
-        case .subtle, .subtleBg: return Color.white.opacity(0.1 + boost)
+        case .subtle: return Theme.Colors.lighterBg.opacity(1).mix(with: .white, by: boost)
+        case .subtleBg: return Theme.Colors.primaryActiveText.opacity(0.2 + boost)
         case .transparent: return pressed ? Theme.Colors.active : hovered ? Theme.Colors.hover : .clear
         case .danger: return Theme.Colors.danger.opacity(pressed ? 0.85 : 1)
-        case .dangerSubtle: return Theme.Colors.danger.opacity(0.14 + boost)
+        case .dangerSubtle: return Theme.Colors.lighterBg.mix(with: .white, by: boost)
         case .success: return Theme.Colors.success.opacity(pressed ? 0.85 : 1)
         case .translucent: return Color.white.opacity(0.12 + boost)
         }
@@ -25,11 +26,13 @@ enum RSButtonKind {
     var foreground: Color {
         switch self {
         case .dangerSubtle: return Theme.Colors.danger
+        case .subtle, .subtleBg: return Theme.Colors.primaryActiveText
         default: return Theme.Colors.text
         }
     }
 
-    var hasBorder: Bool { self == .secondary }
+    /// Kinds drawn `withBorder`.
+    var hasBorder: Bool { self == .secondary || self == .subtle || self == .dangerSubtle }
 }
 
 enum RSButtonSize {
@@ -90,6 +93,8 @@ struct RSButton: View {
     var kind: RSButtonKind = .secondary
     var size: RSButtonSize = .regular
     var isWide = false
+    /// Shortcut glyphs shown after the title, e.g. "⌘↩".
+    var shortcut: String?
     var action: () -> Void
 
     var body: some View {
@@ -97,6 +102,7 @@ struct RSButton: View {
             HStack(spacing: Theme.gap(1)) {
                 if let icon { Image(systemName: icon).font(.system(size: size.iconSize)) }
                 Text(title).lineLimit(1)
+                if let shortcut { Text(shortcut).opacity(0.75) }
             }
         }
         .buttonStyle(RSButtonStyle(kind: kind, size: size, isWide: isWide))
