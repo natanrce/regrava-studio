@@ -6,6 +6,7 @@ import SwiftUI
 enum TrackColors {
     static let clip = Color(hex: 0x93610C)
     static let zoom = Theme.Colors.primary
+    static let mask = Color(hex: 0x82345A)
 }
 
 /// Timeline: ruler, clip track, zoom track, playheads; scroll/zoom/scrub.
@@ -33,6 +34,10 @@ struct EditorTimeline: View {
                     VStack(alignment: .leading, spacing: 12) {
                         ClipTrack(editor: editor, geometry: geo, hoverPlaybackMs: hoverX.map { time($0) })
                         ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                        // Masks track, only once a mask exists.
+                        if !editor.project.masks.isEmpty {
+                            MaskTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                        }
                     }
                 }
                 .padding(.top, 25 - 20)
@@ -73,7 +78,7 @@ struct EditorTimeline: View {
             .onChange(of: geometry.size.width) { _, newWidth in width = newWidth }
             .onDisappear { if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) } }
         }
-        .frame(height: 25 + 20 + 11.3 + 48 + 12 + 48 + 15)
+        .frame(height: 25 + 20 + 11.3 + 48 + 12 + 48 + 15 + (editor.project.masks.isEmpty ? 0 : 12 + 48))
     }
 
     /// Plain wheel pans (dominant axis), ⌘+wheel zooms ±15%, pinch zooms around the pointer.
@@ -832,4 +837,187 @@ private struct ZoomItem: View {
 /// Zoom levels for keys 1…9 (and 0 = default level).
 enum EditorShortcuts {
     static let zoomLevels: [Double] = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6]
+}
+
+// MARK: - Masks track
+
+private struct MaskTrack: View {
+    @ObservedObject var editor: EditorModel
+    var geometry: TimelineGeometry
+    var hoverTimeMs: Double?
+    @State private var hoveringTrack = false
+    @State private var focusTask: Task<Void, Never>?
+    @State private var ghostTimeMs: Double?
+    @State private var creation: (start: Double, end: Double)?
+
+    private var isFocused: Bool { editor.focusedTrack == "masks" }
+
+    var body: some View {
+        let height: CGFloat = isFocused ? 48 : 16
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(height: height)
+                .onContinuousHover { phase in
+                    if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.sourceTime(location.x) } else { ghostTimeMs = nil }
+                }
+                .gesture(createGesture)
+                .contextMenu {
+                    Button("Disable all masks") { editor.setAllMasks(disabled: true) }
+                        .disabled(!editor.project.masks.contains { !$0.isDisabled })
+                    Button("Remove all masks", role: .destructive) { editor.removeMasks(Set(editor.project.masks.map(\.id))) }
+                }
+            if isFocused, let range = creation ?? ghostRange {
+                let width = max(geometry.sx(range.end) - geometry.sx(range.start) - 1, 1)
+                TrackItemBody(color: TrackColors.mask, isPlayed: false, isActive: false, isSelected: false)
+                    .opacity(0.5)
+                    .overlay { if width > 20 { Image(systemName: "plus").foregroundStyle(.white) } }
+                    .frame(width: width, height: 48)
+                    .help("Click or drag to create a new mask")
+                    .offset(x: geometry.sx(range.start) + 1)
+                    .allowsHitTesting(false)
+            }
+            ForEach(editor.project.masks) { mask in
+                MaskItem(editor: editor, mask: mask, geometry: geometry, height: height, isFocused: isFocused, hoverTimeMs: hoverTimeMs)
+            }
+            if !isFocused {
+                Text("Mask")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                    .padding(.leading, 20)
+                    .padding(.trailing, 120)
+                    .frame(height: 16)
+                    .background(LinearGradient(colors: [Theme.Colors.background, Theme.Colors.background.opacity(0)], startPoint: .leading, endPoint: .trailing))
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: height)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isFocused)
+        .onHover { inside in
+            hoveringTrack = inside
+            focusTask?.cancel()
+            if inside && !isFocused {
+                focusTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 30_000_000)
+                    if !Task.isCancelled && hoveringTrack { editor.focusedTrack = "masks" }
+                }
+            }
+        }
+    }
+
+    private var ghostRange: (start: Double, end: Double)? {
+        guard let ghostTimeMs, ghostTimeMs >= 0, ghostTimeMs <= editor.project.recording.durationMs,
+              let gap = editor.freeMaskRange(around: ghostTimeMs) else { return nil }
+        let start = clamp(ghostTimeMs, gap.start, gap.end)
+        let end = min(start + MaskRange.initialDurationMs, gap.end)
+        return end - start >= MaskRange.minimumDurationMs ? (start, end) : nil
+    }
+
+    private var createGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard isFocused else { return }
+                let a = geometry.sourceTime(value.startLocation.x)
+                let b = geometry.sourceTime(value.location.x)
+                if abs(value.translation.width) > 3, let gap = editor.freeMaskRange(around: a) {
+                    creation = (clamp(min(a, b), gap.start, gap.end), clamp(max(a, b), gap.start, gap.end))
+                }
+            }
+            .onEnded { _ in
+                guard isFocused else {
+                    editor.focusedTrack = "masks"
+                    return
+                }
+                if let creation, creation.end - creation.start >= MaskRange.minimumDurationMs {
+                    editor.addMask(startMs: creation.start, endMs: creation.end)
+                } else if let range = ghostRange {
+                    editor.addMask(startMs: range.start, endMs: range.end)
+                }
+                creation = nil
+            }
+    }
+}
+
+private struct MaskItem: View {
+    @ObservedObject var editor: EditorModel
+    var mask: MaskRange
+    var geometry: TimelineGeometry
+    var height: CGFloat
+    var isFocused: Bool
+    var hoverTimeMs: Double?
+    @State private var hovered = false
+    @State private var dragOrigin: MaskRange?
+
+    private var isOpen: Bool { editor.openMaskID == mask.id }
+
+    var body: some View {
+        let width = max(geometry.sx(mask.endMs) - geometry.sx(mask.startMs) - 1, 1)
+        let handle = floor(min(16, width / 3))
+        let chip = mask.type == .sensitiveData ? "Sensitive data" : "Highlight \(Int((mask.highlightMaskOpacity * 100).rounded()))%"
+        TrackItemBody(color: TrackColors.mask, isPlayed: mask.contains(editor.currentSourceTimeMs), isActive: isOpen, isSelected: isOpen)
+            .overlay { if isFocused { TrackItemLabels(kind: "Mask", chips: [("rectangle.fill", chip)], width: width) } }
+            .overlay(alignment: .leading) { if handle >= 16 && isFocused { resizeHandle(leading: true, width: handle) } }
+            .overlay(alignment: .trailing) { if handle >= 16 && isFocused { resizeHandle(leading: false, width: handle) } }
+            .frame(width: width, height: height)
+            .opacity(mask.isDisabled ? 0.5 : editor.openMaskID != nil && !isOpen ? 0.3 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .onHover { hovered = $0 }
+            .gesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { value in
+                        guard !editor.isSplitToolActive else { return }
+                        let origin = dragOrigin ?? mask
+                        if dragOrigin == nil { dragOrigin = mask }
+                        editor.moveMask(mask.id, toStart: geometry.sourceTime(from: origin.startMs, movedBy: value.translation.width))
+                    }
+                    .onEnded { _ in dragOrigin = nil }
+            )
+            .simultaneousGesture(TapGesture().onEnded {
+                if editor.isSplitToolActive, let hoverTimeMs {
+                    editor.splitMask(mask.id, at: hoverTimeMs)
+                } else {
+                    editor.openMask(mask.id)
+                }
+            })
+            .contextMenu { menu }
+            .offset(x: geometry.sx(mask.startMs) + 1)
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button { editor.updateMask(mask.id) { $0.type = .highlight } } label: {
+            Label("Highlight", systemImage: "circle.rectangle.filled.pattern.diagonalline")
+        }
+        Button { editor.updateMask(mask.id) { $0.type = .sensitiveData } } label: {
+            Label("Sensitive data", systemImage: "circle.filled.pattern.diagonalline.rectangle")
+        }
+        Divider()
+        Button("Split mask at current time") { editor.splitMask(mask.id, at: editor.currentSourceTimeMs) }
+            .keyboardShortcut("c", modifiers: [])
+        Button(mask.isDisabled ? "Enable mask" : "Disable mask") { editor.updateMask(mask.id) { $0.isDisabled.toggle() } }
+            .keyboardShortcut("d", modifiers: [])
+        Divider()
+        Button("Remove mask", role: .destructive) { editor.removeMasks([mask.id]) }
+            .keyboardShortcut(.delete, modifiers: [])
+    }
+
+    private func resizeHandle(leading: Bool, width: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: width)
+            .overlay {
+                Capsule().fill(Color.white).frame(width: 3).padding(.vertical, 9).opacity(hovered ? 1 : 0)
+            }
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let origin = dragOrigin ?? mask
+                        if dragOrigin == nil { dragOrigin = mask }
+                        let edge = leading ? origin.startMs : origin.endMs
+                        editor.resizeMask(mask.id, leading: leading, to: geometry.sourceTime(from: edge, movedBy: value.translation.width))
+                    }
+                    .onEnded { _ in dragOrigin = nil }
+            )
+    }
 }
