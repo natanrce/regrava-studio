@@ -377,7 +377,8 @@ private struct PlaybackBar: View {
                             value: Binding(get: { editor.visibleDurationMs }, set: { editor.setVisibleDuration($0, anchorMs: editor.currentTimeMs) }),
                             range: editor.minVisibleDurationMs...editor.maxVisibleDurationMs,
                             step: 1,
-                            inverted: true
+                            inverted: true,
+                            isSecondary: true
                         )
                         .frame(minWidth: 72, maxWidth: 140)
                         .help(Self.zoomTooltip(editor.visibleDurationMs))
@@ -407,6 +408,8 @@ private struct TimeLabel: View {
         Text(Self.format(ms, duration: duration, omitFrames: omitFrames))
             .font(Theme.Typo.copy.monospacedDigit())
             .foregroundStyle(Theme.Colors.tertiary)
+            .lineLimit(1)
+            .fixedSize()
             .opacity(hovered ? 0.8 : 1)
             .frame(height: 38)
             .onHover { hovered = $0 }

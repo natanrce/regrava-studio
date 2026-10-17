@@ -248,7 +248,7 @@ struct TrackItemLabels: View {
     var width: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .center, spacing: 1) {
             if width - 32 > 30 {
                 Text(kind).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
             }
@@ -266,7 +266,7 @@ struct TrackItemLabels: View {
         }
         .lineLimit(1)
         .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .allowsHitTesting(false)
     }
 }
@@ -348,6 +348,7 @@ private struct SliceItem: View {
             isActive: isOpen,
             isSelected: isOpen
         )
+        .overlay { timeLines(start: start, width: width) }
         .overlay { TrackItemLabels(kind: "Clip", chips: chips, width: width) }
         .overlay(alignment: .leading) { if handle >= 16 { trimHandle(.start, width: handle) } }
         .overlay(alignment: .trailing) { if handle >= 16 { trimHandle(.end, width: handle) } }
@@ -364,6 +365,25 @@ private struct SliceItem: View {
         }
         .contextMenu { SliceMenu(editor: editor, slice: slice, index: index) }
         .offset(x: start + 1)
+    }
+
+    /// Vertical lines every `marksInterval` inside the clip, at 68/255 (slice-waveform `lines`).
+    private func timeLines(start: CGFloat, width: CGFloat) -> some View {
+        Canvas { context, size in
+            let interval = geometry.marksIntervalMs
+            let playbackStart = geometry.resolver.sourceToPlayback(slice.sourceStartMs)
+            let playbackEnd = geometry.resolver.sourceToPlayback(slice.sourceEndMs)
+            var t = (playbackStart / interval).rounded(.up) * interval
+            while t < playbackEnd {
+                let x = geometry.x(t) - start - 1
+                if x > 0 && x < size.width {
+                    context.fill(Path(CGRect(x: x, y: 0, width: 1, height: size.height)), with: .color(TrackColors.clip.mix(with: .white, by: 0.4).opacity(68.0 / 255)))
+                }
+                t += interval
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .allowsHitTesting(false)
     }
 
     /// Dragging an edge trims the clip; source time moves at the clip's speed.
@@ -513,7 +533,9 @@ private struct TypingSuggestionChip: View {
         }
         .buttonStyle(.plain)
         .help("Speed up typing")
-        .offset(x: start, y: -22)
+        // Laid out at the chip's position so the popover is anchored on it.
+        .alignmentGuide(.leading) { _ in -start }
+        .alignmentGuide(.top) { _ in 22 }
         .popover(isPresented: $isOpen, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: Theme.gap(2)) {
                 SliderField(
@@ -527,12 +549,12 @@ private struct TypingSuggestionChip: View {
                 )
                 VStack(spacing: Theme.gap(1)) {
                     HStack(spacing: Theme.gap(1)) {
-                        RSButton(title: "Apply all suggestions", kind: .subtle, isWide: true) {
+                        RSButton(title: "Apply all suggestions", kind: .subtle, isWide: true, shortcut: "⌘↩") {
                             editor.applyAllTypingSuggestions()
                             isOpen = false
                         }
                         .keyboardShortcut(.return, modifiers: .command)
-                        RSButton(title: "Apply suggestion", kind: .primary, isWide: true) {
+                        RSButton(title: "Apply suggestion", kind: .primary, isWide: true, shortcut: "↩") {
                             editor.applyTypingSuggestion(range)
                             isOpen = false
                         }
@@ -547,6 +569,8 @@ private struct TypingSuggestionChip: View {
             .padding(Theme.gap(2))
             .frame(maxWidth: 360)
             .environment(\.colorScheme, .dark)
+            // systemPopover: #1e1e1ecc.
+            .presentationBackground(Color(hex: 0x1E1E1E).opacity(0xCC / 255))
         }
     }
 }
