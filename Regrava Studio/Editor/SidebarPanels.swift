@@ -579,3 +579,73 @@ struct SliceInspector: View {
         }
     }
 }
+
+// MARK: - Mask inspector
+
+struct MaskInspector: View {
+    @ObservedObject var editor: EditorModel
+    var maskID: UUID
+
+    private var mask: MaskRange? { editor.project.masks.first { $0.id == maskID } }
+
+    var body: some View {
+        if let mask {
+            VStack(alignment: .leading, spacing: 0) {
+                if !mask.contains(editor.currentSourceTimeMs) {
+                    VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                        Text("Preview is showing different part of the recording than the one covered by the mask.")
+                            .font(Theme.Typo.label)
+                            .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                        RSButton(title: "Focus the timeline on the mask", kind: .secondary) { focus(mask, at: mask.startMs + mask.durationMs / 2) }
+                    }
+                    .padding(.bottom, Theme.gap(3))
+                }
+                SidebarSection {
+                    NamedField(name: "Mask type") {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            SegmentedPicker(
+                                options: MaskType.allCases,
+                                label: { $0 == .sensitiveData ? "Sensitive Data" : "Highlight" },
+                                isWide: true,
+                                selection: Binding(get: { mask.type }, set: { v in editor.updateMask(maskID) { $0.type = v } })
+                            )
+                            if mask.type == .sensitiveData {
+                                Callout(icon: "timeline.selection", message: "Make sure the mask covers the entire part of the timeline where sensitive data is present.")
+                                RSButton(title: "Focus the timeline on the mask start", kind: .secondary) { focus(mask, at: mask.startMs) }
+                                    .help("Start is source of the mask")
+                            } else {
+                                SliderField(
+                                    name: "Highlight mask opacity",
+                                    value: Binding(
+                                        get: { mask.highlightMaskOpacity },
+                                        set: { v in editor.updateMask(maskID, coalesce: "highlight-opacity") { $0.highlightMaskOpacity = v } }
+                                    ),
+                                    range: 0.1...0.9,
+                                    preview: { "\(Int(($0 * 100).rounded()))%" },
+                                    resetValue: 0.5
+                                )
+                                if editor.project.masks.count > 1 {
+                                    RSButton(title: "Apply to all masks", kind: .secondary) { editor.applyHighlightOpacityToAllMasks(from: maskID) }
+                                }
+                            }
+                        }
+                    }
+                }
+                SidebarSection {
+                    ToggleRow(
+                        title: "Disable",
+                        description: "When disabled, the mask will not be applied, but it will still be present in the timeline.",
+                        isOn: Binding(get: { mask.isDisabled }, set: { v in editor.updateMask(maskID) { $0.isDisabled = v } })
+                    )
+                }
+                SidebarSection(showsDivider: false) {
+                    RSButton(title: "Remove mask", icon: "trash", kind: .secondary) { editor.removeMasks([maskID]) }
+                }
+            }
+        }
+    }
+
+    private func focus(_ mask: MaskRange, at sourceMs: Double) {
+        editor.seek(to: editor.project.resolver.sourceToPlayback(sourceMs))
+    }
+}

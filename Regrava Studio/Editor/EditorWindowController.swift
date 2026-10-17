@@ -117,7 +117,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         case (123, [.command]): editor.seek(to: 0)
         case (124, [.command]): editor.seek(to: editor.durationMs)
         case (53, []): editor.closeCurrentSidebarPanel() // Esc
+        case (36, []), (76, []): // ↩ "Finish editing mask"
+            guard editor.openMaskID != nil else { return false }
+            editor.sidebarItem = nil
         case (51, []), (117, []): // Delete
+            if let mask = editor.openMaskID {
+                editor.removeMasks([mask])
+                return true
+            }
             if let slice = editor.openSliceID {
                 editor.removeSlice(slice)
                 return true
@@ -137,12 +144,18 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 guard let openZoom else { return false }
                 editor.duplicateZoom(openZoom)
             case ("d", []):
+                if let mask = editor.openMaskID {
+                    editor.updateMask(mask) { $0.isDisabled.toggle() }
+                    return true
+                }
                 guard let openZoom else { return false }
                 editor.updateZoom(openZoom) { $0.isDisabled.toggle() }
             case ("c", []):
                 // Zoom variant when a zoom is open or under the playhead, otherwise the clip.
                 let source = editor.currentSourceTimeMs
-                if let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id {
+                if let mask = editor.openMaskID {
+                    editor.splitMask(mask, at: source)
+                } else if let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id {
                     editor.splitZoom(target, at: source)
                 } else {
                     editor.splitSlice(atPlayback: editor.currentTimeMs)
