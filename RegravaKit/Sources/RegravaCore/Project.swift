@@ -103,6 +103,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
     public var fps: Int
     public var createdAt: Date
     public var cursors: [RecordedCursor]
+    /// Source of each audio track of the recording, in track order.
+    public var audioSources: [AudioSource]
 
     public init(
         videoFileName: String = "recording.mov",
@@ -111,7 +113,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         durationMs: Double,
         fps: Int,
         createdAt: Date = Date(),
-        cursors: [RecordedCursor] = []
+        cursors: [RecordedCursor] = [],
+        audioSources: [AudioSource] = []
     ) {
         self.videoFileName = videoFileName
         self.videoSize = videoSize
@@ -120,7 +123,11 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         self.fps = fps
         self.createdAt = createdAt
         self.cursors = cursors
+        self.audioSources = audioSources
     }
+
+    public var hasMicrophone: Bool { audioSources.contains(.microphone) }
+    public var hasSystemAudio: Bool { audioSources.contains(.systemAudio) }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -131,6 +138,7 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         fps = c.value(.fps, default: 60)
         createdAt = c.value(.createdAt, default: Date())
         cursors = c.value(.cursors, default: [])
+        audioSources = c.value(.audioSources, default: [])
     }
 }
 
@@ -151,6 +159,7 @@ public struct Project: Codable, Hashable, Sendable {
     public var slices: [Slice]
     /// Sensitive data and highlight masks (`scene.masks`).
     public var masks: [MaskRange] = []
+    public var audio = AudioConfig()
     /// Start times of "Speed up typing" suggestions that were applied or removed
     /// (`resolved-typing-speed-increase-suggestions-v2`).
     public var resolvedTypingSuggestionsMs: [Double] = []
@@ -196,6 +205,7 @@ public struct Project: Codable, Hashable, Sendable {
         slices = stored.isEmpty ? Self.defaultSlices(durationMs: recording.durationMs) : stored.sorted { $0.sourceStartMs < $1.sourceStartMs }
         resolvedTypingSuggestionsMs = c.value(.resolvedTypingSuggestionsMs, default: [])
         masks = c.value(.masks, default: [])
+        audio = c.value(.audio, default: AudioConfig())
     }
 
     /// Output canvas size in pixels (aspect ratio from `style`).

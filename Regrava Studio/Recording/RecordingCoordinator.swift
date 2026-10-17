@@ -438,7 +438,8 @@ final class RecordingCoordinator: ObservableObject {
                     pointPixelScale: result.pointPixelScale,
                     durationMs: result.durationMs,
                     fps: result.fps,
-                    cursors: cursors
+                    cursors: cursors,
+                    audioSources: result.audioSources
                 ),
                 mouseEvents: result.mouseEvents,
                 markersMs: result.markersMs,

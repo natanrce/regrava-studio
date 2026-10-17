@@ -32,6 +32,8 @@ public struct CaptureResult: Sendable {
     /// Images of non-standard cursors referenced by `MouseEvent.cursorID` ("custom-N").
     public var customCursors: [CapturedCursorImage]
     public var keystrokes: [Keystroke]
+    /// Source of each audio track, in track order.
+    public var audioSources: [AudioSource]
     public var markersMs: [Double]
     public var videoSize: Size2
     public var pointPixelScale: Double
@@ -82,6 +84,7 @@ public final class ScreenRecorder: NSObject {
     private var stream: SCStream?
     private var currentOutput: SCRecordingOutput?
     private let mouse = MouseTracker()
+    private var expectedAudioSources: [AudioSource] = []
     private let frameSink = FrameSink()
     private var segments: [Segment] = []
     private var markerUptimes: [TimeInterval] = []
@@ -115,6 +118,8 @@ public final class ScreenRecorder: NSObject {
             segments = []
             markerUptimes = []
             fps = options.fps
+            // ScreenCaptureKit writes system audio before the microphone (separate tracks).
+            expectedAudioSources = (options.capturesSystemAudio ? [AudioSource.systemAudio] : []) + (options.microphoneID != nil ? [.microphone] : [])
 
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             let (filter, configuration) = try makeFilter(source: source, options: options, content: content)
@@ -199,6 +204,8 @@ public final class ScreenRecorder: NSObject {
                 cursorID: sample.cursorID
             )
         }
+        let audioTrackCount = (try? await AVURLAsset(url: outputURL).loadTracks(withMediaType: .audio).count) ?? 0
+        let audioSources = Array(expectedAudioSources.prefix(audioTrackCount))
         return CaptureResult(
             videoURL: outputURL,
             mouseEvents: events.sorted { $0.timeMs < $1.timeMs },
@@ -206,6 +213,7 @@ public final class ScreenRecorder: NSObject {
             keystrokes: mouse.keySamples.compactMap { sample in
                 timelineMs(sample.uptime).map { Keystroke(kind: sample.kind, timeMs: $0) }
             }.sorted { $0.timeMs < $1.timeMs },
+            audioSources: audioSources,
             markersMs: markerUptimes.compactMap(timelineMs),
             videoSize: videoSize,
             pointPixelScale: pointPixelScale,
