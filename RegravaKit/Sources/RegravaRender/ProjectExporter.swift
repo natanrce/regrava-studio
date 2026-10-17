@@ -109,7 +109,8 @@ public enum ProjectExporter {
         to outputURL: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
-        let asset = try await PlaybackComposition.make(asset: AVURLAsset(url: videoURL), slices: project.slices)
+        let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: videoURL.deletingLastPathComponent()))
+        let asset = media.asset
         let duration = try await asset.load(.duration)
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
@@ -132,6 +133,7 @@ public enum ProjectExporter {
         if !audioTracks.isEmpty {
             let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [AVFormatIDKey: kAudioFormatLinearPCM])
             output.audioTimePitchAlgorithm = .spectral
+            output.audioMix = media.audioMix
             reader.add(output)
             audioOutput = output
         }

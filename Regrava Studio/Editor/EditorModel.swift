@@ -149,6 +149,10 @@ final class EditorModel: ObservableObject {
     private func apply(_ updated: Project) {
         let canvasChanged = updated.canvasSize != project.canvasSize
         let slicesChanged = updated.slices != project.slices
+        let backgroundChanged = updated.audio.backgroundAudioFileName != project.audio.backgroundAudioFileName
+            || updated.audio.muteBackgroundAudio != project.audio.muteBackgroundAudio
+            || (updated.audio.backgroundAudioVolume > 0) != (project.audio.backgroundAudioVolume > 0)
+        let audioChanged = updated.audio != project.audio
         project = updated
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
@@ -158,9 +162,10 @@ final class EditorModel: ObservableObject {
         selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
         isDirty = true
         scheduleAutosave()
-        if canvasChanged || slicesChanged {
-            Task { await rebuildComposition(replacingItem: slicesChanged) }
+        if canvasChanged || slicesChanged || backgroundChanged {
+            Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged) }
         } else {
+            if audioChanged { Task { await refreshAudioMix() } }
             scheduleRefresh()
         }
     }
@@ -180,7 +185,8 @@ final class EditorModel: ObservableObject {
         let snapshot = RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundleURL)
         renderState.replace(with: snapshot)
         do {
-            let asset = try await PlaybackComposition.make(asset: AVURLAsset(url: videoURL), slices: project.slices)
+            let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL))
+            let asset = media.asset
             let output = previewOutputSize
             let composition = try await CompositionFactory.make(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output)
             baseComposition = composition
@@ -188,16 +194,24 @@ final class EditorModel: ObservableObject {
             compositionOutput = output
             if let item = player.currentItem, !replacingItem {
                 item.videoComposition = composition
+                item.audioMix = media.audioMix
             } else {
                 let item = AVPlayerItem(asset: asset)
                 item.audioTimePitchAlgorithm = .spectral
                 item.videoComposition = composition
+                item.audioMix = media.audioMix
                 player.replaceCurrentItem(with: item)
             }
             if !isPlaying { seek(to: min(currentTimeMs, durationMs)) }
         } catch {
             errorMessage = "Could not load the recording: \(error.localizedDescription)"
         }
+    }
+
+    /// Volumes and mutes only change the mix of the current item.
+    private func refreshAudioMix() async {
+        guard let media = try? await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL)) else { return }
+        player.currentItem?.audioMix = media.audioMix
     }
 
     private func scheduleRefresh() {

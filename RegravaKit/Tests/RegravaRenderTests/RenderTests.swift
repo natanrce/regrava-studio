@@ -155,6 +155,36 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    @Test func backgroundAudioRepeatsUntilTheEnd() async throws {
+        try await withTestVideo { source, dir in
+            // 0.5 s tone as background audio in the project's assets folder.
+            let assets = ProjectStore.assetsURL(bundle: dir)
+            try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+            let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+            let file = try AVAudioFile(forWriting: assets.appendingPathComponent("music.caf"), settings: format.settings)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22_050)!
+            buffer.frameLength = 22_050
+            for i in 0..<22_050 { buffer.floatChannelData![0][i] = sin(Float(i) * 0.05) * 0.5 }
+            try file.write(from: buffer)
+
+            var project = sampleProject(duration: 2000)
+            project.audio.backgroundAudioFileName = "music.caf"
+            let media = try await PlaybackComposition.media(asset: AVURLAsset(url: source), project: project, assetsDirectory: assets)
+            let tracks = try await media.asset.loadTracks(withMediaType: .audio)
+            #expect(tracks.count == 1)
+            let range = try await tracks[0].load(.timeRange)
+            #expect(abs(range.duration.seconds - 2) < 0.05)
+            var volume: Float = 0
+            let parameters = try #require(media.audioMix?.inputParameters.first)
+            _ = parameters.getVolumeRamp(for: .zero, startVolume: &volume, endVolume: nil, timeRange: nil)
+            #expect(abs(volume - 0.05) < 0.001)
+
+            project.audio.muteBackgroundAudio = true
+            let muted = try await PlaybackComposition.media(asset: AVURLAsset(url: source), project: project, assetsDirectory: assets)
+            #expect(try await muted.asset.loadTracks(withMediaType: .audio).isEmpty)
+        }
+    }
+
     @Test func exportsBothCodecsAsTwoFiles() async throws {
         try await withTestVideo { source, dir in
             let output = dir.appendingPathComponent("export.mp4")

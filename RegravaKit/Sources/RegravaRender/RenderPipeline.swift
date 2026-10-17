@@ -73,15 +73,66 @@ public enum CompositionFactory {
     }
 }
 
+/// The recording rearranged into playback time, plus how its audio is mixed.
+public struct PlaybackMedia: @unchecked Sendable {
+    public let asset: AVAsset
+    public let audioMix: AVAudioMix?
+}
+
 /// The recording rearranged into playback time: each clip's source range, in order, scaled
 /// to its speed (gaps between clips are left out). Composition time is playback time.
 public enum PlaybackComposition {
     public static func make(asset: AVAsset, slices: [Slice]) async throws -> AVAsset {
+        try await composition(asset: asset, slices: slices, backgroundAudio: nil, playbackDurationMs: 0) ?? asset
+    }
+
+    /// The playable media for a project: each recorded source at its clip volumes unless
+    /// muted, and the background audio repeated until the end.
+    public static func media(asset: AVAsset, project: Project, assetsDirectory: URL?) async throws -> PlaybackMedia {
+        let audio = project.audio
+        var backgroundURL: URL?
+        if let name = audio.backgroundAudioFileName, !audio.muteBackgroundAudio, audio.backgroundAudioVolume > 0, let assetsDirectory {
+            let url = assetsDirectory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { backgroundURL = url }
+        }
+        let resolver = project.resolver
+        let playable = try await composition(
+            asset: asset, slices: project.slices, backgroundAudio: backgroundURL, playbackDurationMs: resolver.playbackDurationMs
+        ) ?? asset
+        let tracks = try await playable.loadTracks(withMediaType: .audio)
+        guard !tracks.isEmpty else { return PlaybackMedia(asset: playable, audioMix: nil) }
+        let sources = project.recording.audioSources
+        var parameters: [AVAudioMixInputParameters] = []
+        for (index, track) in tracks.enumerated() {
+            let input = AVMutableAudioMixInputParameters(track: track)
+            if backgroundURL != nil && index == tracks.count - 1 && playable !== asset {
+                input.setVolume(Float(audio.backgroundAudioVolume * audio.volume), at: .zero)
+            } else if index < sources.count {
+                let source = sources[index]
+                if audio.isMuted(source) {
+                    input.setVolume(0, at: .zero)
+                } else {
+                    for (slice, link) in zip(project.slices, resolver.links) {
+                        let at = CMTime(seconds: link.playbackStartMs / 1000, preferredTimescale: 600)
+                        input.setVolume(Float(slice.volume(for: source) * audio.volume), at: at)
+                    }
+                }
+            } else {
+                input.setVolume(Float(audio.volume), at: .zero)
+            }
+            parameters.append(input)
+        }
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = parameters
+        return PlaybackMedia(asset: playable, audioMix: mix)
+    }
+
+    /// nil when the file can be played as it is.
+    private static func composition(asset: AVAsset, slices: [Slice], backgroundAudio: URL?, playbackDurationMs: Double) async throws -> AVAsset? {
         let duration = try await asset.load(.duration)
         let durationMs = duration.seconds * 1000
-        // One untouched clip: play the file directly.
-        if slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
-            return asset
+        if backgroundAudio == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
+            return nil
         }
         let composition = AVMutableComposition()
         for type in [AVMediaType.video, .audio] {
@@ -100,6 +151,21 @@ public enum PlaybackComposition {
                         target.scaleTimeRange(CMTimeRange(start: cursor, duration: range.duration), toDuration: scaled)
                     }
                     cursor = cursor + scaled
+                }
+            }
+        }
+        // Background audio, repeated until the end (`repeatUntilMs`).
+        if let backgroundAudio {
+            let music = AVURLAsset(url: backgroundAudio)
+            if let source = try await music.loadTracks(withMediaType: .audio).first,
+               let target = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                let length = try await music.load(.duration)
+                let end = CMTime(seconds: playbackDurationMs / 1000, preferredTimescale: 600)
+                var cursor = CMTime.zero
+                while length.seconds > 0.01 && cursor < end {
+                    let piece = CMTimeMinimum(length, end - cursor)
+                    try target.insertTimeRange(CMTimeRange(start: .zero, duration: piece), of: source, at: cursor)
+                    cursor = cursor + piece
                 }
             }
         }
