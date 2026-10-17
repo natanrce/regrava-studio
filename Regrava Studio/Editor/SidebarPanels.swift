@@ -536,8 +536,31 @@ struct SliceInspector: View {
     var body: some View {
         if let slice {
             VStack(alignment: .leading, spacing: 0) {
-                // Per-source volume sliders need the recording's audio sources, which are not
-                // tracked separately yet.
+                let recording = editor.project.recording
+                if recording.hasMicrophone || recording.hasSystemAudio {
+                    SidebarSection {
+                        if recording.hasMicrophone {
+                            SliderField(
+                                name: "Microphone volume",
+                                icon: "microphone",
+                                value: Binding(get: { slice.volume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-mic-volume") { $0.volume = v } }),
+                                range: 0...1,
+                                step: 0.01,
+                                preview: { "\(Int(($0 * 100).rounded()))%" }
+                            )
+                        }
+                        if recording.hasSystemAudio {
+                            SliderField(
+                                name: "System audio volume",
+                                icon: "hifispeaker",
+                                value: Binding(get: { slice.systemAudioVolume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-system-volume") { $0.systemAudioVolume = v } }),
+                                range: 0...1,
+                                step: 0.01,
+                                preview: { "\(Int(($0 * 100).rounded()))%" }
+                            )
+                        }
+                    }
+                }
                 SidebarSection {
                     NamedField(name: "Speed") {
                         VStack(alignment: .leading, spacing: Theme.gap(1)) {
@@ -647,5 +670,137 @@ struct MaskInspector: View {
 
     private func focus(_ mask: MaskRange, at sourceMs: Double) {
         editor.seek(to: editor.project.resolver.sourceToPlayback(sourceMs))
+    }
+}
+
+// MARK: - Audio
+
+struct AudioPanel: View {
+    @ObservedObject var editor: EditorModel
+    @StateObject private var preview = BackgroundAudioPreview()
+    @State private var category: BackgroundAudioCategory = .userLibrary
+    @State private var libraryTracks: [URL] = []
+
+    private var audio: AudioConfig { editor.project.audio }
+    private var recording: RecordingInfo { editor.project.recording }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if recording.hasMicrophone {
+                SidebarSection {
+                    NamedField(name: "Microphone") {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            ToggleRow(title: "Mute microphone", isOn: editor.binding(\.audio.muteMicrophone))
+                            // "Microphone audio mode" shows only when processing presets are supported.
+                            if audio.muteMicrophone {
+                                Callout(icon: "speaker.slash.fill", message: "Microphone is muted.")
+                            }
+                        }
+                    }
+                }
+            }
+            if recording.hasSystemAudio {
+                SidebarSection {
+                    NamedField(name: "System audio") {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            ToggleRow(title: "Mute system audio", isOn: editor.binding(\.audio.muteSystemAudio))
+                            if audio.muteSystemAudio {
+                                Callout(icon: "speaker.slash.fill", message: "System audio is muted.")
+                            }
+                        }
+                    }
+                }
+            }
+            SidebarSection(showsDivider: false) {
+                NamedField(name: "Background audio") {
+                    VStack(alignment: .leading, spacing: Theme.gap(2)) {
+                        SegmentedPicker(
+                            options: BackgroundAudioCategory.allCases,
+                            label: { $0.title },
+                            // Built-in tracks are not available here.
+                            isDisabled: { $0 != .userLibrary },
+                            size: .small,
+                            selection: $category
+                        )
+                        if !libraryTracks.isEmpty {
+                            SegmentedPicker(
+                                options: libraryTracks,
+                                label: { BackgroundAudioLibrary.displayName($0.lastPathComponent) },
+                                size: .small,
+                                selection: Binding(
+                                    get: { libraryTracks.first { BackgroundAudioLibrary.displayName($0.lastPathComponent) == BackgroundAudioLibrary.displayName(audio.backgroundAudioFileName ?? "") } ?? URL(fileURLWithPath: "/") },
+                                    set: { pick($0) }
+                                )
+                            )
+                            RSButton(title: "Open audio library folder", icon: "folder", kind: .secondary) { BackgroundAudioLibrary.reveal() }
+                        } else {
+                            Callout(kind: .secondary, icon: nil, message: "Add background audio tracks to your library folder to access them here")
+                            RSButton(title: "Open audio library folder", icon: "folder", kind: .secondary) { BackgroundAudioLibrary.reveal() }
+                        }
+                        Rectangle().fill(Theme.Colors.lighterBg).frame(height: 1).padding(.vertical, 4)
+                        if let name = audio.backgroundAudioFileName {
+                            RSButton(
+                                title: (preview.isPlaying ? "Stop " : "Play ") + BackgroundAudioLibrary.displayName(name, maxLength: 20),
+                                icon: preview.isPlaying ? "stop.circle" : "play.circle",
+                                kind: .subtle
+                            ) { preview.toggle(url: assetURL(name), volume: audio.backgroundAudioVolume) }
+                            ToggleRow(title: "Mute background audio", isOn: editor.binding(\.audio.muteBackgroundAudio))
+                            if !audio.muteBackgroundAudio {
+                                SliderField(
+                                    name: "Background audio volume",
+                                    icon: "hifispeaker",
+                                    value: Binding(
+                                        get: { audio.backgroundAudioVolume },
+                                        set: { v in
+                                            editor.change(coalesce: "background-volume") { $0.audio.backgroundAudioVolume = (v * 100).rounded() / 100 }
+                                            preview.setVolume(v)
+                                        }
+                                    ),
+                                    range: 0...1,
+                                    step: 0.01,
+                                    preview: { "\(Int(($0 * 100).rounded()))%" },
+                                    resetValue: AudioConfig().backgroundAudioVolume
+                                )
+                            }
+                            RSButton(title: "Remove background audio", icon: "hifispeaker.badge.minus", kind: .secondary) { remove(name) }
+                        } else {
+                            RSButton(title: "Add background audio", icon: "hifispeaker.badge.plus", kind: .subtle) { addFromFile() }
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear { libraryTracks = BackgroundAudioLibrary.tracks() }
+        .onDisappear { preview.stop() }
+    }
+
+    private func assetURL(_ name: String) -> URL {
+        ProjectStore.assetsURL(bundle: editor.bundleURL).appendingPathComponent(name)
+    }
+
+    /// Copies a track into the project and plays it (`playOnChange`).
+    private func use(_ source: URL) {
+        guard let name = BackgroundAudioLibrary.copy(source, intoProject: editor.bundleURL) else { return }
+        editor.change { $0.audio.backgroundAudioFileName = name }
+        preview.play(url: assetURL(name), volume: audio.backgroundAudioVolume)
+    }
+
+    private func pick(_ track: URL) {
+        guard track.path != "/" else { return }
+        use(track)
+    }
+
+    private func addFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.mp3, .mpeg4Audio]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        use(url)
+    }
+
+    private func remove(_ name: String) {
+        preview.stop()
+        try? FileManager.default.removeItem(at: assetURL(name))
+        editor.change { $0.audio.backgroundAudioFileName = nil }
     }
 }

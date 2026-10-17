@@ -40,7 +40,7 @@ extension EditorModel {
             SidebarRailEntry(root: .cameraStyle, name: "Camera Style", icon: "person.fill.viewfinder", key: "4", disabledTooltip: "No camera recorded"),
             SidebarRailEntry(root: .captions, name: "Captions", icon: "captions.bubble", key: "5", disabledTooltip: notYet),
             SidebarRailEntry(root: .transcript, name: "Edit by transcript", icon: "text.quote", key: "6", disabledTooltip: notYet),
-            SidebarRailEntry(root: .audio, name: "Audio", icon: "speaker.wave.1", key: "7", disabledTooltip: notYet),
+            SidebarRailEntry(root: .audio, name: "Audio", icon: "speaker.wave.1", key: "7"),
             SidebarRailEntry(root: .shortcuts, name: "Keyboard Shortcuts", icon: "command", key: "8", disabledTooltip: "No keyboard shortcuts during recording"),
             SidebarRailEntry(root: .animation, name: "Animations", icon: "point.topleft.down.to.point.bottomright.curvepath.fill", key: "9"),
         ]
@@ -120,6 +120,7 @@ struct SidebarPanel: View {
                     switch editor.sidebarRoot {
                     case .cursor: CursorPanel(editor: editor)
                     case .animation: AnimationsPanel(editor: editor)
+                    case .audio: AudioPanel(editor: editor)
                     default: GeneralPanel(editor: editor)
                     }
                 }
