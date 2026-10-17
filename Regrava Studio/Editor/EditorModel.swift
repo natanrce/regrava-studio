@@ -14,6 +14,7 @@ enum SidebarRoot: String, CaseIterable {
 enum SidebarItem: Equatable {
     case zoom(UUID)
     case slice(UUID)
+    case mask(UUID)
 }
 
 /// `view.layoutType`.
@@ -50,6 +51,9 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomIDs: Set<UUID> = []
     /// Zoom add tool armed from the add-tools rail.
     @Published var isAddZoomToolArmed = false
+    /// Mask add tool (`activeAddTool = "mask"`, `addMaskType`).
+    @Published var isAddMaskToolArmed = false
+    @Published var addMaskType: MaskType = .sensitiveData
     @Published var isSplitToolActive = false
     /// Visible timeline duration (zoom level of the timeline).
     @Published var visibleDurationMs: Double = 30_000
@@ -150,6 +154,7 @@ final class EditorModel: ObservableObject {
         canRedo = !redoStack.isEmpty
         if case .zoom(let id) = sidebarItem, !project.zooms.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .slice(let id) = sidebarItem, !project.slices.contains(where: { $0.id == id }) { sidebarItem = nil }
+        if case .mask(let id) = sidebarItem, !project.masks.contains(where: { $0.id == id }) { sidebarItem = nil }
         selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
         isDirty = true
         scheduleAutosave()
@@ -327,7 +332,9 @@ final class EditorModel: ObservableObject {
 
     /// Escape: close the item inspector, else go back to General.
     func closeCurrentSidebarPanel() {
-        if isAddZoomToolArmed {
+        if isAddMaskToolArmed {
+            isAddMaskToolArmed = false
+        } else if isAddZoomToolArmed {
             isAddZoomToolArmed = false
         } else if isSplitToolActive {
             isSplitToolActive = false
@@ -358,6 +365,147 @@ final class EditorModel: ObservableObject {
     func openSlice(_ id: UUID) {
         sidebarItem = .slice(id)
         selectedZoomIDs = []
+    }
+
+    var openMaskID: UUID? {
+        if case .mask(let id) = sidebarItem { return id }
+        return nil
+    }
+
+    func openMask(_ id: UUID) {
+        sidebarItem = .mask(id)
+        selectedZoomIDs = []
+        focusedTrack = "masks"
+    }
+
+    /// Where the recording is drawn on the canvas right now (canvas pixels), for overlays.
+    var recordingAreaRect: Rect2 {
+        renderState.current.track.frame(at: currentTimeMs).screenRect
+    }
+
+    // MARK: Masks
+
+    /// Arms the mask tool, or opens the mask under the playhead.
+    func armMaskTool(_ type: MaskType) {
+        if let mask = project.masks.first(where: { $0.contains(currentSourceTimeMs) }) {
+            openMask(mask.id)
+            return
+        }
+        if isAddMaskToolArmed && addMaskType == type {
+            isAddMaskToolArmed = false
+            return
+        }
+        addMaskType = type
+        isAddMaskToolArmed = true
+        isAddZoomToolArmed = false
+        pause()
+        sidebarItem = nil
+    }
+
+    /// Adds a mask at the playhead: 3 s within the free space, opened and centred.
+    func addMask(type: MaskType, bounds: Rect2?) {
+        isAddMaskToolArmed = false
+        let start = currentSourceTimeMs
+        if let existing = project.masks.first(where: { $0.contains(start) }) {
+            openMask(existing.id)
+            return
+        }
+        let next = project.sortedMasks.first { $0.startMs > start }?.startMs ?? project.recording.durationMs
+        let end = min(start + MaskRange.initialDurationMs, next)
+        guard end - start >= MaskRange.minimumDurationMs else {
+            toast = "Not enough space in selected timeline position to add a new mask"
+            return
+        }
+        let mask = MaskRange(startMs: start, endMs: end, bounds: bounds.map { [$0] } ?? project.defaultMaskBounds, type: type)
+        change { $0.masks.append(mask) }
+        openMask(mask.id)
+        if !isPlaying { seek(to: project.resolver.sourceToPlayback(start + (end - start) / 2)) }
+    }
+
+    /// Mask created from the track (click or drag on the empty area).
+    func addMask(startMs: Double, endMs: Double) {
+        let mask = MaskRange(startMs: startMs, endMs: endMs, bounds: project.defaultMaskBounds)
+        change { $0.masks.append(mask) }
+        openMask(mask.id)
+        if !isPlaying { seek(to: project.resolver.sourceToPlayback(startMs + (endMs - startMs) / 2)) }
+    }
+
+    func updateMask(_ id: UUID, coalesce: String? = nil, _ body: (inout MaskRange) -> Void) {
+        change(coalesce: coalesce) { project in
+            guard let index = project.masks.firstIndex(where: { $0.id == id }) else { return }
+            body(&project.masks[index])
+        }
+    }
+
+    func freeMaskRange(around timeMs: Double, excluding id: UUID? = nil) -> (start: Double, end: Double)? {
+        let others = project.sortedMasks.filter { $0.id != id }
+        if others.contains(where: { $0.contains(timeMs) && $0.endMs > timeMs }) { return nil }
+        let start = others.last(where: { $0.endMs <= timeMs })?.endMs ?? 0
+        let end = others.first(where: { $0.startMs >= timeMs })?.startMs ?? project.recording.durationMs
+        return (start, end)
+    }
+
+    func moveMask(_ id: UUID, toStart start: Double) {
+        guard let mask = project.masks.first(where: { $0.id == id }) else { return }
+        let others = project.sortedMasks.filter { $0.id != id }
+        let lower = others.last(where: { $0.endMs <= mask.startMs + 0.5 })?.endMs ?? 0
+        let upper = others.first(where: { $0.startMs >= mask.endMs - 0.5 })?.startMs ?? project.recording.durationMs
+        let newStart = clamp(start, lower, upper - mask.durationMs)
+        updateMask(id, coalesce: "drag-\(id)") {
+            $0.startMs = newStart
+            $0.endMs = newStart + mask.durationMs
+        }
+    }
+
+    func resizeMask(_ id: UUID, leading: Bool, to time: Double) {
+        guard let mask = project.masks.first(where: { $0.id == id }) else { return }
+        let others = project.sortedMasks.filter { $0.id != id }
+        let minimum = MaskRange.minimumDurationMs
+        updateMask(id, coalesce: "resize-\(id)") {
+            if leading {
+                let lower = others.last(where: { $0.endMs <= mask.startMs + 0.5 })?.endMs ?? 0
+                $0.startMs = clamp(time, lower, mask.endMs - minimum)
+            } else {
+                let upper = others.first(where: { $0.startMs >= mask.endMs - 0.5 })?.startMs ?? project.recording.durationMs
+                $0.endMs = clamp(time, mask.startMs + minimum, upper)
+            }
+        }
+    }
+
+    func splitMask(_ id: UUID, at timeMs: Double) {
+        guard let mask = project.masks.first(where: { $0.id == id }) else { return }
+        let minimum = MaskRange.minimumDurationMs
+        guard timeMs - mask.startMs >= minimum, mask.endMs - timeMs >= minimum else {
+            NSSound.beep()
+            return
+        }
+        var second = mask
+        second.id = UUID()
+        second.startMs = timeMs
+        change { project in
+            guard let index = project.masks.firstIndex(where: { $0.id == id }) else { return }
+            project.masks[index].endMs = timeMs
+            project.masks.append(second)
+        }
+    }
+
+    func removeMasks(_ ids: Set<UUID>) {
+        change { $0.masks.removeAll { ids.contains($0.id) } }
+    }
+
+    func setAllMasks(disabled: Bool) {
+        change { project in
+            for index in project.masks.indices { project.masks[index].isDisabled = disabled }
+        }
+    }
+
+    /// "Apply to all masks" for the highlight opacity.
+    func applyHighlightOpacityToAllMasks(from id: UUID) {
+        guard let opacity = project.masks.first(where: { $0.id == id })?.highlightMaskOpacity else { return }
+        change { project in
+            for index in project.masks.indices { project.masks[index].highlightMaskOpacity = opacity }
+        }
+        toast = "Highlight mask opacity applied to all masks"
     }
 
     /// Recording time at the playhead.

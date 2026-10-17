@@ -178,6 +178,16 @@ private struct AddToolsRail: View {
                     .disabled(true)
                     .opacity(Theme.disabledOpacity)
             }
+            // Mask group.
+            VStack(spacing: Theme.gap(0)) {
+                ForEach([MaskType.sensitiveData, .highlight], id: \.self) { type in
+                    RSIconButton(
+                        icon: type == .sensitiveData ? "circle.filled.pattern.diagonalline.rectangle" : "circle.rectangle.filled.pattern.diagonalline",
+                        kind: editor.isAddMaskToolArmed && editor.addMaskType == type ? .subtleBg : .transparent,
+                        tooltip: type == .sensitiveData ? "Sensitive data mask" : "Highlight mask"
+                    ) { editor.armMaskTool(type) }
+                }
+            }
         }
         .padding(6)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -222,6 +232,7 @@ private struct PreviewSpace: View {
                             .allowsHitTesting(false)
                     }
                 }
+                .overlay { MaskOverlays(editor: editor, scale: scale) }
                 .frame(width: size.width, height: size.height)
                 .clipShape(RoundedRectangle(cornerRadius: 2))
                 .contextMenu {
@@ -455,5 +466,206 @@ private struct SpeedButton: View {
         } label: {
             if editor.playbackRate == rate { Label(String(format: "%g×", rate), systemImage: "checkmark") } else { Text(String(format: "%g×", rate)) }
         }
+    }
+}
+
+// MARK: - Mask overlays
+
+private struct MaskOverlays: View {
+    @ObservedObject var editor: EditorModel
+    var scale: CGFloat
+    @State private var drawing: CGRect?
+
+    var body: some View {
+        if !editor.isPlaying {
+            let area = editor.recordingAreaRect
+            let areaRect = CGRect(x: area.x * scale, y: area.y * scale, width: area.width * scale, height: area.height * scale)
+            ZStack(alignment: .topLeading) {
+                if editor.isAddMaskToolArmed {
+                    drawTool(areaRect)
+                } else if let id = editor.openMaskID, let mask = editor.project.masks.first(where: { $0.id == id }), let bound = mask.firstBound {
+                    // Clicking outside the rectangle finishes editing.
+                    Color.white.opacity(0.001).onTapGesture { editor.sidebarItem = nil }
+                    MaskRectEditor(
+                        rect: rect(bound, in: areaRect),
+                        area: areaRect,
+                        onChange: { newRect in
+                            editor.updateMask(id, coalesce: "mask-bounds-\(id)") { mask in
+                                mask.bounds = [recording(newRect, mask.bounds.first ?? bound, area: areaRect)]
+                            }
+                        }
+                    )
+                } else if let mask = visibleMask, let bound = mask.firstBound {
+                    // A shown mask can be clicked to edit it.
+                    let r = rect(bound, in: areaRect)
+                    Color.white.opacity(0.001)
+                        .frame(width: r.width, height: r.height)
+                        .offset(x: r.minX, y: r.minY)
+                        .onTapGesture {
+                            let t = editor.currentSourceTimeMs
+                            if t < mask.startMs { editor.seek(to: editor.project.resolver.sourceToPlayback(mask.startMs)) }
+                            if t > mask.endMs { editor.seek(to: editor.project.resolver.sourceToPlayback(mask.endMs)) }
+                            editor.openMask(mask.id)
+                        }
+                }
+            }
+        }
+    }
+
+    private var visibleMask: MaskRange? {
+        let t = editor.currentSourceTimeMs
+        let masks = editor.project.sortedMasks
+        if let here = masks.first(where: { $0.contains(t) }) { return here.canShow ? here : nil }
+        return masks.first { $0.isWithinShowWindow(t) }
+    }
+
+    private func rect(_ bound: Rect2, in area: CGRect) -> CGRect {
+        let size = editor.project.recording.videoSize
+        return CGRect(
+            x: area.minX + bound.x / size.width * area.width,
+            y: area.minY + bound.y / size.height * area.height,
+            width: bound.width / size.width * area.width,
+            height: bound.height / size.height * area.height
+        )
+    }
+
+    private func recording(_ rect: CGRect, _ fallback: Rect2, area: CGRect) -> Rect2 {
+        guard area.width > 0, area.height > 0 else { return fallback }
+        let size = editor.project.recording.videoSize
+        return Rect2(
+            x: (rect.minX - area.minX) / area.width * size.width,
+            y: (rect.minY - area.minY) / area.height * size.height,
+            width: rect.width / area.width * size.width,
+            height: rect.height / area.height * size.height
+        )
+    }
+
+    /// "Drag on the canvas to draw the mask"; a click places a 350×80 mask.
+    private func drawTool(_ area: CGRect) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.white.opacity(0.001)
+                .frame(width: area.width, height: area.height)
+                .offset(x: area.minX, y: area.minY)
+                .onContinuousHover { phase in if case .active = phase { NSCursor.crosshair.set() } }
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .named("mask-surface"))
+                        .onChanged { value in
+                            let a = clampPoint(value.startLocation, area), b = clampPoint(value.location, area)
+                            drawing = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+                        }
+                        .onEnded { value in
+                            let drawn = drawing
+                            drawing = nil
+                            let size = editor.project.recording.videoSize
+                            if let drawn, drawn.width >= 6, drawn.height >= 6 {
+                                editor.addMask(type: editor.addMaskType, bounds: recording(drawn, Rect2(x: 0, y: 0, width: size.width, height: size.height), area: area))
+                            } else if abs(value.translation.width) < 3 && abs(value.translation.height) < 3 {
+                                let p = clampPoint(value.location, area)
+                                let point01 = Vec2((p.x - area.minX) / max(area.width, 1), (p.y - area.minY) / max(area.height, 1))
+                                editor.addMask(type: editor.addMaskType, bounds: editor.project.clickedMaskBounds(at: point01))
+                            }
+                        }
+                )
+            if let drawing {
+                Rectangle()
+                    .fill(Theme.Colors.primary.opacity(0.1))
+                    .overlay(Rectangle().strokeBorder(Theme.Colors.primary.opacity(0.9), lineWidth: 1.5))
+                    .frame(width: drawing.width, height: drawing.height)
+                    .offset(x: drawing.minX, y: drawing.minY)
+                    .allowsHitTesting(false)
+            }
+            Text("Drag on the canvas to draw the mask")
+                .font(Theme.Typo.label.weight(.medium))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Theme.Colors.background.opacity(0.8)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 12)
+                .allowsHitTesting(false)
+        }
+        .coordinateSpace(name: "mask-surface")
+    }
+
+    private func clampPoint(_ p: CGPoint, _ area: CGRect) -> CGPoint {
+        CGPoint(x: clamp(p.x, area.minX, area.maxX), y: clamp(p.y, area.minY, area.maxY))
+    }
+}
+
+/// Rectangle editor over the recording (the crop-area control): move by dragging inside,
+/// resize by the corner and edge handles, centre lines at 50%.
+private struct MaskRectEditor: View {
+    var rect: CGRect
+    var area: CGRect
+    var onChange: (CGRect) -> Void
+    @State private var origin: CGRect?
+
+    private enum Handle: CaseIterable { case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .overlay(Rectangle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5))
+                .overlay {
+                    ZStack {
+                        Rectangle().fill(Color.white.opacity(0.35)).frame(width: 1)
+                        Rectangle().fill(Color.white.opacity(0.35)).frame(height: 1)
+                    }
+                    .allowsHitTesting(false)
+                }
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
+                .gesture(drag { start, t in
+                    var moved = start.offsetBy(dx: t.width, dy: t.height)
+                    moved.origin.x = clamp(moved.minX, area.minX, area.maxX - moved.width)
+                    moved.origin.y = clamp(moved.minY, area.minY, area.maxY - moved.height)
+                    return moved
+                })
+            ForEach(Handle.allCases, id: \.self) { handle in
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 10, height: 10)
+                    .offset(x: point(handle).x - 5, y: point(handle).y - 5)
+                    .gesture(drag { start, t in resize(start, handle, t) })
+            }
+        }
+    }
+
+    private func point(_ handle: Handle) -> CGPoint {
+        switch handle {
+        case .topLeft: return CGPoint(x: rect.minX, y: rect.minY)
+        case .top: return CGPoint(x: rect.midX, y: rect.minY)
+        case .topRight: return CGPoint(x: rect.maxX, y: rect.minY)
+        case .right: return CGPoint(x: rect.maxX, y: rect.midY)
+        case .bottomRight: return CGPoint(x: rect.maxX, y: rect.maxY)
+        case .bottom: return CGPoint(x: rect.midX, y: rect.maxY)
+        case .bottomLeft: return CGPoint(x: rect.minX, y: rect.maxY)
+        case .left: return CGPoint(x: rect.minX, y: rect.midY)
+        }
+    }
+
+    private func resize(_ start: CGRect, _ handle: Handle, _ t: CGSize) -> CGRect {
+        var minX = start.minX, minY = start.minY, maxX = start.maxX, maxY = start.maxY
+        switch handle {
+        case .topLeft, .left, .bottomLeft: minX = clamp(minX + t.width, area.minX, maxX - 6)
+        case .topRight, .right, .bottomRight: maxX = clamp(maxX + t.width, minX + 6, area.maxX)
+        default: break
+        }
+        switch handle {
+        case .topLeft, .top, .topRight: minY = clamp(minY + t.height, area.minY, maxY - 6)
+        case .bottomLeft, .bottom, .bottomRight: maxY = clamp(maxY + t.height, minY + 6, area.maxY)
+        default: break
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private func drag(_ transform: @escaping (CGRect, CGSize) -> CGRect) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                let start = origin ?? rect
+                if origin == nil { origin = rect }
+                onChange(transform(start, value.translation))
+            }
+            .onEnded { _ in origin = nil }
     }
 }
