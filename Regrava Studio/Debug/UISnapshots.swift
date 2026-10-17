@@ -91,6 +91,10 @@ enum UISnapshots {
         project.splitSlice(at: 36_000)
         project.slices[1].timeScale = 0.5
         project.updateSlice(project.slices[2].id, sourceStartMs: 38_000)
+        project.masks = [
+            MaskRange(startMs: 6000, endMs: 9000, bounds: [Rect2(x: 1100, y: 800, width: 700, height: 160)]),
+            MaskRange(startMs: 21_000, endMs: 25_000, bounds: [Rect2(x: 400, y: 300, width: 900, height: 500)], type: .highlight),
+        ]
         let controller = EditorWindowController(bundleURL: bundle, project: project)
         guard let window = controller.window, let view = window.contentView else { return }
         window.setFrame(NSRect(x: -10_000, y: -10_000, width: 1440, height: 860), display: true)
@@ -100,6 +104,7 @@ enum UISnapshots {
             ("cursor", { controller.model.openSidebar(.cursor) }),
             ("animations", { controller.model.openSidebar(.animation) }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
+            ("mask", { if let mask = controller.model.project.masks.first { controller.model.openMask(mask.id) } }),
             ("slice", { if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
         ]
         for (name, apply) in states {
