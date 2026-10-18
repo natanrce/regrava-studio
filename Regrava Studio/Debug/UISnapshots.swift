@@ -104,11 +104,13 @@ enum UISnapshots {
             ("cursor", { controller.model.openSidebar(.cursor) }),
             ("animations", { controller.model.openSidebar(.animation) }),
             ("audio", { controller.model.openSidebar(.audio) }),
+            ("command-menu", { controller.model.openSidebar(.background); controller.model.isCommandMenuOpen = true }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
             ("mask", { if let mask = controller.model.project.masks.first { controller.model.openMask(mask.id) } }),
             ("slice", { if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
         ]
         for (name, apply) in states {
+            controller.model.isCommandMenuOpen = false
             apply()
             RunLoop.main.run(until: Date().addingTimeInterval(0.6))
             if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -116,6 +118,7 @@ enum UISnapshots {
                 try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("editor-\(name).png"))
             }
         }
+        controller.model.isCommandMenuOpen = false
         controller.window?.delegate = nil
         window.orderOut(nil)
         try? FileManager.default.removeItem(at: bundle)
