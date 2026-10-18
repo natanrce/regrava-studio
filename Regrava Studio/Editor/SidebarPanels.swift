@@ -22,8 +22,8 @@ struct GeneralPanel: View {
                     SegmentedPicker(
                         options: BackgroundKind.allCases,
                         label: { $0.label },
-                        // Wallpaper images and Unsplash are not bundled with this app.
-                        isDisabled: { $0 == .wallpaper || $0 == .unsplash },
+                        // Unsplash search is not available in this app.
+                        isDisabled: { $0 == .unsplash },
                         selection: editor.binding(\.style.background.kind)
                     )
                 }
@@ -93,13 +93,10 @@ struct GeneralPanel: View {
                 ForEach(BackgroundConfig.gradientPresets.indices, id: \.self) { index in
                     let preset = BackgroundConfig.gradientPresets[index]
                     Button {
-                        editor.change {
-                            $0.style.background.gradientFrom = preset.0
-                            $0.style.background.gradientTo = preset.1
-                        }
+                        editor.change { $0.style.background.gradientStops = preset }
                     } label: {
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(LinearGradient(colors: [Color(rgba: preset.0), Color(rgba: preset.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .fill(LinearGradient(colors: preset.map { Color(rgba: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing))
                             .aspectRatio(1, contentMode: .fit)
                     }
                     .buttonStyle(.plain)
@@ -110,7 +107,12 @@ struct GeneralPanel: View {
                 BackgroundImagePicker(editor: editor)
             }
             SliderField(name: "Background blur", value: editor.binding(\.style.background.blur), range: 0...100, step: 0.1, preview: { String(format: "%.0fpx", $0) })
-        case .wallpaper, .unsplash:
+        case .wallpaper:
+            NamedField(name: "Wallpaper") {
+                WallpaperPicker(selection: editor.binding(\.style.background.systemName))
+            }
+            SliderField(name: "Background blur", value: editor.binding(\.style.background.blur), range: 0...100, step: 0.1, preview: { String(format: "%.0fpx", $0) })
+        case .unsplash:
             EmptyView()
         }
     }
@@ -123,8 +125,7 @@ struct GeneralPanel: View {
                 let current = Double(NSColor(Color(rgba: style.background.gradientFrom)).usingColorSpace(.sRGB)?.hueComponent ?? 0) * 360
                 let delta = newHue - current
                 editor.change(coalesce: "hue") {
-                    $0.style.background.gradientFrom = Self.rotateHue($0.style.background.gradientFrom, by: delta)
-                    $0.style.background.gradientTo = Self.rotateHue($0.style.background.gradientTo, by: delta)
+                    $0.style.background.gradientStops = $0.style.background.gradientStops.map { Self.rotateHue($0, by: delta) }
                 }
             }
         )
