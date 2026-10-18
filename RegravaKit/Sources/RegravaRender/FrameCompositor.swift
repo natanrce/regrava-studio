@@ -246,35 +246,54 @@ public final class FrameCompositor: @unchecked Sendable {
         case .image:
             if let name = config.imageFileName, let directory = assetsDirectory,
                let image = CIImage(contentsOf: directory.appendingPathComponent(name)) {
-                // Aspect-fill, then blur (clamped so edges stay opaque).
-                let scale = max(rect.width / image.extent.width, rect.height / image.extent.height)
-                var filled = image
-                    .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                filled = filled.transformed(by: CGAffineTransform(
-                    translationX: (rect.width - filled.extent.width) / 2,
-                    y: (rect.height - filled.extent.height) / 2
-                ))
-                if config.blur > 0 {
-                    filled = filled.clampedToExtent().applyingGaussianBlur(sigma: config.blur / 2)
-                }
-                return filled.cropped(to: rect)
+                return filled(image, rect: rect, blur: config.blur)
             }
             return gradient(config, rect: rect)
-        case .gradient, .wallpaper, .unsplash:
-            // Wallpapers and Unsplash photos are not bundled; they fall back to the gradient.
+        case .wallpaper:
+            if let url = WallpaperLibrary.url(for: config.systemName), let image = CIImage(contentsOf: url) {
+                return filled(image, rect: rect, blur: config.blur)
+            }
+            return gradient(config, rect: rect)
+        case .gradient, .unsplash:
+            // Unsplash photos are not available; they fall back to the gradient.
             return gradient(config, rect: rect)
         }
     }
 
-    /// Two-stop gradient from the top-left corner (0,0) to the bottom-right corner (1,1).
+    /// Aspect-fill, then blur (clamped so edges stay opaque).
+    static func filled(_ image: CIImage, rect: CGRect, blur: Double) -> CIImage {
+        let scale = max(rect.width / image.extent.width, rect.height / image.extent.height)
+        var filled = image
+            .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        filled = filled.transformed(by: CGAffineTransform(
+            translationX: (rect.width - filled.extent.width) / 2,
+            y: (rect.height - filled.extent.height) / 2
+        ))
+        if blur > 0 {
+            filled = filled.clampedToExtent().applyingGaussianBlur(sigma: blur / 2)
+        }
+        return filled.cropped(to: rect)
+    }
+
+    /// Gradient from the top-left corner (0,0) to the bottom-right corner (1,1), stops evenly
+    /// spaced; drawn once per canvas size.
     static func gradient(_ config: BackgroundConfig, rect: CGRect) -> CIImage {
-        let filter = CIFilter.linearGradient()
-        filter.point0 = CGPoint(x: rect.minX, y: rect.maxY)
-        filter.point1 = CGPoint(x: rect.maxX, y: rect.minY)
-        filter.color0 = ciColor(config.gradientFrom)
-        filter.color1 = ciColor(config.gradientTo)
-        return (filter.outputImage ?? CIImage(color: ciColor(config.gradientFrom))).cropped(to: rect)
+        let stops = config.gradientStops.count >= 2 ? config.gradientStops : [config.gradientFrom, config.gradientTo]
+        let width = max(Int(rect.width), 1), height = max(Int(rect.height), 1)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let cgGradient = CGGradient(
+                colorsSpace: space,
+                colors: stops.map { CGColor(srgbRed: $0.r, green: $0.g, blue: $0.b, alpha: $0.a) } as CFArray,
+                locations: stops.indices.map { CGFloat($0) / CGFloat(stops.count - 1) }
+              ) else {
+            return CIImage(color: ciColor(config.gradientFrom)).cropped(to: rect)
+        }
+        // Core Graphics is bottom-left: top-left is (0, height).
+        context.drawLinearGradient(cgGradient, start: CGPoint(x: 0, y: height), end: CGPoint(x: width, y: 0), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        guard let image = context.makeImage() else { return CIImage(color: ciColor(config.gradientFrom)).cropped(to: rect) }
+        return CIImage(cgImage: image).cropped(to: rect)
     }
 
     static func ciColor(_ c: RGBA, alpha: Double? = nil) -> CIColor {

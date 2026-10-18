@@ -315,7 +315,7 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         decoder.dateDecodingStrategy = .iso8601
         let project = try decoder.decode(Project.self, from: Data(json.utf8))
         #expect(project.style.paddingRatio == 0.08)
-        #expect(project.style.background.kind == .gradient)
+        #expect(project.style.background.kind == .wallpaper)
         #expect(project.cursor.size == 48)
         #expect(project.zooms.first?.presentation == .screen)
         #expect(project.markersMs.isEmpty)

@@ -58,49 +58,81 @@ public enum BackgroundKind: String, Codable, CaseIterable, Sendable {
 }
 
 public struct BackgroundConfig: Codable, Hashable, Sendable {
+    /// Wallpaper shown by default.
+    public static let defaultWallpaper = "macOS/san-francisco-dark.jpg"
+
     public var kind: BackgroundKind
     public var color: RGBA
-    public var gradientFrom: RGBA
-    public var gradientTo: RGBA
+    /// Gradient colours from the top-left to the bottom-right corner (2 or more).
+    public var gradientStops: [RGBA]
+    /// Wallpaper id: its path in the wallpaper library ("macOS/sonoma-light.jpg").
+    public var systemName: String
     /// Image copied into the project folder.
     public var imageFileName: String?
     /// 0–100 px.
     public var blur: Double
 
     public init(
-        kind: BackgroundKind = .gradient,
+        kind: BackgroundKind = .wallpaper,
         color: RGBA = RGBA(hex: 0x4776E6),
-        gradientFrom: RGBA = RGBA(hex: 0x4776E6),
-        gradientTo: RGBA = RGBA(hex: 0x8E54E9),
+        gradientStops: [RGBA] = [RGBA(hex: 0x4776E6), RGBA(hex: 0x8E54E9)],
+        systemName: String = BackgroundConfig.defaultWallpaper,
         imageFileName: String? = nil,
         blur: Double = 0
     ) {
         self.kind = kind
         self.color = color
-        self.gradientFrom = gradientFrom
-        self.gradientTo = gradientTo
+        self.gradientStops = gradientStops
+        self.systemName = systemName
         self.imageFileName = imageFileName
         self.blur = blur
     }
+
+    private enum LegacyKeys: String, CodingKey { case gradientFrom, gradientTo }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = BackgroundConfig()
         kind = c.value(.kind, default: d.kind)
         color = c.value(.color, default: d.color)
-        gradientFrom = c.value(.gradientFrom, default: d.gradientFrom)
-        gradientTo = c.value(.gradientTo, default: d.gradientTo)
+        if let stops = try? c.decodeIfPresent([RGBA].self, forKey: .gradientStops), stops.count >= 2 {
+            gradientStops = stops
+        } else if let legacy = try? decoder.container(keyedBy: LegacyKeys.self),
+                  let from = try? legacy.decode(RGBA.self, forKey: .gradientFrom),
+                  let to = try? legacy.decode(RGBA.self, forKey: .gradientTo) {
+            gradientStops = [from, to]
+        } else {
+            gradientStops = d.gradientStops
+        }
+        systemName = c.value(.systemName, default: d.systemName)
         imageFileName = c.value(.imageFileName, default: d.imageFileName)
         blur = c.value(.blur, default: d.blur)
     }
 
-    /// Gradient presets for the swatch grid (8 columns). These are this app's own.
-    public static let gradientPresets: [(RGBA, RGBA)] = [
-        (0x4776E6, 0x8E54E9), (0x6A11CB, 0x2575FC), (0xFF9A8B, 0xFF6A88), (0x0BA360, 0x3CBA92),
-        (0x1E3C72, 0x2A5298), (0xF7971E, 0xFFD200), (0xEE0979, 0xFF6A00), (0x00C6FF, 0x0072FF),
-        (0x8E2DE2, 0x4A00E0), (0xF953C6, 0xB91D73), (0x11998E, 0x38EF7D), (0xFC466B, 0x3F5EFB),
-        (0x434343, 0x000000), (0xC33764, 0x1D2671), (0x56CCF2, 0x2F80ED), (0xF2994A, 0xF2C94C),
-    ].map { (RGBA(hex: $0.0), RGBA(hex: $0.1)) }
+    /// First stop; editing it rebuilds a 2-stop gradient.
+    public var gradientFrom: RGBA {
+        get { gradientStops.first ?? RGBA(hex: 0x4776E6) }
+        set { gradientStops = [newValue, gradientTo] }
+    }
+
+    /// Last stop; editing it rebuilds a 2-stop gradient.
+    public var gradientTo: RGBA {
+        get { gradientStops.last ?? RGBA(hex: 0x8E54E9) }
+        set { gradientStops = [gradientFrom, newValue] }
+    }
+
+    /// The 30 gradient presets.
+    public static let gradientPresets: [[RGBA]] = [
+        [0xF5F7FA, 0xC3CFE2], [0xA1C4FD, 0xC2E9FB], [0xFFECD2, 0xFCB69F], [0xE0C3FC, 0x8EC5FC],
+        [0xA8EDEA, 0xFED6E3], [0xD4FC79, 0x96E6A1], [0xFA709A, 0xFEE140], [0xF6D365, 0xFDA085],
+        [0xEE0979, 0xFF6A00], [0xF83600, 0xF9D423], [0x3A1C71, 0xD76D77, 0xFFAF7B],
+        [0xFCC5E4, 0xFDA34B, 0xFF7882, 0xC8699E, 0x7046AA, 0x0C1DB8, 0x020F75],
+        [0x4FACFE, 0x00F2FE], [0x1FA2FF, 0x12D8FA, 0xA6FFCB], [0x43CEA2, 0x185A9D], [0x11998E, 0x38EF7D],
+        [0x134E5E, 0x71B280], [0x1A2980, 0x26D0CE], [0x4776E6, 0x8E54E9], [0xC33764, 0x1D2671],
+        [0x30CFD0, 0x330867], [0xFC466B, 0x3F5EFB], [0x12C2E9, 0xC471ED, 0xF64F59], [0x00DBDE, 0xFC00FF],
+        [0x0F2027, 0x203A43, 0x2C5364], [0x000428, 0x004E92], [0xC31432, 0x240B36],
+        [0x03001E, 0x7303C0, 0xEC38BC, 0xFDEFF9], [0xBDC3C7, 0x2C3E50], [0x434343, 0x000000],
+    ].map { $0.map { RGBA(hex: $0) } }
 }
 
 // MARK: - Frame (Sections B and C)
