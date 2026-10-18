@@ -148,6 +148,10 @@ final class Preferences: ObservableObject {
     @Published var recordingSystemAudio: Bool
     // Editing
     @Published var useLastProjectConfigForNewProjects: Bool
+    /// Preset applied to new projects ("Use as default for new projects").
+    @Published var defaultPresetID: String? {
+        didSet { UserDefaults.standard.set(defaultPresetID, forKey: "defaultPresetId") }
+    }
     @Published var autoSaveProject: Bool
     @Published var presetsFolderPath: String?
     /// Preview quality factor: 1 (Full), 0.5 (Half), 0.25 (Quarter).
@@ -193,6 +197,7 @@ final class Preferences: ObservableObject {
         recordingMicrophoneID = store.string(forKey: "recordingMicrophoneID")
         recordingSystemAudio = bool("recordingSystemAudio", false)
         useLastProjectConfigForNewProjects = bool("useLastProjectConfigForNewProjects", false)
+        defaultPresetID = UserDefaults.standard.string(forKey: "defaultPresetId")
         autoSaveProject = bool("autoSaveProject", true)
         presetsFolderPath = store.string(forKey: "presetsFolderPath")
         playbackPreviewResolution = store.object(forKey: "playbackPreviewResolution") as? Double ?? 1

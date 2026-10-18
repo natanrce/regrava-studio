@@ -53,6 +53,9 @@ struct EditorView: View {
         .overlay {
             if exports.isExporting { ExportStatusOverlay(exports: exports) }
         }
+        .overlay {
+            if editor.isCommandMenuOpen { CommandMenuOverlay(editor: editor) }
+        }
         .overlay(alignment: .top) {
             if let message = editor.toast {
                 Text(message)
@@ -94,6 +97,8 @@ private struct Topbar: View {
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: Theme.gap(1)) {
+                RSIconButton(icon: "command.circle", size: .toolbar, tooltip: "Show command menu...  ⌘K") { editor.isCommandMenuOpen = true }
+                Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
                 HStack(spacing: 2) {
                     RSIconButton(icon: "arrow.uturn.backward", size: .toolbar, tooltip: "Undo  ⌘Z") { editor.undo() }
                         .disabled(!editor.canUndo)
@@ -102,6 +107,8 @@ private struct Topbar: View {
                         .disabled(!editor.canRedo)
                         .opacity(editor.canRedo ? 1 : Theme.disabledOpacity)
                 }
+                Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
+                PresetsButton(editor: editor)
                 Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
                 RSButton(title: "Export", icon: "square.and.arrow.up.fill", kind: .primary) { editor.openExportPicker() }
                     .disabled(exports.isExporting || exports.isPickerOpen)
@@ -670,5 +677,23 @@ private struct MaskRectEditor: View {
                 onChange(transform(start, value.translation))
             }
             .onEnded { _ in origin = nil }
+    }
+}
+
+/// "Presets" dropdown (`wand.and.rays`, transparent, active while open).
+private struct PresetsButton: View {
+    @ObservedObject var editor: EditorModel
+    @State private var isOpen = false
+
+    var body: some View {
+        Button { isOpen.toggle() } label: {
+            HStack(spacing: Theme.gap(1)) {
+                Image(systemName: "wand.and.rays")
+                Text("Presets")
+                Image(systemName: "chevron.down").font(.system(size: 10))
+            }
+        }
+        .buttonStyle(RSButtonStyle(kind: isOpen ? .subtleBg : .transparent))
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) { PresetsPopover(editor: editor) }
     }
 }

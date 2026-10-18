@@ -445,6 +445,15 @@ final class RecordingCoordinator: ObservableObject {
                 markersMs: result.markersMs,
                 keystrokes: result.keystrokes
             )
+            // New projects start from the default preset, or the last edited settings.
+            if let preset = PresetStore.shared.defaultPreset {
+                PresetStore.shared.copyAssets(of: preset, into: bundleURL)
+                project.apply(preset.preset.config)
+            } else if preferences.useLastProjectConfigForNewProjects,
+                      let data = UserDefaults.standard.data(forKey: "lastProjectConfig"),
+                      let config = try? JSONDecoder().decode(PresetConfig.self, from: data) {
+                project.apply(config)
+            }
             project.autoZoom.isEnabled = preferences.createAutomaticZooms
             project.regenerateAutomaticZooms()
             try ProjectStore.save(project, to: bundleURL)

@@ -136,6 +136,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             editor.layoutType = editor.layoutType == .preview ? .edit : .preview
         default:
             switch (key, flags) {
+            case ("k", [.command]): editor.isCommandMenuOpen.toggle()
             case ("z", [.command]): editor.undo()
             case ("z", [.command, .shift]): editor.redo()
             case ("=", [.command]), ("+", [.command]): editor.zoomTimeline(in: true)

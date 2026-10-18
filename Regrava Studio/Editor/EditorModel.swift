@@ -51,6 +51,8 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomIDs: Set<UUID> = []
     /// Zoom add tool armed from the add-tools rail.
     @Published var isAddZoomToolArmed = false
+    /// Command menu (⌘K).
+    @Published var isCommandMenuOpen = false
     /// Mask add tool (`activeAddTool = "mask"`, `addMaskType`).
     @Published var isAddMaskToolArmed = false
     @Published var addMaskType: MaskType = .sensitiveData
@@ -162,6 +164,7 @@ final class EditorModel: ObservableObject {
         selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
         isDirty = true
         scheduleAutosave()
+        rememberLastProjectConfig()
         if canvasChanged || slicesChanged || backgroundChanged {
             Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged) }
         } else {
@@ -214,9 +217,50 @@ final class EditorModel: ObservableObject {
         player.currentItem?.audioMix = media.audioMix
     }
 
+    // MARK: Presets
+
+    private var lastConfigTask: Task<Void, Never>?
+
+    /// With "use last project config", the edited settings are kept for new projects after
+    /// 3 s without changes.
+    private func rememberLastProjectConfig() {
+        guard preferences.useLastProjectConfigForNewProjects else { return }
+        lastConfigTask?.cancel()
+        let config = project.presetConfig
+        lastConfigTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled, let data = try? JSONEncoder().encode(config) else { return }
+            UserDefaults.standard.set(data, forKey: "lastProjectConfig")
+        }
+    }
+
+    /// Settings shown while hovering a preset (`project.presetPreview`); not part of history.
+    var presetPreview: PresetConfig? {
+        didSet { if presetPreview != oldValue { scheduleRefresh() } }
+    }
+
+    /// The project as rendered (with the hovered preset, if any).
+    private var renderedProject: Project {
+        guard let presetPreview else { return project }
+        var preview = project
+        preview.apply(presetPreview)
+        return preview
+    }
+
+    func previewPreset(_ entry: PresetStore.Entry?) {
+        if let entry { PresetStore.shared.copyAssets(of: entry, into: bundleURL) }
+        presetPreview = entry?.preset.config
+    }
+
+    func applyPreset(_ entry: PresetStore.Entry) {
+        PresetStore.shared.copyAssets(of: entry, into: bundleURL)
+        presetPreview = nil
+        change { $0.apply(entry.preset.config) }
+    }
+
     private func scheduleRefresh() {
         refreshTask?.cancel()
-        let project = self.project
+        let project = self.renderedProject
         let cursors = self.cursors
         let bundle = bundleURL
         refreshTask = Task { [weak self] in
