@@ -67,8 +67,8 @@ struct EditorView: View {
                     .padding(.top, 72)
                     .transition(.opacity)
                     .task(id: message) {
-                        // Info toasts last 2 s.
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        // Info toasts last 2 s; preview markers use 1 s.
+                        try? await Task.sleep(nanoseconds: UInt64(editor.toastDurationMs * 1_000_000))
                         if editor.toast == message { editor.toast = nil }
                     }
             }
@@ -239,6 +239,7 @@ private struct PreviewSpace: View {
                             .allowsHitTesting(false)
                     }
                 }
+                .overlay { PreviewMarkers(editor: editor, scale: scale) }
                 .overlay { MaskOverlays(editor: editor, scale: scale) }
                 .frame(width: size.width, height: size.height)
                 .clipShape(RoundedRectangle(cornerRadius: 2))
@@ -507,16 +508,12 @@ private struct MaskOverlays: View {
                     )
                 } else if let mask = visibleMask, let bound = mask.firstBound {
                     // A shown mask can be clicked to edit it.
-                    let r = rect(bound, in: areaRect)
-                    Color.white.opacity(0.001)
-                        .frame(width: r.width, height: r.height)
-                        .offset(x: r.minX, y: r.minY)
-                        .onTapGesture {
+                    MarkerArea(rect: rect(bound, in: areaRect), cornerRadius: 4) {
                             let t = editor.currentSourceTimeMs
                             if t < mask.startMs { editor.seek(to: editor.project.resolver.sourceToPlayback(mask.startMs)) }
                             if t > mask.endMs { editor.seek(to: editor.project.resolver.sourceToPlayback(mask.endMs)) }
                             editor.openMask(mask.id)
-                        }
+                    }
                 }
             }
         }

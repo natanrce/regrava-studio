@@ -66,6 +66,13 @@ final class EditorModel: ObservableObject {
     @Published var errorMessage: String?
     /// Short message shown over the editor (e.g. "Copied to clipboard").
     @Published var toast: String?
+    /// How long the toast stays (2 s for info toasts, 1 s for the preview markers).
+    var toastDurationMs: Double = 2000
+
+    func showToast(_ message: String, durationMs: Double = 2000) {
+        toastDurationMs = durationMs
+        toast = message
+    }
 
     private let cursors: CursorLibrary
     private let renderState: RenderState
@@ -434,6 +441,32 @@ final class EditorModel: ObservableObject {
         sidebarItem = .mask(id)
         selectedZoomIDs = []
         focusedTrack = "masks"
+    }
+
+    /// Where the cursor image is drawn right now (canvas pixels), if visible.
+    var cursorAreaRect: Rect2? {
+        let snapshot = renderState.current
+        let frame = snapshot.track.frame(at: currentTimeMs)
+        guard !project.cursor.hide, frame.cursorOpacity > 0.01, let position = frame.cursor else { return nil }
+        let layout = snapshot.track.layout
+        let asset = cursors.asset(named: frame.cursorName)
+        let videoToCanvas = frame.screenRect.width / max(layout.videoSize.width, 1)
+        let perPoint = project.recording.pointPixelScale * project.cursor.sizeMultiplier * videoToCanvas * frame.cursorScale
+        let tip = layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect)
+        return Rect2(
+            x: tip.x - asset.hotspotPoints.x * perPoint,
+            y: tip.y - asset.hotspotPoints.y * perPoint,
+            width: asset.sizePoints.width * perPoint,
+            height: asset.sizePoints.height * perPoint
+        )
+    }
+
+    /// Corner radius of the recording right now (canvas pixels), as the compositor draws it.
+    var recordingAreaCornerRadius: Double {
+        let snapshot = renderState.current
+        let area = snapshot.track.frame(at: currentTimeMs).screenRect
+        let zoom = area.width / max(snapshot.track.layout.restScreen.width, 1)
+        return min(project.style.cornerRadius * zoom, min(area.width, area.height) / 2)
     }
 
     /// Where the recording is drawn on the canvas right now (canvas pixels), for overlays.
