@@ -1,10 +1,10 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 /// Engine of Regrava Studio, used by the app target in "Regrava Studio.xcodeproj".
 let package = Package(
     name: "RegravaKit",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v26)],
     products: [
         .library(name: "RegravaCore", targets: ["RegravaCore"]),
         .library(name: "RegravaRender", targets: ["RegravaRender"]),

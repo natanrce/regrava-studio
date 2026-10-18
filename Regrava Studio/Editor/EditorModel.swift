@@ -69,7 +69,7 @@ final class EditorModel: ObservableObject {
 
     private let cursors: CursorLibrary
     private let renderState: RenderState
-    private var baseComposition: AVMutableVideoComposition?
+    private var baseConfiguration: AVVideoComposition.Configuration?
     private var compositionCanvas: Size2?
     private var compositionOutput: Size2?
     private var timeObserver: Any?
@@ -191,8 +191,9 @@ final class EditorModel: ObservableObject {
             let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL))
             let asset = media.asset
             let output = previewOutputSize
-            let composition = try await CompositionFactory.make(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output)
-            baseComposition = composition
+            let configuration = try await CompositionFactory.configuration(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output)
+            let composition = AVVideoComposition(configuration: configuration)
+            baseConfiguration = configuration
             compositionCanvas = project.canvasSize
             compositionOutput = output
             if let item = player.currentItem, !replacingItem {
@@ -272,9 +273,8 @@ final class EditorModel: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             self.renderState.replace(with: snapshot)
             // Re-assigning the composition drops cached frames.
-            if let base = self.baseComposition, let item = self.player.currentItem,
-               let copy = base.mutableCopy() as? AVMutableVideoComposition {
-                item.videoComposition = copy
+            if let base = self.baseConfiguration, let item = self.player.currentItem {
+                item.videoComposition = AVVideoComposition(configuration: base)
                 if !self.isPlaying { self.seek(to: self.isScrubbing ? self.scrubTimeMs : self.currentTimeMs, moveHead: false) }
             }
         }

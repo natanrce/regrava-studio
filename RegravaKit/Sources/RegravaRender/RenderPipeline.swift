@@ -54,23 +54,100 @@ public enum CompositionFactory {
         canvas: Size2,
         outputSize: Size2? = nil,
         fps: Int? = nil
-    ) async throws -> AVMutableVideoComposition {
-        let output = outputSize ?? canvas
-        let scaleX = output.width / max(canvas.width, 1)
-        let scaleY = output.height / max(canvas.height, 1)
-        let outputRect = CGRect(x: 0, y: 0, width: output.width.rounded(), height: output.height.rounded())
-        let composition = try await AVMutableVideoComposition.videoComposition(with: asset) { request in
-            let timeMs = request.compositionTime.seconds * 1000
-            var image = state.render(source: request.sourceImage, timeMs: timeMs)
-            if scaleX != 1 || scaleY != 1 {
-                image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY)).cropped(to: outputRect)
-            }
-            request.finish(with: image, context: nil)
-        }
-        composition.renderSize = outputRect.size
-        if let fps { composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps)) }
-        return composition
+    ) async throws -> AVVideoComposition {
+        AVVideoComposition(configuration: try await configuration(asset: asset, state: state, canvas: canvas, outputSize: outputSize, fps: fps))
     }
+
+    /// The composition's configuration: a single instruction over the whole asset, rendered
+    /// by `CanvasCompositor` at the output size.
+    public static func configuration(
+        asset: AVAsset,
+        state: RenderState,
+        canvas: Size2,
+        outputSize: Size2? = nil,
+        fps: Int? = nil
+    ) async throws -> AVVideoComposition.Configuration {
+        let output = outputSize ?? canvas
+        let renderSize = CGSize(width: output.width.rounded(), height: output.height.rounded())
+        let duration = try await asset.load(.duration)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        var rate = Float(fps ?? 0)
+        if rate <= 0, let track = tracks.first { rate = try await track.load(.nominalFrameRate) }
+        if rate <= 0 { rate = 60 }
+        let instruction = CanvasInstruction(
+            timeRange: CMTimeRange(start: .zero, duration: duration),
+            trackID: tracks.first?.trackID ?? kCMPersistentTrackID_Invalid,
+            state: state,
+            canvas: canvas,
+            renderSize: renderSize
+        )
+        return AVVideoComposition.Configuration(
+            customVideoCompositorClass: CanvasCompositor.self,
+            frameDuration: CMTime(value: 1, timescale: CMTimeScale(rate.rounded())),
+            instructions: [instruction],
+            renderSize: renderSize
+        )
+    }
+}
+
+/// Instruction carrying what `CanvasCompositor` needs to draw a frame.
+final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
+    let timeRange: CMTimeRange
+    let enablePostProcessing = false
+    let containsTweening = true
+    let requiredSourceTrackIDs: [NSValue]?
+    let passthroughTrackID = kCMPersistentTrackID_Invalid
+    let trackID: CMPersistentTrackID
+    let state: RenderState
+    let canvas: Size2
+    let renderSize: CGSize
+
+    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, state: RenderState, canvas: Size2, renderSize: CGSize) {
+        self.timeRange = timeRange
+        self.trackID = trackID
+        self.state = state
+        self.canvas = canvas
+        self.renderSize = renderSize
+        requiredSourceTrackIDs = [NSNumber(value: trackID)]
+    }
+}
+
+/// Renders each frame with Core Image on the GPU (Metal) at canvas size, scaled to the
+/// output size.
+final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
+    private static let context = CIContext(options: [.cacheIntermediates: false])
+
+    let sourcePixelBufferAttributes: [String: any Sendable]? = [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferMetalCompatibilityKey as String: true,
+    ]
+    let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferMetalCompatibilityKey as String: true,
+    ]
+
+    func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
+
+    func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
+        guard let instruction = request.videoCompositionInstruction as? CanvasInstruction,
+              let source = request.sourceFrame(byTrackID: instruction.trackID),
+              let output = request.renderContext.newPixelBuffer() else {
+            request.finish(with: NSError(domain: "RegravaRender", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing frame"]))
+            return
+        }
+        let timeMs = request.compositionTime.seconds * 1000
+        var image = instruction.state.render(source: CIImage(cvPixelBuffer: source), timeMs: timeMs)
+        let scaleX = instruction.renderSize.width / max(instruction.canvas.width, 1)
+        let scaleY = instruction.renderSize.height / max(instruction.canvas.height, 1)
+        if scaleX != 1 || scaleY != 1 {
+            image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        }
+        let bounds = CGRect(origin: .zero, size: instruction.renderSize)
+        Self.context.render(image.cropped(to: bounds), to: output, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        request.finish(withComposedVideoFrame: output)
+    }
+
+    func cancelAllPendingVideoCompositionRequests() {}
 }
 
 /// The recording rearranged into playback time, plus how its audio is mixed.
