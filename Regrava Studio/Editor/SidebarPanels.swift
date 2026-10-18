@@ -89,17 +89,13 @@ struct GeneralPanel: View {
                 }
             }
             SliderField(name: "Hue", icon: "paintpalette", value: hueBinding, range: 0...360, step: 1, preview: degrees)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 8), spacing: 4) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 32, maximum: 32), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(BackgroundConfig.gradientPresets.indices, id: \.self) { index in
                     let preset = BackgroundConfig.gradientPresets[index]
-                    Button {
-                        editor.change { $0.style.background.gradientStops = preset }
-                    } label: {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(LinearGradient(colors: preset.map { Color(rgba: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .aspectRatio(1, contentMode: .fit)
+                    PickerTile(isSelected: style.background.gradientStops == preset) {
+                        LinearGradient(colors: preset.map { Color(rgba: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
                     }
-                    .buttonStyle(.plain)
+                    .onTapGesture { editor.change { $0.style.background.gradientStops = preset } }
                 }
             }
         case .image:

@@ -55,9 +55,9 @@ struct WallpaperPicker: View {
                     .font(Theme.Typo.label)
                     .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 8), spacing: 4) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 32, maximum: 32), spacing: 8)], alignment: .leading, spacing: 8) {
                     ForEach(wallpapers) { wallpaper in
-                        WallpaperThumbnail(wallpaper: wallpaper, isSelected: wallpaper.id == selection)
+                        WallpaperThumbnail(wallpaper: wallpaper, isSelected: wallpaper.id == selection, isFavourite: favouriteIDs.contains(wallpaper.id))
                             .onTapGesture { selection = wallpaper.id }
                             .contextMenu {
                                 let isFavourite = favouriteIDs.contains(wallpaper.id)
@@ -84,20 +84,52 @@ struct WallpaperPicker: View {
 private struct WallpaperThumbnail: View {
     var wallpaper: WallpaperLibrary.Wallpaper
     var isSelected: Bool
+    var isFavourite: Bool
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.lighterBg)
+        PickerTile(isSelected: isSelected) {
             if let image {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Theme.Colors.lighterBg
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(isSelected ? Color.white : .clear, lineWidth: 1.5).padding(-2))
-        .contentShape(Rectangle())
+        .overlay {
+            // Favourite star: centred, with a text shadow.
+            Image(systemName: "star.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.6), radius: 2)
+                .opacity(isFavourite ? 1 : 0)
+                .animation(.easeInOut(duration: 0.125), value: isFavourite)
+                .allowsHitTesting(false)
+        }
         .task(id: wallpaper.id) { image = await WallpaperThumbnails.shared.thumbnail(for: wallpaper.id) }
+    }
+}
+
+/// Picker tile shared by wallpapers and gradients: 32×32, radius 6, an inner 1 px #fff8
+/// overlay border, and a 1 px outline offset by 1 px, white at 40% on hover and white when selected.
+struct PickerTile<Content: View>: View {
+    var isSelected: Bool
+    @ViewBuilder var content: () -> Content
+    @State private var hovered = false
+
+    var body: some View {
+        Color.clear
+            .frame(width: 32, height: 32)
+            .overlay { content() }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0x88 / 255), lineWidth: 1).blendMode(.overlay))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color.white : hovered ? Color.white.opacity(0.4) : .clear, lineWidth: 1)
+                    .padding(-2)
+            )
+            .contentShape(Rectangle())
+            .onHover { hovered = $0 }
+            .animation(.easeOut(duration: 0.15), value: hovered)
     }
 }
 
