@@ -80,7 +80,7 @@ enum UISnapshots {
             [Keystroke(kind: .down, timeMs: $0), Keystroke(kind: .up, timeMs: $0 + 40)]
         }
         var project = Project(
-            recording: RecordingInfo(videoSize: Size2(width: 3024, height: 1964), pointPixelScale: 2, durationMs: 42_000, fps: 60),
+            recording: RecordingInfo(videoSize: Size2(width: 3024, height: 1964), pointPixelScale: 2, durationMs: 42_000, fps: 60, audioSources: [.systemAudio, .microphone]),
             mouseEvents: [MouseEvent(kind: .move, timeMs: 0, position: Vec2(100, 100))] + clicks,
             markersMs: [9000, 20000],
             keystrokes: keys
@@ -103,6 +103,7 @@ enum UISnapshots {
             ("general", { controller.model.openSidebar(.background) }),
             ("cursor", { controller.model.openSidebar(.cursor) }),
             ("animations", { controller.model.openSidebar(.animation) }),
+            ("audio", { controller.model.openSidebar(.audio) }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
             ("mask", { if let mask = controller.model.project.masks.first { controller.model.openMask(mask.id) } }),
             ("slice", { if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
