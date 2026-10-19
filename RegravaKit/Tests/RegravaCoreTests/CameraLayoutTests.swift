@@ -84,4 +84,25 @@ struct CameraLayoutTests {
         project.camera.hide = true
         #expect(CameraTrack(project: project).frame(at: 2000).cameraRect == nil)
     }
+
+    @Test func rangeMatchingTheDefaultLayoutIsDetected() {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 2, durationMs: 10000, fps: 60, cameraFileName: "camera.mov", cameraSize: Size2(width: 1280, height: 720)), mouseEvents: [])
+        let overlay = CameraLayoutRange(startMs: 0, endMs: 3000)
+        #expect(project.isEqualToDefaultLayout(overlay))
+        #expect(!project.isEqualToDefaultLayout(CameraLayoutRange(startMs: 0, endMs: 3000, overlayPosition01: Vec2(0, 0))))
+        #expect(!project.isEqualToDefaultLayout(CameraLayoutRange(startMs: 0, endMs: 3000, type: .splitScreen)))
+        project.defaultLayout.type = .splitScreen
+        #expect(project.isEqualToDefaultLayout(CameraLayoutRange(startMs: 0, endMs: 3000, type: .splitScreen)))
+        #expect(!project.isEqualToDefaultLayout(overlay))
+    }
+
+    @Test func freeLayoutRangeStopsAtTheNextRange() {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 2, durationMs: 10000, fps: 60), mouseEvents: [])
+        project.cameraLayouts = [CameraLayoutRange(startMs: 4000, endMs: 6000)]
+        #expect(project.freeLayoutRange(startingAt: 2000)! == (2000, 4000))
+        #expect(project.freeLayoutRange(startingAt: 0)! == (0, 3000))
+        #expect(project.freeLayoutRange(startingAt: 5000) == nil)
+        #expect(project.freeLayoutRange(startingAt: 3700) == nil)
+        #expect(project.freeLayoutRange(startingAt: 9000)! == (9000, 10000))
+    }
 }

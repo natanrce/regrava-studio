@@ -518,6 +518,41 @@ public extension Project {
             return .screenOnly(info)
         }
     }
+
+    var sortedCameraLayouts: [CameraLayoutRange] { cameraLayouts.sorted { $0.startMs < $1.startMs } }
+
+    /// `isEqualToDefaultLayout`: same type as the default layout and, for overlay and cutout,
+    /// overrides that change nothing. Such ranges get the disabled look.
+    func isEqualToDefaultLayout(_ range: CameraLayoutRange) -> Bool {
+        guard range.type == defaultLayout.type else { return false }
+        switch range.type {
+        case .cameraOverlay:
+            var merged = defaultLayout.cameraOverlay
+            merged.position01 = range.overlayPosition01
+            if let v = range.overlaySizeRatio01 { merged.sizeRatio01 = v }
+            if let v = range.overlayZoomedScale { merged.zoomedScale = v }
+            if let v = range.overlayPaddingRatio01 { merged.paddingRatio01 = v }
+            return merged == defaultLayout.cameraOverlay
+        case .cutoutCamera:
+            var merged = defaultLayout.cutoutCamera
+            merged.positionX01 = range.cutoutPositionX01
+            if let v = range.cutoutSizeRatio01 { merged.sizeRatio01 = v }
+            if let v = range.cutoutZoomedScale { merged.zoomedScale = v }
+            return merged == defaultLayout.cutoutCamera
+        default:
+            return true
+        }
+    }
+
+    /// `getFreeRangeStartingAt`: `[t, min(next start, t + duration)]`, nil when `t` is inside a
+    /// range or the gap is shorter than the minimum.
+    func freeLayoutRange(startingAt t: Double, durationMs: Double = CameraLayoutRange.initialDurationMs) -> (start: Double, end: Double)? {
+        let sorted = sortedCameraLayouts
+        if sorted.contains(where: { $0.startMs < t && $0.endMs > t }) { return nil }
+        let next = sorted.first { $0.startMs > t }?.startMs ?? recording.durationMs
+        let end = min(next, t + durationMs)
+        return end - t < CameraLayoutRange.minimumDurationMs ? nil : (t, end)
+    }
 }
 
 /// Picks the resolvers for the screen and for the camera at a source time.
