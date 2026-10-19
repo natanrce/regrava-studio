@@ -132,6 +132,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 editor.removeMasks([mask])
                 return true
             }
+            if let layout = editor.openLayoutID {
+                editor.removeLayouts([layout])
+                return true
+            }
             if let slice = editor.openSliceID {
                 editor.removeSlice(slice)
                 return true
@@ -149,6 +153,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 guard editor.sidebarRoot == .cameraLayout, editor.sidebarItem == nil, editor.layoutType.showsSidebar,
                       editor.project.recording.hasCamera else { return false }
                 editor.change { $0.camera.hide.toggle() }
+            case ("l", [.control]): editor.toggleAddLayoutTool()
+            case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil, ("3", []) where editor.openLayoutID != nil:
+                // Layout mode: Overlay / Fullscreen / Hide camera. 4 = Cutout is unavailable without
+                // person segmentation.
+                let types: [String: CameraLayoutType] = ["1": .cameraOverlay, "2": .fullscreenCamera, "3": .screenOnly]
+                guard let layout = editor.openLayoutID, let type = types[key] else { return false }
+                editor.updateLayout(layout) { $0.type = type }
             case ("z", [.command]): editor.undo()
             case ("z", [.command, .shift]): editor.redo()
             case ("=", [.command]), ("+", [.command]): editor.zoomTimeline(in: true)
@@ -161,6 +172,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                     editor.updateMask(mask) { $0.isDisabled.toggle() }
                     return true
                 }
+                if let layout = editor.openLayoutID {
+                    editor.updateLayout(layout) { $0.isDisabled.toggle() }
+                    return true
+                }
                 guard let openZoom else { return false }
                 editor.updateZoom(openZoom) { $0.isDisabled.toggle() }
             case ("c", []):
@@ -168,6 +183,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 let source = editor.currentSourceTimeMs
                 if let mask = editor.openMaskID {
                     editor.splitMask(mask, at: source)
+                } else if let layout = editor.openLayoutID {
+                    editor.splitLayout(layout, at: source)
                 } else if let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id {
                     editor.splitZoom(target, at: source)
                 } else {

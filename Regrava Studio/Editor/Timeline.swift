@@ -7,6 +7,7 @@ enum TrackColors {
     static let clip = Color(hex: 0x93610C)
     static let zoom = Theme.Colors.primary
     static let mask = Color(hex: 0x82345A)
+    static let layout = Color(hex: 0x65575E)
 }
 
 /// Timeline: ruler, clip track, zoom track, playheads; scroll/zoom/scrub.
@@ -34,6 +35,10 @@ struct EditorTimeline: View {
                     VStack(alignment: .leading, spacing: 12) {
                         ClipTrack(editor: editor, geometry: geo, hoverPlaybackMs: hoverX.map { time($0) })
                         ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                        // Camera layouts track, only once a layout exists.
+                        if !editor.project.cameraLayouts.isEmpty {
+                            LayoutTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                        }
                         // Masks track, only once a mask exists.
                         if !editor.project.masks.isEmpty {
                             MaskTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
@@ -78,7 +83,9 @@ struct EditorTimeline: View {
             .onChange(of: geometry.size.width) { _, newWidth in width = newWidth }
             .onDisappear { if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) } }
         }
-        .frame(height: 25 + 20 + 11.3 + 48 + 12 + trackHeight("zooms") + 15 + (editor.project.masks.isEmpty ? 0 : 12 + trackHeight("masks")))
+        .frame(height: 25 + 20 + 11.3 + 48 + 12 + trackHeight("zooms") + 15
+            + (editor.project.cameraLayouts.isEmpty ? 0 : 12 + trackHeight("camera-mode"))
+            + (editor.project.masks.isEmpty ? 0 : 12 + trackHeight("masks")))
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: editor.focusedTrack)
     }
 
@@ -1046,6 +1053,206 @@ private struct MaskItem: View {
                         if dragOrigin == nil { dragOrigin = mask }
                         let edge = leading ? origin.startMs : origin.endMs
                         editor.resizeMask(mask.id, leading: leading, to: geometry.sourceTime(from: edge, movedBy: value.translation.width))
+                    }
+                    .onEnded { _ in dragOrigin = nil }
+            )
+    }
+}
+
+// MARK: - Camera layouts track
+
+private struct LayoutTrack: View {
+    @ObservedObject var editor: EditorModel
+    var geometry: TimelineGeometry
+    var hoverTimeMs: Double?
+    @State private var hoveringTrack = false
+    @State private var focusTask: Task<Void, Never>?
+    @State private var ghostTimeMs: Double?
+    @State private var creation: (start: Double, end: Double)?
+
+    private var isFocused: Bool { editor.focusedTrack == "camera-mode" }
+
+    var body: some View {
+        let height: CGFloat = isFocused ? 48 : 16
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(height: height)
+                .onContinuousHover { phase in
+                    if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.sourceTime(location.x) } else { ghostTimeMs = nil }
+                }
+                .gesture(createGesture)
+                .contextMenu {
+                    Button("Remove all layouts", role: .destructive) { editor.removeLayouts(Set(editor.project.cameraLayouts.map(\.id))) }
+                }
+            if isFocused, let range = creation ?? ghostRange {
+                let width = max(geometry.sx(range.end) - geometry.sx(range.start) - 1, 1)
+                TrackItemBody(color: TrackColors.layout, isPlayed: false, isActive: false, isSelected: false)
+                    .opacity(0.5)
+                    .overlay { if width > 20 { Image(systemName: "plus").foregroundStyle(.white) } }
+                    .frame(width: width, height: 48)
+                    .offset(x: geometry.sx(range.start) + 1)
+                    .allowsHitTesting(false)
+            }
+            ForEach(editor.project.cameraLayouts) { layout in
+                LayoutItem(editor: editor, layout: layout, geometry: geometry, height: height, isFocused: isFocused, hoverTimeMs: hoverTimeMs)
+            }
+            if !isFocused {
+                Text("Layout")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                    .padding(.leading, 20)
+                    .padding(.trailing, 120)
+                    .frame(height: 16)
+                    .background(LinearGradient(colors: [Theme.Colors.background, Theme.Colors.background.opacity(0)], startPoint: .leading, endPoint: .trailing))
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: height)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isFocused)
+        .help(isFocused ? "" : "Click to edit")
+        .onHover { inside in
+            hoveringTrack = inside
+            focusTask?.cancel()
+            if inside && !isFocused {
+                focusTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 30_000_000)
+                    if !Task.isCancelled && hoveringTrack { editor.focusedTrack = "camera-mode" }
+                }
+            }
+        }
+    }
+
+    private var ghostRange: (start: Double, end: Double)? {
+        guard let ghostTimeMs, ghostTimeMs >= 0, ghostTimeMs <= editor.project.recording.durationMs,
+              let gap = editor.freeLayoutRange(around: ghostTimeMs) else { return nil }
+        let start = clamp(ghostTimeMs, gap.start, gap.end)
+        let end = min(start + CameraLayoutRange.initialDurationMs, gap.end)
+        return end - start >= CameraLayoutRange.minimumDurationMs ? (start, end) : nil
+    }
+
+    private var createGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard isFocused else { return }
+                let a = geometry.sourceTime(value.startLocation.x)
+                let b = geometry.sourceTime(value.location.x)
+                if abs(value.translation.width) > 3, let gap = editor.freeLayoutRange(around: a) {
+                    creation = (clamp(min(a, b), gap.start, gap.end), clamp(max(a, b), gap.start, gap.end))
+                }
+            }
+            .onEnded { _ in
+                guard isFocused else {
+                    editor.focusedTrack = "camera-mode"
+                    return
+                }
+                if let creation, creation.end - creation.start >= CameraLayoutRange.minimumDurationMs {
+                    editor.addLayout(startMs: creation.start, endMs: creation.end)
+                } else if let range = ghostRange {
+                    editor.addLayout(startMs: range.start, endMs: range.end)
+                }
+                creation = nil
+            }
+    }
+}
+
+private struct LayoutItem: View {
+    @ObservedObject var editor: EditorModel
+    var layout: CameraLayoutRange
+    var geometry: TimelineGeometry
+    var height: CGFloat
+    var isFocused: Bool
+    var hoverTimeMs: Double?
+    @State private var hovered = false
+    @State private var dragOrigin: CameraLayoutRange?
+
+    private var isOpen: Bool { editor.openLayoutID == layout.id }
+
+    /// Chip text per type.
+    static func chip(_ type: CameraLayoutType) -> String {
+        switch type {
+        case .fullscreenCamera: "Fullscreen"
+        case .splitScreen: "Split screen"
+        case .screenOnly: "Screen only"
+        case .cameraOverlay: "Camera overlay"
+        case .cutoutCamera: "Camera cutout"
+        }
+    }
+
+    var body: some View {
+        let width = max(geometry.sx(layout.endMs) - geometry.sx(layout.startMs) - 1, 1)
+        let handle = floor(min(16, width / 3))
+        // Disabled look when disabled or when it changes nothing over the default layout.
+        let looksDisabled = layout.isDisabled || editor.project.isEqualToDefaultLayout(layout)
+        TrackItemBody(color: TrackColors.layout, isPlayed: layout.contains(editor.currentSourceTimeMs), isActive: isOpen, isSelected: isOpen)
+            .overlay { if isFocused { TrackItemLabels(kind: "Layout", chips: [("warninglight", Self.chip(layout.type))], width: width) } }
+            .overlay(alignment: .leading) { if handle >= 16 && isFocused { resizeHandle(leading: true, width: handle) } }
+            .overlay(alignment: .trailing) { if handle >= 16 && isFocused { resizeHandle(leading: false, width: handle) } }
+            .frame(width: width, height: height)
+            .opacity(looksDisabled ? 0.5 : editor.openLayoutID != nil && !isOpen ? 0.3 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .onHover { hovered = $0 }
+            .gesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { value in
+                        guard !editor.isSplitToolActive else { return }
+                        let origin = dragOrigin ?? layout
+                        if dragOrigin == nil { dragOrigin = layout }
+                        editor.moveLayout(layout.id, toStart: geometry.sourceTime(from: origin.startMs, movedBy: value.translation.width))
+                    }
+                    .onEnded { _ in dragOrigin = nil }
+            )
+            .simultaneousGesture(TapGesture().onEnded {
+                if editor.isSplitToolActive, let hoverTimeMs {
+                    editor.splitLayout(layout.id, at: hoverTimeMs)
+                } else {
+                    editor.openLayout(layout.id)
+                }
+            })
+            .contextMenu { menu }
+            .offset(x: geometry.sx(layout.startMs) + 1)
+    }
+
+    /// Palette [Overlay, Cutout, Fullscreen, Hide camera], split, remove.
+    @ViewBuilder
+    private var menu: some View {
+        Button { setType(.cameraOverlay) } label: { Label("Overlay", systemImage: "square.grid.3x3") }
+            .keyboardShortcut("1", modifiers: [])
+        // Cutout needs person segmentation, which this app does not have (`isEnabled`).
+        Button {} label: { Label("Cutout", systemImage: "person.and.background.dotted") }
+            .keyboardShortcut("4", modifiers: [])
+            .disabled(true)
+        Button { setType(.fullscreenCamera) } label: { Label("Fullscreen", systemImage: "person.crop.rectangle") }
+            .keyboardShortcut("2", modifiers: [])
+        Button { setType(.screenOnly) } label: { Label("Hide camera", systemImage: "macwindow") }
+            .keyboardShortcut("3", modifiers: [])
+        Divider()
+        Button("Split layout at current time") { editor.splitLayout(layout.id, at: editor.currentSourceTimeMs) }
+            .keyboardShortcut("c", modifiers: [])
+        Divider()
+        Button("Remove layout", role: .destructive) { editor.removeLayouts([layout.id]) }
+            .keyboardShortcut(.delete, modifiers: [])
+    }
+
+    private func setType(_ type: CameraLayoutType) {
+        editor.updateLayout(layout.id) { $0.type = type }
+    }
+
+    private func resizeHandle(leading: Bool, width: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: width)
+            .overlay {
+                Capsule().fill(Color.white).frame(width: 3).padding(.vertical, 9).opacity(hovered ? 1 : 0)
+            }
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let origin = dragOrigin ?? layout
+                        if dragOrigin == nil { dragOrigin = layout }
+                        let edge = leading ? origin.startMs : origin.endMs
+                        editor.resizeLayout(layout.id, leading: leading, to: geometry.sourceTime(from: edge, movedBy: value.translation.width))
                     }
                     .onEnded { _ in dragOrigin = nil }
             )

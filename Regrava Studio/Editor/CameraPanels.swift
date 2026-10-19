@@ -378,3 +378,72 @@ struct OptionDotPicker: View {
         .background(RoundedRectangle(cornerRadius: Theme.Boxes.control.radius).fill(Theme.Colors.lighterBg))
     }
 }
+
+// MARK: - Layout range inspector
+
+/// The open layout range: "Disable layout", its type and position, the shared "Layout
+/// settings" (which edit the default layout) and "Remove layout".
+struct LayoutInspector: View {
+    @ObservedObject var editor: EditorModel
+    var layoutID: UUID
+
+    private var layout: CameraLayoutRange? { editor.project.cameraLayouts.first { $0.id == layoutID } }
+
+    var body: some View {
+        if let layout {
+            VStack(alignment: .leading, spacing: Theme.gap(3)) {
+                ToggleRow(
+                    title: "Disable layout",
+                    isOn: Binding(get: { layout.isDisabled }, set: { v in editor.updateLayout(layoutID) { $0.isDisabled = v } })
+                )
+                if !layout.isDisabled {
+                    VStack(alignment: .leading, spacing: 0) {
+                        SidebarSection {
+                            NamedField(name: "Layout type") {
+                                CameraLayoutTypePicker(
+                                    editor: editor,
+                                    types: CameraLayoutTypePicker.availableTypes(isDefaultLayout: false),
+                                    selection: Binding(get: { layout.type }, set: { v in editor.updateLayout(layoutID) { $0.type = v } })
+                                )
+                            }
+                        }
+                        switch layout.type {
+                        case .cameraOverlay:
+                            SidebarSection {
+                                NamedField(name: "Camera Position") {
+                                    OptionDotPicker(
+                                        value: Binding(get: { layout.overlayPosition01 }, set: { v in editor.updateLayout(layoutID) { $0.overlayPosition01 = v } }),
+                                        options: OptionDotPicker.eightPositions
+                                    )
+                                }
+                            }
+                            sharedSettings {
+                                OverlayLayoutOptionsView(options: editor.binding(\.defaultLayout.cameraOverlay), disablePositionPicker: true)
+                            }
+                        case .splitScreen:
+                            sharedSettings {
+                                SplitLayoutOptionsView(editor: editor, options: editor.binding(\.defaultLayout.splitScreen))
+                            }
+                        default:
+                            EmptyView()
+                        }
+                    }
+                }
+                RSButton(title: "Remove layout", icon: "trash", kind: .secondary) { editor.removeLayouts([layoutID]) }
+            }
+        }
+    }
+
+    /// "Layout settings" with the shared-properties badge.
+    private func sharedSettings<Content: View>(@ViewBuilder _ content: @escaping () -> Content) -> some View {
+        SidebarSection {
+            NamedField(
+                name: "Layout settings",
+                icon: "inset.filled.rectangle.and.person.filled",
+                badge: ("cube.transparent", "Layout properties are shared across all layouts in the project.")
+            ) {
+                content()
+            }
+        }
+    }
+}

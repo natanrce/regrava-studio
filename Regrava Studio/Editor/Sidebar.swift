@@ -115,6 +115,10 @@ struct SidebarPanel: View {
                     RSButton(title: "Close Mask editor", icon: "arrow.left", kind: .secondary) { editor.sidebarItem = nil }
                         .padding(.bottom, Theme.gap(3))
                     MaskInspector(editor: editor, maskID: id)
+                } else if let id = editor.openLayoutID {
+                    RSButton(title: "Close Camera Layout editor", icon: "arrow.left", kind: .secondary) { editor.sidebarItem = nil }
+                        .padding(.bottom, Theme.gap(3))
+                    LayoutInspector(editor: editor, layoutID: id)
                 } else if let id = editor.openSliceID {
                     RSButton(title: "Close Slice editor", icon: "arrow.left", kind: .secondary) { editor.sidebarItem = nil }
                         .padding(.bottom, Theme.gap(3))

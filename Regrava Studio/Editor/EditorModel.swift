@@ -15,6 +15,7 @@ enum SidebarItem: Equatable {
     case zoom(UUID)
     case slice(UUID)
     case mask(UUID)
+    case layout(UUID)
 }
 
 /// `view.layoutType`.
@@ -56,6 +57,10 @@ final class EditorModel: ObservableObject {
     /// Mask add tool (`activeAddTool = "mask"`, `addMaskType`).
     @Published var isAddMaskToolArmed = false
     @Published var addMaskType: MaskType = .sensitiveData
+    /// Layout add tool (`activeAddTool = "layout"`); only camera overlay arms it.
+    @Published var isAddLayoutToolArmed = false
+    /// Last layout type chosen from the add tools (`addLayoutType`), used by ⌃L.
+    @Published var addLayoutType: CameraLayoutType = .cameraOverlay
     @Published var isSplitToolActive = false
     /// Visible timeline duration (zoom level of the timeline).
     @Published var visibleDurationMs: Double = 30_000
@@ -168,6 +173,7 @@ final class EditorModel: ObservableObject {
         if case .zoom(let id) = sidebarItem, !project.zooms.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .slice(let id) = sidebarItem, !project.slices.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .mask(let id) = sidebarItem, !project.masks.contains(where: { $0.id == id }) { sidebarItem = nil }
+        if case .layout(let id) = sidebarItem, !project.cameraLayouts.contains(where: { $0.id == id }) { sidebarItem = nil }
         selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
         isDirty = true
         scheduleAutosave()
@@ -399,6 +405,8 @@ final class EditorModel: ObservableObject {
     func closeCurrentSidebarPanel() {
         if isAddMaskToolArmed {
             isAddMaskToolArmed = false
+        } else if isAddLayoutToolArmed {
+            isAddLayoutToolArmed = false
         } else if isAddZoomToolArmed {
             isAddZoomToolArmed = false
         } else if isSplitToolActive {
@@ -489,6 +497,7 @@ final class EditorModel: ObservableObject {
         addMaskType = type
         isAddMaskToolArmed = true
         isAddZoomToolArmed = false
+        isAddLayoutToolArmed = false
         pause()
         sidebarItem = nil
     }
