@@ -314,6 +314,8 @@ struct NamedField<Content: View>: View {
     var description: String?
     var horizontal = false
     var togglable = false
+    /// Icon pill before the name with a tooltip (`badge`).
+    var badge: (icon: String, tooltip: String)?
     @State private var isOpen: Bool
     @ViewBuilder var content: () -> Content
 
@@ -324,10 +326,12 @@ struct NamedField<Content: View>: View {
         horizontal: Bool = false,
         togglable: Bool = false,
         defaultOpen: Bool = false,
+        badge: (icon: String, tooltip: String)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.name = name
         self.icon = icon
+        self.badge = badge
         self.description = description
         self.horizontal = horizontal
         self.togglable = togglable
@@ -338,6 +342,15 @@ struct NamedField<Content: View>: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: Theme.gap(1)) {
+                if let badge {
+                    Image(systemName: badge.icon)
+                        .font(Theme.Typo.label)
+                        .foregroundStyle(Theme.Colors.tertiary)
+                        .padding(.horizontal, Theme.Boxes.badge.paddingX)
+                        .frame(minHeight: Theme.Boxes.badge.height)
+                        .background(Capsule().fill(Theme.Colors.primaryActiveText.opacity(0.1)))
+                        .help(badge.tooltip)
+                }
                 if let icon { Image(systemName: icon).font(.system(size: 14)) }
                 Text(name).font(Theme.Typo.copy)
                 if togglable {

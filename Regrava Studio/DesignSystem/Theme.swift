@@ -73,6 +73,7 @@ enum Theme {
         static let squareControl = Box(height: 38, width: 38, radius: 5, paddingX: 14)
         static let smallSquareControl = Box(height: 28, width: 28, radius: 6, paddingX: 8)
         static let toolbar = Box(height: 38, width: 46, radius: 6, paddingX: 12)
+        static let badge = Box(height: 22, radius: 50, paddingX: 8)
     }
 }
 
