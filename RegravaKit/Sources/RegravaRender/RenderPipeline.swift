@@ -31,6 +31,22 @@ public final class RenderState: @unchecked Sendable {
         return snapshot
     }
 
+    private var _quality: RenderQuality = .export
+
+    /// Playback, paused or export quality of the frames rendered from now on.
+    public var quality: RenderQuality {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _quality
+        }
+        set {
+            lock.lock()
+            _quality = newValue
+            lock.unlock()
+        }
+    }
+
     public func replace(with newSnapshot: Snapshot) {
         lock.lock()
         snapshot = newSnapshot
@@ -39,7 +55,7 @@ public final class RenderState: @unchecked Sendable {
 
     public func render(source: CIImage, camera: CIImage? = nil, timeMs: Double) -> CIImage {
         let s = current
-        return s.compositor.compose(source: source, camera: camera, frame: s.track.frame(at: timeMs))
+        return s.compositor.compose(source: source, camera: camera, frame: s.track.frame(at: timeMs), quality: quality)
     }
 }
 

@@ -41,7 +41,7 @@ public final class FrameCompositor: @unchecked Sendable {
         CGPoint(x: p.x, y: canvasHeight - p.y)
     }
 
-    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame) -> CIImage {
+    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
         // Masks act on the recording itself, so they follow zoom and motion blur.
         let src = MaskRenderer.apply(frame.mask, to: source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)))
@@ -63,7 +63,7 @@ public final class FrameCompositor: @unchecked Sendable {
         var screenImage = screenLayer(src, rect: now)
         if !isStatic {
             let bounds = ciRect(now).union(ciRect(trailStart)).integral
-            let samples = MotionBlur.sampleCount(travel: now.cornerTravel(to: trailStart))
+            let samples = MotionBlur.sampleCount(travel: now.cornerTravel(to: trailStart), quality: quality)
             if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in
                 self.screenLayer(src, rect: trailStart.lerp(to: now, t))
             }) {
@@ -97,7 +97,7 @@ public final class FrameCompositor: @unchecked Sendable {
                 let bounds = cursorImage.extent
                     .union(placedCursor(cursor, tip: trailTip, frame: frame, pixelsPerPoint: pixelsPerPoint * trailScale).extent)
                     .integral
-                if let blurred = MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel), bounds: bounds, layer: { t in
+                if let blurred = MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel, quality: quality), bounds: bounds, layer: { t in
                     self.placedCursor(
                         cursor,
                         tip: trailTip.lerp(to: tip, t),

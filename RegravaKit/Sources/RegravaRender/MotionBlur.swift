@@ -5,11 +5,18 @@ import RegravaCore
 /// Motion blur: a moving layer is averaged along the trail between where it is now and
 /// `lerp(now, previousFrame, strength)`, with `strength = motionBlurAmount × fps / 60`. Samples
 /// where the layer is absent weigh more (`fp(alpha, 2) = 1 + 2·smoothstep(0, 1, 1 − alpha)`), so
-/// the trail fades out smoothly.
+/// the trail fades out smoothly. How much work a frame may take: export and paused frames use
+/// the full motion blur quality, playback a lighter one.
+public enum RenderQuality: Sendable {
+    case export, pausedHigh, pausedLow, playing
+
+    /// `qualityByMode`: most samples along a trail.
+    var maxSamples: Int { self == .playing ? 6 : 16 }
+    /// `fetchSpanTexelsByMode`: one sample every this many texels of travel.
+    var texelsPerSample: Double { self == .export || self == .pausedHigh ? 4 : 16 }
+}
+
 enum MotionBlur {
-    /// Export quality: at most 16 samples, one every 4 texels of travel.
-    static let maxSamples = 16
-    static let texelsPerSample = 4.0
     /// `smoothFalloffRatio` used for the screen and the cursor.
     static let smoothFalloffRatio = 2.0
 
@@ -23,8 +30,8 @@ enum MotionBlur {
     }
 
     /// Number of samples for a trail `travel` canvas pixels long.
-    static func sampleCount(travel: Double) -> Int {
-        Int(clamp((travel / texelsPerSample).rounded(.up), 1, Double(maxSamples)))
+    static func sampleCount(travel: Double, quality: RenderQuality = .export) -> Int {
+        Int(clamp((travel / quality.texelsPerSample).rounded(.up), 1, Double(quality.maxSamples)))
     }
 
     /// Averages `layer(t)` for t spread over the trail (0 = trail start, 1 = now), inside `bounds`.

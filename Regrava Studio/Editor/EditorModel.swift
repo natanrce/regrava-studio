@@ -41,7 +41,9 @@ final class EditorModel: ObservableObject {
 
     // Playback
     @Published private(set) var currentTimeMs: Double = 0
-    @Published private(set) var isPlaying = false
+    @Published private(set) var isPlaying = false {
+        didSet { if oldValue != isPlaying { updateRenderQuality() } }
+    }
     /// `playback.defaultRate`: 0.25…8.
     @Published var playbackRate: Double = 1
 
@@ -91,7 +93,9 @@ final class EditorModel: ObservableObject {
     private var redoStack: [Project] = []
     private var lastCoalesceKey: String?
     private var lastChangeAt = Date.distantPast
-    private var isScrubbing = false
+    private var isScrubbing = false {
+        didSet { if oldValue != isScrubbing { updateRenderQuality() } }
+    }
     private var cancellables: Set<AnyCancellable> = []
 
     init(bundleURL: URL, project: Project) {
@@ -291,6 +295,20 @@ final class EditorModel: ObservableObject {
                 item.videoComposition = AVVideoComposition(configuration: base)
                 if !self.isPlaying { self.seek(to: self.isScrubbing ? self.scrubTimeMs : self.currentTimeMs, moveHead: false) }
             }
+        }
+    }
+
+    /// Lighter motion blur while playing, full quality when paused (`wf.qualityByMode`). A frame
+    /// left on screen after playback or scrubbing is drawn again at full quality.
+    private func updateRenderQuality() {
+        let quality: RenderQuality = isPlaying ? .playing : isScrubbing ? .pausedLow : .pausedHigh
+        let previous = renderState.quality
+        guard quality != previous else { return }
+        renderState.quality = quality
+        if quality == .pausedHigh, previous == .playing || previous == .pausedLow,
+           let base = baseConfiguration, let item = player.currentItem {
+            item.videoComposition = AVVideoComposition(configuration: base)
+            seek(to: currentTimeMs, moveHead: false)
         }
     }
 
