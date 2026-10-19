@@ -66,6 +66,7 @@ struct EditorTimeline: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
+                    if editor.isSplitToolActive { SplitCursor.cursor.set() }
                     isHovering = true
                     hoverX = location.x
                     editor.scrub(to: time(location.x))
@@ -78,6 +79,9 @@ struct EditorTimeline: View {
             .onTapGesture { location in
                 guard !editor.isSplitToolActive else { return }
                 editor.seek(to: time(location.x))
+            }
+            .onChange(of: editor.isSplitToolActive) { _, active in
+                if isHovering { (active ? SplitCursor.cursor : NSCursor.arrow).set() }
             }
             .onAppear { width = geometry.size.width; installWheelMonitor() }
             .onChange(of: geometry.size.width) { _, newWidth in width = newWidth }
@@ -197,7 +201,7 @@ private struct GridLines: View {
     }
 }
 
-/// 1 px line fading toward the bottom, with a teardrop head (12×12, radius 10/10/10/0, −45°).
+/// 1 px line fading toward the bottom, with a teardrop head pointing down (12×12, radius 10/10/10/0, −45°).
 private struct Playhead: View {
     var color: Color
     var height: CGFloat
@@ -207,7 +211,8 @@ private struct Playhead: View {
             Rectangle()
                 .fill(LinearGradient(colors: [color, color.opacity(0)], startPoint: .top, endPoint: .bottom))
                 .frame(width: 1, height: height)
-            UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10, bottomTrailingRadius: 0, topTrailingRadius: 10)
+            // CSS radius `10 10 10 0`: the sharp corner is the bottom-left one, so −45° points down.
+            UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 0, bottomTrailingRadius: 10, topTrailingRadius: 10)
                 .fill(color)
                 .frame(width: 12, height: 12)
                 .rotationEffect(.degrees(-45))
@@ -533,6 +538,8 @@ private struct TypingSuggestionChip: View {
     var range: TimeRange
     var geometry: TimelineGeometry
     @State private var isOpen = false
+    /// Padding 4/6/3 around a 12 px line.
+    static let height: CGFloat = 4 + 12 + 3
 
     var body: some View {
         let start = geometry.sx(range.startMs)
@@ -542,13 +549,13 @@ private struct TypingSuggestionChip: View {
                 .fill(TrackColors.clip.mix(with: .black, by: 0.3))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(TrackColors.clip.mix(with: .white, by: 0.3), lineWidth: 1))
                 .overlay(Image(systemName: "keyboard").font(.system(size: 10)).foregroundStyle(.white.opacity(0.9)))
-                .frame(width: width, height: 16)
+                .frame(width: width, height: Self.height)
         }
         .buttonStyle(.plain)
         .help("Speed up typing")
-        // Laid out at the chip's position so the popover is anchored on it.
+        // Sits on top of the clip track with 1 px between (bottom 100%, padding-bottom 1).
         .alignmentGuide(.leading) { _ in -start }
-        .alignmentGuide(.top) { _ in 22 }
+        .alignmentGuide(.top) { _ in Self.height + 1 }
         .popover(isPresented: $isOpen, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: Theme.gap(2)) {
                 SliderField(
@@ -792,7 +799,7 @@ private struct ZoomItem: View {
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { inside in
             hovered = inside
-            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+            if inside && !editor.isSplitToolActive { NSCursor.openHand.push() } else if !inside { NSCursor.pop() }
         }
         .gesture(moveGesture)
         .simultaneousGesture(TapGesture().onEnded { tap() })
@@ -1256,5 +1263,34 @@ private struct LayoutItem: View {
                     }
                     .onEnded { _ in dragOrigin = nil }
             )
+    }
+}
+
+/// Split tool cursor: scissors with the hotspot at 16,16 of a 32 pt image. Drawn from the
+/// `scissors` symbol.
+enum SplitCursor {
+    static let cursor: NSCursor = {
+        let size = NSSize(width: 32, height: 32)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            guard let symbol = NSImage(systemSymbolName: "scissors", accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return false }
+            let s = symbol.size
+            let frame = NSRect(x: rect.midX - s.width / 2, y: rect.midY - s.height / 2, width: s.width, height: s.height)
+            // White outline under the black symbol so it reads on any background.
+            for dx in [-1.0, 1.0] { for dy in [-1.0, 1.0] { tinted(symbol, .white).draw(in: frame.offsetBy(dx: dx, dy: dy)) } }
+            tinted(symbol, .black).draw(in: frame)
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: 16, y: 16))
+    }()
+
+    private static func tinted(_ image: NSImage, _ color: NSColor) -> NSImage {
+        let copy = NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            color.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        return copy
     }
 }
