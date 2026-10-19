@@ -60,6 +60,8 @@ public struct CameraFrame: Hashable, Sendable {
     public var cameraOpacity: Double = 0
     /// Drawn corner radius in canvas pixels.
     public var cameraCornerRadius: Double = 0
+    /// Camera width over its layout's resting width: scales its shadow.
+    public var cameraSizeFactor: Double = 1
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -188,7 +190,8 @@ public final class CameraTrack: @unchecked Sendable {
                 let rect = cameraRect.rect
                 frame.cameraRect = layout.toCanvas(rect)
                 frame.cameraOpacity = clamp(cameraOpacity.value, 0, 1)
-                frame.cameraCornerRadius = cameraRadius.value * rect.width / max(cameraReference.value, 0.0001) * layout.scale
+                frame.cameraSizeFactor = rect.width / max(cameraReference.value, 0.0001)
+                frame.cameraCornerRadius = cameraRadius.value * frame.cameraSizeFactor * layout.scale
             }
             frame.cursorScale = press.value
             frame.isInstantSnap = target.instant
@@ -241,6 +244,7 @@ public final class CameraTrack: @unchecked Sendable {
         }
         frame.cameraOpacity = a.cameraOpacity + (b.cameraOpacity - a.cameraOpacity) * f
         frame.cameraCornerRadius = a.cameraCornerRadius + (b.cameraCornerRadius - a.cameraCornerRadius) * f
+        frame.cameraSizeFactor = a.cameraSizeFactor + (b.cameraSizeFactor - a.cameraSizeFactor) * f
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {

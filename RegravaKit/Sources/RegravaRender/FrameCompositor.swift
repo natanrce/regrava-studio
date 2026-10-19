@@ -16,6 +16,7 @@ public final class FrameCompositor: @unchecked Sendable {
     private let background: CIImage
     private let motionBlurAmount: Double
     private let fps: Int
+    private let camera: CameraConfig
 
     /// `assetsDirectory` is the project folder (for background images).
     public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil) {
@@ -26,6 +27,7 @@ public final class FrameCompositor: @unchecked Sendable {
         self.cursors = cursors
         motionBlurAmount = project.animation.motionBlurAmount
         fps = project.recording.fps
+        camera = project.camera
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
@@ -39,7 +41,7 @@ public final class FrameCompositor: @unchecked Sendable {
         CGPoint(x: p.x, y: canvasHeight - p.y)
     }
 
-    public func compose(source: CIImage, frame: CameraFrame) -> CIImage {
+    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
         // Masks act on the recording itself, so they follow zoom and motion blur.
         let src = MaskRenderer.apply(frame.mask, to: source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)))
@@ -109,6 +111,11 @@ public final class FrameCompositor: @unchecked Sendable {
             output = cursorImage.composited(over: output)
         }
 
+        // The webcam is drawn above everything.
+        if let cameraImage, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
+            output = cameraLayer(cameraImage, rect: rect, frame: frame).composited(over: output)
+        }
+
         return output.cropped(to: canvasRect)
     }
 
@@ -135,6 +142,44 @@ public final class FrameCompositor: @unchecked Sendable {
             if let ringImage = ring.outputImage { image = ringImage.composited(over: image) }
         }
         return image
+    }
+
+    /// The webcam covering `rect` (centred focal point), cropped, mirrored, with rounded corners,
+    /// the screen's shadow, and faded and blurred while hiding.
+    private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame) -> CIImage {
+        var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        if let crop = camera.crop01 {
+            let e = content.extent
+            let window = CGRect(x: crop.x * e.width, y: (1 - crop.y - crop.height) * e.height, width: crop.width * e.width, height: crop.height * e.height)
+            content = content.cropped(to: window).transformed(by: CGAffineTransform(translationX: -window.minX, y: -window.minY))
+        }
+        if camera.mirror {
+            content = content.transformed(by: CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -content.extent.width, y: 0))
+        }
+        let target = ciRect(rect)
+        let size = content.extent.size
+        let k = max(target.width / max(size.width, 1), target.height / max(size.height, 1))
+        let w = size.width * k, h = size.height * k
+        let placed = content
+            .transformed(by: CGAffineTransform(scaleX: k, y: k))
+            .transformed(by: CGAffineTransform(translationX: target.midX - w / 2, y: target.midY - h / 2))
+        let radius = min(frame.cameraCornerRadius, min(target.width, target.height) / 2)
+        var layer = masked(placed.cropped(to: target), to: target, radius: radius)
+        if style.shadow.intensity > 0 {
+            layer = layer.composited(over: shadow(for: target, radius: radius, zoomFactor: frame.cameraSizeFactor))
+        }
+        let opacity = frame.cameraOpacity
+        if opacity < 1 {
+            let blur = 10 * (1 - opacity) * layout.scale
+            if blur > 0.1 { layer = layer.clampedToExtent().applyingGaussianBlur(sigma: blur).cropped(to: layer.extent.insetBy(dx: -3 * blur, dy: -3 * blur)) }
+            layer = layer.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: CGFloat(opacity), y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: CGFloat(opacity), z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: CGFloat(opacity), w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity)),
+            ])
+        }
+        return layer
     }
 
     // MARK: Pieces

@@ -37,9 +37,9 @@ public final class RenderState: @unchecked Sendable {
         lock.unlock()
     }
 
-    public func render(source: CIImage, timeMs: Double) -> CIImage {
+    public func render(source: CIImage, camera: CIImage? = nil, timeMs: Double) -> CIImage {
         let s = current
-        return s.compositor.compose(source: source, frame: s.track.frame(at: timeMs))
+        return s.compositor.compose(source: source, camera: camera, frame: s.track.frame(at: timeMs))
     }
 }
 
@@ -74,9 +74,11 @@ public enum CompositionFactory {
         var rate = Float(fps ?? 0)
         if rate <= 0, let track = tracks.first { rate = try await track.load(.nominalFrameRate) }
         if rate <= 0 { rate = 60 }
+        // The screen is the first video track; the webcam, when present, the second.
         let instruction = CanvasInstruction(
             timeRange: CMTimeRange(start: .zero, duration: duration),
             trackID: tracks.first?.trackID ?? kCMPersistentTrackID_Invalid,
+            cameraTrackID: tracks.count > 1 ? tracks[1].trackID : nil,
             state: state,
             canvas: canvas,
             renderSize: renderSize
@@ -98,17 +100,19 @@ final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
     let requiredSourceTrackIDs: [NSValue]?
     let passthroughTrackID = kCMPersistentTrackID_Invalid
     let trackID: CMPersistentTrackID
+    let cameraTrackID: CMPersistentTrackID?
     let state: RenderState
     let canvas: Size2
     let renderSize: CGSize
 
-    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, state: RenderState, canvas: Size2, renderSize: CGSize) {
+    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, state: RenderState, canvas: Size2, renderSize: CGSize) {
         self.timeRange = timeRange
         self.trackID = trackID
+        self.cameraTrackID = cameraTrackID
         self.state = state
         self.canvas = canvas
         self.renderSize = renderSize
-        requiredSourceTrackIDs = [NSNumber(value: trackID)]
+        requiredSourceTrackIDs = ([trackID] + (cameraTrackID.map { [$0] } ?? [])).map { NSNumber(value: $0) }
     }
 }
 
@@ -136,7 +140,8 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
             return
         }
         let timeMs = request.compositionTime.seconds * 1000
-        var image = instruction.state.render(source: CIImage(cvPixelBuffer: source), timeMs: timeMs)
+        let camera = instruction.cameraTrackID.flatMap { request.sourceFrame(byTrackID: $0) }.map { CIImage(cvPixelBuffer: $0) }
+        var image = instruction.state.render(source: CIImage(cvPixelBuffer: source), camera: camera, timeMs: timeMs)
         let scaleX = instruction.renderSize.width / max(instruction.canvas.width, 1)
         let scaleY = instruction.renderSize.height / max(instruction.canvas.height, 1)
         if scaleX != 1 || scaleY != 1 {
@@ -160,7 +165,14 @@ public struct PlaybackMedia: @unchecked Sendable {
 /// to its speed (gaps between clips are left out). Composition time is playback time.
 public enum PlaybackComposition {
     public static func make(asset: AVAsset, slices: [Slice]) async throws -> AVAsset {
-        try await composition(asset: asset, slices: slices, backgroundAudio: nil, playbackDurationMs: 0) ?? asset
+        try await composition(asset: asset, slices: slices, camera: nil, backgroundAudio: nil, playbackDurationMs: 0) ?? asset
+    }
+
+    /// The webcam movie of a project: saved beside the screen recording.
+    static func cameraAsset(project: Project, recording: AVAsset) -> AVAsset? {
+        guard let name = project.recording.cameraFileName, let screen = (recording as? AVURLAsset)?.url else { return nil }
+        let url = screen.deletingLastPathComponent().appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: url.path) ? AVURLAsset(url: url) : nil
     }
 
     /// The playable media for a project: each recorded source at its clip volumes unless
@@ -174,7 +186,8 @@ public enum PlaybackComposition {
         }
         let resolver = project.resolver
         let playable = try await composition(
-            asset: asset, slices: project.slices, backgroundAudio: backgroundURL, playbackDurationMs: resolver.playbackDurationMs
+            asset: asset, slices: project.slices, camera: cameraAsset(project: project, recording: asset),
+            backgroundAudio: backgroundURL, playbackDurationMs: resolver.playbackDurationMs
         ) ?? asset
         let tracks = try await playable.loadTracks(withMediaType: .audio)
         guard !tracks.isEmpty else { return PlaybackMedia(asset: playable, audioMix: nil) }
@@ -205,31 +218,44 @@ public enum PlaybackComposition {
     }
 
     /// nil when the file can be played as it is.
-    private static func composition(asset: AVAsset, slices: [Slice], backgroundAudio: URL?, playbackDurationMs: Double) async throws -> AVAsset? {
+    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, backgroundAudio: URL?, playbackDurationMs: Double) async throws -> AVAsset? {
         let duration = try await asset.load(.duration)
         let durationMs = duration.seconds * 1000
-        if backgroundAudio == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
+        if backgroundAudio == nil, camera == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
             return nil
         }
         let composition = AVMutableComposition()
-        for type in [AVMediaType.video, .audio] {
-            for track in try await asset.loadTracks(withMediaType: type) {
-                guard let target = composition.addMutableTrack(withMediaType: type, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-                target.preferredTransform = try await track.load(.preferredTransform)
-                var cursor = CMTime.zero
-                for slice in slices {
-                    let start = CMTime(seconds: max(slice.sourceStartMs, 0) / 1000, preferredTimescale: 600)
-                    let end = CMTime(seconds: min(slice.sourceEndMs, durationMs) / 1000, preferredTimescale: 600)
-                    guard end > start else { continue }
-                    let range = CMTimeRange(start: start, end: end)
-                    try target.insertTimeRange(range, of: track, at: cursor)
-                    let scaled = CMTime(seconds: range.duration.seconds * slice.timeScale, preferredTimescale: 600)
-                    if scaled != range.duration {
-                        target.scaleTimeRange(CMTimeRange(start: cursor, duration: range.duration), toDuration: scaled)
+        /// Each clip's source range, in order, scaled to its speed. A shorter source (the webcam)
+        /// keeps the playback timing: missing parts are left empty.
+        func insertSliced(_ track: AVAssetTrack, type: AVMediaType, sourceDurationMs: Double) async throws {
+            guard let target = composition.addMutableTrack(withMediaType: type, preferredTrackID: kCMPersistentTrackID_Invalid) else { return }
+            target.preferredTransform = try await track.load(.preferredTransform)
+            var cursor = CMTime.zero
+            for slice in slices {
+                let start = CMTime(seconds: max(slice.sourceStartMs, 0) / 1000, preferredTimescale: 600)
+                let end = CMTime(seconds: min(slice.sourceEndMs, durationMs) / 1000, preferredTimescale: 600)
+                guard end > start else { continue }
+                let range = CMTimeRange(start: start, end: end)
+                let scaled = CMTime(seconds: range.duration.seconds * slice.timeScale, preferredTimescale: 600)
+                let available = CMTimeRange(start: start, end: CMTimeMinimum(end, CMTime(seconds: sourceDurationMs / 1000, preferredTimescale: 600)))
+                if available.duration > .zero {
+                    try target.insertTimeRange(available, of: track, at: cursor)
+                    let scaledAvailable = CMTime(seconds: available.duration.seconds * slice.timeScale, preferredTimescale: 600)
+                    if scaledAvailable != available.duration {
+                        target.scaleTimeRange(CMTimeRange(start: cursor, duration: available.duration), toDuration: scaledAvailable)
                     }
-                    cursor = cursor + scaled
                 }
+                cursor = cursor + scaled
             }
+        }
+        for track in try await asset.loadTracks(withMediaType: .video) {
+            try await insertSliced(track, type: .video, sourceDurationMs: durationMs)
+        }
+        if let camera, let track = try await camera.loadTracks(withMediaType: .video).first {
+            try await insertSliced(track, type: .video, sourceDurationMs: try await camera.load(.duration).seconds * 1000)
+        }
+        for track in try await asset.loadTracks(withMediaType: .audio) {
+            try await insertSliced(track, type: .audio, sourceDurationMs: durationMs)
         }
         // Background audio, repeated until the end (`repeatUntilMs`).
         if let backgroundAudio {

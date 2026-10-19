@@ -61,6 +61,25 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         #expect(image.extent == CGRect(x: 0, y: 0, width: 1920, height: 1080))
     }
 
+    @Test func drawsTheWebcamInItsLayoutRect() {
+        var project = sampleProject(duration: 2000)
+        project.zooms = []
+        project.style.shadow.intensity = 0
+        project.recording.cameraFileName = "camera.mov"
+        project.recording.cameraSize = Size2(width: 320, height: 180)
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: nil)
+        let frame = snapshot.track.frame(at: 1000)
+        let rect = frame.cameraRect!
+        let screen = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
+        let camera = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let image = snapshot.compositor.compose(source: screen, camera: camera, frame: frame)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        // Centre of the camera, in Core Image (bottom-left) coordinates.
+        let point = CGRect(x: rect.midX, y: 1080 - rect.midY, width: 1, height: 1)
+        CIContext().render(image, toBitmap: &pixel, rowBytes: 4, bounds: point, format: .RGBA8, colorSpace: nil)
+        #expect(pixel[0] > 240 && pixel[2] < 15)
+    }
+
     /// Set REGRAVA_SNAPSHOT_DIR to write rest/zoomed PNG frames for visual inspection.
     @Test func writesSnapshotsWhenRequested() throws {
         guard let dir = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_DIR"] else { return }
@@ -152,6 +171,23 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
             let gif = CGImageSourceCreateWithURL(output as CFURL, nil)
             // 1.5 s of playback at 10 fps.
             #expect(abs(Double(gif.map(CGImageSourceGetCount) ?? 0) - 15) <= 2)
+        }
+    }
+
+    @Test func webcamBecomesTheSecondVideoTrack() async throws {
+        try await withTestVideo { source, dir in
+            let assets = ProjectStore.assetsURL(bundle: dir)
+            try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+            try await makeTestVideo(url: dir.appendingPathComponent("camera.mov"), width: 320, height: 180, frames: 45, fps: 30)
+            var project = sampleProject(duration: 2000)
+            project.recording.cameraFileName = "camera.mov"
+            project.recording.cameraSize = Size2(width: 320, height: 180)
+            let media = try await PlaybackComposition.media(asset: AVURLAsset(url: source), project: project, assetsDirectory: assets)
+            let tracks = try await media.asset.loadTracks(withMediaType: .video)
+            #expect(tracks.count == 2)
+            let output = dir.appendingPathComponent("camera-export.mp4")
+            try await ProjectExporter.export(project: project, videoURL: source, settings: ExportSettings.defaults(for: .mp4), to: output, cursors: nil)
+            #expect(FileManager.default.fileExists(atPath: output.path))
         }
     }
 
