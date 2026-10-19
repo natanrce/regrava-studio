@@ -1,5 +1,6 @@
 import AppKit
 import RegravaCore
+import RegravaRender
 import SwiftUI
 
 /// Debug aid: `Regrava Studio --render-ui <dir>` renders key screens offscreen to PNG files
@@ -19,6 +20,11 @@ enum UISnapshots {
     }
 
     private static func render(to directory: URL) {
+        // Wallpaper library as seen from the app bundle.
+        let library = WallpaperLibrary.categories.map { "\($0.name): \($0.wallpapers.count)" }.joined(separator: "\n")
+        let resolved = WallpaperLibrary.url(for: BackgroundConfig.defaultWallpaper) != nil
+        try? "\(library)\ndefault resolves: \(resolved)\n".write(to: directory.appendingPathComponent("wallpapers.txt"), atomically: true, encoding: .utf8)
+
         for tab in SettingsTab.allCases {
             let state = SettingsState()
             state.tab = tab
