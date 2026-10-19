@@ -101,6 +101,9 @@ enum UISnapshots {
             MaskRange(startMs: 6000, endMs: 9000, bounds: [Rect2(x: 1100, y: 800, width: 700, height: 160)]),
             MaskRange(startMs: 21_000, endMs: 25_000, bounds: [Rect2(x: 400, y: 300, width: 900, height: 500)], type: .highlight),
         ]
+        // A webcam (the movie itself is absent) so the camera panels are enabled.
+        project.recording.cameraFileName = "camera.mov"
+        project.recording.cameraSize = Size2(width: 1920, height: 1080)
         let controller = EditorWindowController(bundleURL: bundle, project: project)
         guard let window = controller.window, let view = window.contentView else { return }
         window.setFrame(NSRect(x: -10_000, y: -10_000, width: 1440, height: 860), display: true)
@@ -110,6 +113,9 @@ enum UISnapshots {
             ("cursor", { controller.model.openSidebar(.cursor) }),
             ("animations", { controller.model.openSidebar(.animation) }),
             ("audio", { controller.model.openSidebar(.audio) }),
+            ("camera-layout", { controller.model.openSidebar(.cameraLayout) }),
+            ("camera-layout-split", { controller.model.change { $0.defaultLayout.type = .splitScreen } }),
+            ("camera-style", { controller.model.change { $0.defaultLayout.type = .cameraOverlay }; controller.model.openSidebar(.cameraStyle) }),
             ("command-menu", { controller.model.openSidebar(.background); controller.model.isCommandMenuOpen = true }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
             ("mask", { if let mask = controller.model.project.masks.first { controller.model.openMask(mask.id) } }),

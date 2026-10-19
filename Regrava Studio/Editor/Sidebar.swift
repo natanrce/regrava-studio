@@ -36,8 +36,8 @@ extension EditorModel {
         return [
             SidebarRailEntry(root: .background, name: "General", icon: "inset.filled.square.dashed", key: "1"),
             SidebarRailEntry(root: .cursor, name: "Cursor", icon: "cursorarrow", key: "2", disabledTooltip: project.mouseEvents.isEmpty ? "There is no mouse cursor recorded" : nil),
-            SidebarRailEntry(root: .cameraLayout, name: "Camera Layout", icon: "inset.filled.rectangle.and.person.filled", key: "3", disabledTooltip: "No camera recorded"),
-            SidebarRailEntry(root: .cameraStyle, name: "Camera Style", icon: "person.fill.viewfinder", key: "4", disabledTooltip: "No camera recorded"),
+            SidebarRailEntry(root: .cameraLayout, name: "Camera Layout", icon: "inset.filled.rectangle.and.person.filled", key: "3", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
+            SidebarRailEntry(root: .cameraStyle, name: "Camera Style", icon: "person.fill.viewfinder", key: "4", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
             SidebarRailEntry(root: .captions, name: "Captions", icon: "captions.bubble", key: "5", disabledTooltip: notYet),
             SidebarRailEntry(root: .transcript, name: "Edit by transcript", icon: "text.quote", key: "6", disabledTooltip: notYet),
             SidebarRailEntry(root: .audio, name: "Audio", icon: "speaker.wave.1", key: "7"),
@@ -124,6 +124,8 @@ struct SidebarPanel: View {
                     case .cursor: CursorPanel(editor: editor)
                     case .animation: AnimationsPanel(editor: editor)
                     case .audio: AudioPanel(editor: editor)
+                    case .cameraLayout: CameraLayoutPanel(editor: editor)
+                    case .cameraStyle: CameraStylePanel(editor: editor)
                     default: GeneralPanel(editor: editor)
                     }
                 }

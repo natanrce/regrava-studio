@@ -144,6 +144,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         default:
             switch (key, flags) {
             case ("k", [.command]): editor.isCommandMenuOpen.toggle()
+            case ("h", []):
+                // Registered by the Camera Layout panel while it is shown.
+                guard editor.sidebarRoot == .cameraLayout, editor.sidebarItem == nil, editor.layoutType.showsSidebar,
+                      editor.project.recording.hasCamera else { return false }
+                editor.change { $0.camera.hide.toggle() }
             case ("z", [.command]): editor.undo()
             case ("z", [.command, .shift]): editor.redo()
             case ("=", [.command]), ("+", [.command]): editor.zoomTimeline(in: true)

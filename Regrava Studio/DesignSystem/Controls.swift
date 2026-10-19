@@ -179,6 +179,8 @@ struct ToggleRow: View {
     var icon: String?
     var title: String
     var description: String?
+    /// Shows a two-option segmented control with these labels instead of the switch.
+    var labels: (off: String, on: String)?
     @Binding var isOn: Bool
 
     var body: some View {
@@ -198,7 +200,12 @@ struct ToggleRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { isOn.toggle() }
-            RSSwitch(isOn: $isOn)
+            if let labels {
+                SegmentedPicker(options: [false, true], label: { $0 ? labels.on : labels.off }, size: .small, selection: $isOn)
+                    .fixedSize()
+            } else {
+                RSSwitch(isOn: $isOn)
+            }
         }
     }
 }
