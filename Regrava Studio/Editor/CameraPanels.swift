@@ -70,7 +70,7 @@ struct CameraLayoutPanel: View {
 
 // MARK: - Camera Style
 
-/// Sharpen, mirror and the advanced camera delay. Color grading, crop and face tracking are
+/// Sharpen, crop, mirror and the advanced camera delay. Color grading and face tracking are
 /// added as their processing is implemented.
 struct CameraStylePanel: View {
     @ObservedObject var editor: EditorModel
@@ -87,6 +87,20 @@ struct CameraStylePanel: View {
                     preview: { $0 == 0 ? "Off" : percent($0) },
                     resetValue: 0
                 )
+            }
+            if editor.project.recording.hasCamera {
+                SidebarSection {
+                    NamedField(name: "Crop", icon: "crop") {
+                        HStack(spacing: Theme.gap(1)) {
+                            RSButton(title: editor.project.camera.crop01 != nil ? "Edit crop" : "Crop camera", kind: .secondary, isWide: true) {
+                                CameraCropWindowController.show(for: editor)
+                            }
+                            if editor.project.camera.crop01 != nil {
+                                RSButton(title: "Reset", kind: .secondary) { editor.change { $0.camera.crop01 = nil } }
+                            }
+                        }
+                    }
+                }
             }
             SidebarSection(showsDivider: editor.project.recording.hasCamera) {
                 ToggleRow(title: "Mirror horizontally", isOn: editor.binding(\.camera.mirror))

@@ -143,6 +143,9 @@ enum UISnapshots {
             }
         }
         controller.model.isCommandMenuOpen = false
+        let crop = CameraCropModel(editor: controller.model)
+        crop.state.setCrop(Rect2(x: 500, y: 150, width: 800, height: 700))
+        write(CameraCropView(model: crop, close: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("camera-crop.png"))
         // Responsiveness: the smallest window and a large one.
         controller.model.openSidebar(.background)
         for (name, size) in [("min", NSSize(width: 1280, height: 740)), ("large", NSSize(width: 2200, height: 1300))] {
