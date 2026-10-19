@@ -17,6 +17,8 @@ final class AppController {
     private init() {}
 
     func launch() {
+        // Projects opened before are listed in the Dock menu too (oldest first, newest on top).
+        for url in recentProjects.reversed() { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
         statusItem = StatusItemController(coordinator: recording)
         recording.onStateChange = { [weak self] in
             self?.statusItem?.refresh()
@@ -119,6 +121,8 @@ final class AppController {
     var lastProjectURL: URL? { recentProjects.first }
 
     private func rememberRecent(_ url: URL) {
+        // Also listed by macOS in the Dock menu and "Open Recent".
+        NSDocumentController.shared.noteNewRecentDocumentURL(url)
         var paths = UserDefaults.standard.stringArray(forKey: "recentProjects") ?? []
         paths.removeAll { $0 == url.path }
         paths.insert(url.path, at: 0)

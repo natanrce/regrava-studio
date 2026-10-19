@@ -1,4 +1,5 @@
 import AppKit
+import RegravaCore
 
 /// AppKit lifecycle:, there is no main window — the record picker opens on launch and
 /// every project opens in its own editor window.
@@ -34,7 +35,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    /// Dock menu.
+    /// Dock menu. Projects opened from Finder or the Dock's recent documents.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.pathExtension == ProjectStore.fileExtension {
+            AppController.shared.recording.closePicker()
+            AppController.shared.openProject(at: url)
+        }
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let app = AppController.shared
         let recording = app.recording
@@ -44,18 +52,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.item("Finish recording") { recording.requestFinish() }
             menu.item("Cancel recording") { recording.requestCancel() }
             menu.item("Restart recording") { recording.requestRestart() }
-        } else {
-            menu.item("New recording...") { recording.openPicker() }
+            menu.group("settings")
         }
-        menu.group("settings")
+        // Dock menu order.
         menu.item("Show Regrava Studio in Dock", checked: !Preferences.shared.hideDockIcon) {
             Preferences.shared.hideDockIcon.toggle()
             app.applyDockIconPolicy()
         }
-        menu.group("open")
         menu.item("Open last project", enabled: app.lastProjectURL != nil) { app.openLastProject() }
-        menu.group("quit")
         menu.item("Show settings") { SettingsWindowController.shared.show() }
+        if !recording.isRecording {
+            menu.item("New recording...") { recording.openPicker() }
+        }
         return menu.menu
     }
 
