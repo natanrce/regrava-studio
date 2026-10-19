@@ -31,7 +31,7 @@ struct GeneralPanel: View {
             }
             SidebarSection {
                 SliderField(name: "Padding", value: editor.binding(\.style.paddingRatio), range: 0...0.25, preview: { percent($0, decimals: 1) }, resetValue: 0.1)
-                SliderField(name: "Screen rounded corners", value: editor.binding(\.style.cornerRadius), range: 0...128, step: 1, preview: { String(format: "%.1f", $0) }, resetValue: 16, suggestedValues: [0, 12, 16, 20, 26])
+                SliderField(name: "Screen rounded corners", value: editor.binding(\.style.cornerRadius), range: 0...128, step: 1, preview: { String(format: "%.1f", $0) }, resetValue: 16)
                 ToggleRow(title: "Inset", description: "Add inset around the screen.", isOn: Binding(
                     get: { style.inset.isOn },
                     set: { on in editor.change { $0.style.inset = on ? .enabledDefault : InsetConfig(size: 0) } }
