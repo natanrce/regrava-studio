@@ -44,15 +44,22 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResize(_ notification: Notification) { positionTrafficLights() }
     func windowDidBecomeKey(_ notification: Notification) { positionTrafficLights() }
+    func windowDidEndLiveResize(_ notification: Notification) { positionTrafficLights() }
 
-    /// Traffic lights at {x: 23, y: 22} in the 60 px topbar.
+    /// Traffic lights at {x: 23, y: 22} in the 60 px topbar (`trafficLightPosition`): the
+    /// title bar is stretched to the topbar's height so the buttons share its centre line.
     private func positionTrafficLights() {
-        guard let window else { return }
+        guard let window,
+              let close = window.standardWindowButton(.closeButton),
+              let titlebarView = close.superview,
+              let container = titlebarView.superview else { return }
+        let height: CGFloat = 60
+        container.frame = NSRect(x: 0, y: window.frame.height - height, width: window.frame.width, height: height)
+        titlebarView.frame = container.bounds
         let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
         for (index, type) in buttons.enumerated() {
-            guard let button = window.standardWindowButton(type), let container = button.superview else { continue }
-            let y = container.frame.height - 22 - button.frame.height / 2 - 1
-            button.setFrameOrigin(NSPoint(x: 23 + CGFloat(index) * 20, y: y))
+            guard let button = window.standardWindowButton(type) else { continue }
+            button.setFrameOrigin(NSPoint(x: 23 + CGFloat(index) * 20, y: height - 22 - button.frame.height))
         }
     }
 

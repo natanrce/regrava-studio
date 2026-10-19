@@ -44,6 +44,8 @@ struct EditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.Colors.background)
+        // The topbar sits in the title bar, next to the traffic lights.
+        .ignoresSafeArea(edges: .top)
         .foregroundStyle(Theme.Colors.text)
         .overlay {
             if exports.isPickerOpen {
