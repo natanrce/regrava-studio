@@ -167,6 +167,7 @@ final class EditorModel: ObservableObject {
             || updated.audio.muteBackgroundAudio != project.audio.muteBackgroundAudio
             || (updated.audio.backgroundAudioVolume > 0) != (project.audio.backgroundAudioVolume > 0)
         let audioChanged = updated.audio != project.audio
+        let cameraDelayChanged = updated.camera.delayAdjustmentMs != project.camera.delayAdjustmentMs
         project = updated
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
@@ -178,8 +179,8 @@ final class EditorModel: ObservableObject {
         isDirty = true
         scheduleAutosave()
         rememberLastProjectConfig()
-        if canvasChanged || slicesChanged || backgroundChanged {
-            Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged) }
+        if canvasChanged || slicesChanged || backgroundChanged || cameraDelayChanged {
+            Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || cameraDelayChanged) }
         } else {
             if audioChanged { Task { await refreshAudioMix() } }
             scheduleRefresh()

@@ -191,6 +191,29 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    @Test func cameraDelayShiftsAndHoldsTheWebcam() async throws {
+        try await withTestVideo { source, dir in
+            let assets = ProjectStore.assetsURL(bundle: dir)
+            try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+            try await makeTestVideo(url: dir.appendingPathComponent("camera.mov"), width: 320, height: 180, frames: 45, fps: 30)
+            for delay in [-200.0, 0, 200] {
+                var project = sampleProject(duration: 2000)
+                project.recording.cameraFileName = "camera.mov"
+                project.recording.cameraSize = Size2(width: 320, height: 180)
+                project.camera.delayAdjustmentMs = delay
+                let media = try await PlaybackComposition.media(asset: AVURLAsset(url: source), project: project, assetsDirectory: assets)
+                let camera = try await media.asset.loadTracks(withMediaType: .video)[1]
+                let segments = try await camera.load(.segments).filter { !$0.isEmpty }
+                // The 1.5 s webcam covers the whole 2 s timeline, its last frame held.
+                let covered = segments.reduce(0.0) { $0 + $1.timeMapping.target.duration.seconds }
+                #expect(abs(covered - 2) < 0.05)
+                let first = try #require(segments.first)
+                let expectedStart = max(delay, 0) / 1000
+                #expect(abs(first.timeMapping.source.start.seconds - expectedStart) < 0.02)
+            }
+        }
+    }
+
     @Test func sharpenRaisesEdgeContrast() {
         let left = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3)).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
         let right = CIImage(color: CIColor(red: 0.7, green: 0.7, blue: 0.7)).cropped(to: CGRect(x: 8, y: 0, width: 8, height: 8))

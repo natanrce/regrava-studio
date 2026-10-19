@@ -187,6 +187,7 @@ public enum PlaybackComposition {
         let resolver = project.resolver
         let playable = try await composition(
             asset: asset, slices: project.slices, camera: cameraAsset(project: project, recording: asset),
+            cameraOffsetMs: project.camera.delayAdjustmentMs,
             backgroundAudio: backgroundURL, playbackDurationMs: resolver.playbackDurationMs
         ) ?? asset
         let tracks = try await playable.loadTracks(withMediaType: .audio)
@@ -218,41 +219,57 @@ public enum PlaybackComposition {
     }
 
     /// nil when the file can be played as it is.
-    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, backgroundAudio: URL?, playbackDurationMs: Double) async throws -> AVAsset? {
+    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, cameraOffsetMs: Double = 0, backgroundAudio: URL?, playbackDurationMs: Double) async throws -> AVAsset? {
         let duration = try await asset.load(.duration)
         let durationMs = duration.seconds * 1000
         if backgroundAudio == nil, camera == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
             return nil
         }
         let composition = AVMutableComposition()
-        /// Each clip's source range, in order, scaled to its speed. A shorter source (the webcam)
-        /// keeps the playback timing: missing parts are left empty.
-        func insertSliced(_ track: AVAssetTrack, type: AVMediaType, sourceDurationMs: Double) async throws {
+        /// Each clip's source range, in order, scaled to its speed. A shorter source keeps the
+        /// playback timing: missing parts are left empty, or, with `holdEdges` (the webcam), filled
+        /// with its first or last frame. `offsetMs` shifts the source (camera delay).
+        func insertSliced(_ track: AVAssetTrack, type: AVMediaType, sourceDurationMs: Double, offsetMs: Double = 0, holdEdges: Bool = false) async throws {
             guard let target = composition.addMutableTrack(withMediaType: type, preferredTrackID: kCMPersistentTrackID_Invalid) else { return }
             target.preferredTransform = try await track.load(.preferredTransform)
-            var cursor = CMTime.zero
-            for slice in slices {
-                let start = CMTime(seconds: max(slice.sourceStartMs, 0) / 1000, preferredTimescale: 600)
-                let end = CMTime(seconds: min(slice.sourceEndMs, durationMs) / 1000, preferredTimescale: 600)
-                guard end > start else { continue }
-                let range = CMTimeRange(start: start, end: end)
-                let scaled = CMTime(seconds: range.duration.seconds * slice.timeScale, preferredTimescale: 600)
-                let available = CMTimeRange(start: start, end: CMTimeMinimum(end, CMTime(seconds: sourceDurationMs / 1000, preferredTimescale: 600)))
-                if available.duration > .zero {
-                    try target.insertTimeRange(available, of: track, at: cursor)
-                    let scaledAvailable = CMTime(seconds: available.duration.seconds * slice.timeScale, preferredTimescale: 600)
-                    if scaledAvailable != available.duration {
-                        target.scaleTimeRange(CMTimeRange(start: cursor, duration: available.duration), toDuration: scaledAvailable)
-                    }
+            let frameMs = 1000.0 / Double(max(try await track.load(.nominalFrameRate), 1))
+            func time(_ ms: Double) -> CMTime { CMTime(seconds: ms / 1000, preferredTimescale: 600) }
+            /// Inserts `[startMs, endMs)` of the source stretched to `durationMs` at `atMs`.
+            func place(_ startMs: Double, _ endMs: Double, atMs: Double, durationMs: Double) throws {
+                guard endMs > startMs, durationMs > 0 else { return }
+                let range = CMTimeRange(start: time(startMs), end: time(endMs))
+                try target.insertTimeRange(range, of: track, at: time(atMs))
+                if abs(range.duration.seconds * 1000 - durationMs) > 0.5 {
+                    target.scaleTimeRange(CMTimeRange(start: time(atMs), duration: range.duration), toDuration: time(durationMs))
                 }
-                cursor = cursor + scaled
+            }
+            var cursorMs = 0.0
+            for slice in slices {
+                let start = max(slice.sourceStartMs, 0), end = min(slice.sourceEndMs, durationMs)
+                guard end > start else { continue }
+                let wantStart = start + offsetMs, wantEnd = end + offsetMs
+                let lo = max(wantStart, 0), hi = min(wantEnd, sourceDurationMs)
+                let headMs = min(max(lo - wantStart, 0), end - start)
+                if holdEdges && headMs > 0 && sourceDurationMs > 0 {
+                    try place(0, min(frameMs, sourceDurationMs), atMs: cursorMs, durationMs: headMs * slice.timeScale)
+                }
+                if hi > lo {
+                    try place(lo, hi, atMs: cursorMs + headMs * slice.timeScale, durationMs: (hi - lo) * slice.timeScale)
+                }
+                let tailMs = (end - start) - headMs - max(hi - lo, 0)
+                if holdEdges && tailMs > 0.5 && sourceDurationMs > frameMs {
+                    let at = cursorMs + (end - start - tailMs) * slice.timeScale
+                    try place(sourceDurationMs - frameMs, sourceDurationMs, atMs: at, durationMs: tailMs * slice.timeScale)
+                }
+                cursorMs += (end - start) * slice.timeScale
             }
         }
         for track in try await asset.loadTracks(withMediaType: .video) {
             try await insertSliced(track, type: .video, sourceDurationMs: durationMs)
         }
         if let camera, let track = try await camera.loadTracks(withMediaType: .video).first {
-            try await insertSliced(track, type: .video, sourceDurationMs: try await camera.load(.duration).seconds * 1000)
+            // Camera time = recording time + delay, clamped to the movie.
+            try await insertSliced(track, type: .video, sourceDurationMs: try await camera.load(.duration).seconds * 1000, offsetMs: cameraOffsetMs, holdEdges: true)
         }
         for track in try await asset.loadTracks(withMediaType: .audio) {
             try await insertSliced(track, type: .audio, sourceDurationMs: durationMs)

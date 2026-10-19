@@ -70,7 +70,7 @@ struct CameraLayoutPanel: View {
 
 // MARK: - Camera Style
 
-/// Sharpen and mirror. Color grading, crop and face tracking are
+/// Sharpen, mirror and the advanced camera delay. Color grading, crop and face tracking are
 /// added as their processing is implemented.
 struct CameraStylePanel: View {
     @ObservedObject var editor: EditorModel
@@ -88,8 +88,22 @@ struct CameraStylePanel: View {
                     resetValue: 0
                 )
             }
-            SidebarSection(showsDivider: false) {
+            SidebarSection(showsDivider: editor.project.recording.hasCamera) {
                 ToggleRow(title: "Mirror horizontally", isOn: editor.binding(\.camera.mirror))
+            }
+            if editor.project.recording.hasCamera {
+                NamedField(name: "Advanced", togglable: true) {
+                    SliderField(
+                        name: "Camera delay",
+                        icon: "waveform.and.person.filled",
+                        description: "If your lips look out of sync with your voice, raise it when they move after the words, lower it when they move before.",
+                        value: editor.binding(\.camera.delayAdjustmentMs),
+                        range: -200...200,
+                        step: 5,
+                        preview: { "\($0 > 0 ? "+" : "")\(Int($0.rounded())) ms" },
+                        resetValue: 0
+                    )
+                }
             }
         }
     }
