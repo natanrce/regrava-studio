@@ -217,6 +217,10 @@ public enum ProjectExporter {
     ) async {
         let queue = DispatchQueue(label: "regrava.export.\(label)")
         let once = CancellationFlag()
+        // AVFoundation's reader and writer objects are used only on `queue` here.
+        nonisolated(unsafe) let input = input
+        nonisolated(unsafe) let output = output
+        nonisolated(unsafe) let reader = reader
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             input.requestMediaDataWhenReady(on: queue) {
                 while input.isReadyForMoreMediaData {
