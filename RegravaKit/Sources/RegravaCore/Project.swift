@@ -171,6 +171,12 @@ public struct Project: Codable, Hashable, Sendable {
     /// Sensitive data and highlight masks (`scene.masks`).
     public var masks: [MaskRange] = []
     public var audio = AudioConfig()
+    /// Camera image settings (`cameraConfig`).
+    public var camera = CameraConfig()
+    /// Layout used where no layout range applies (`defaultLayout`).
+    public var defaultLayout = DefaultCameraLayout()
+    /// Camera layout ranges in source time (`scene.layouts`).
+    public var cameraLayouts: [CameraLayoutRange] = []
     /// Start times of "Speed up typing" suggestions that were applied or removed
     /// (`resolved-typing-speed-increase-suggestions-v2`).
     public var resolvedTypingSuggestionsMs: [Double] = []
@@ -217,6 +223,9 @@ public struct Project: Codable, Hashable, Sendable {
         resolvedTypingSuggestionsMs = c.value(.resolvedTypingSuggestionsMs, default: [])
         masks = c.value(.masks, default: [])
         audio = c.value(.audio, default: AudioConfig())
+        camera = c.value(.camera, default: CameraConfig())
+        defaultLayout = c.value(.defaultLayout, default: DefaultCameraLayout())
+        cameraLayouts = c.value(.cameraLayouts, default: [])
     }
 
     /// Output canvas size in pixels (aspect ratio from `style`).

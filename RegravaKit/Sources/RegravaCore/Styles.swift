@@ -238,6 +238,9 @@ public struct StyleConfig: Codable, Hashable, Sendable {
     public var background: BackgroundConfig
     /// When zoomed, the screen may grow over the padding until it fills the whole canvas.
     public var zoomFillsCanvas: Bool
+    /// "Avoid empty area": the resting screen covers the zoom area instead of fitting in it
+    /// (`stage.avoidEmptyZoomArea`).
+    public var avoidEmptyZoomArea = false
 
     public init(
         aspectRatio: Double? = nil,
@@ -267,6 +270,7 @@ public struct StyleConfig: Codable, Hashable, Sendable {
         shadow = c.value(.shadow, default: d.shadow)
         background = c.value(.background, default: d.background)
         zoomFillsCanvas = c.value(.zoomFillsCanvas, default: d.zoomFillsCanvas)
+        avoidEmptyZoomArea = c.value(.avoidEmptyZoomArea, default: d.avoidEmptyZoomArea)
     }
 
     /// The canvas long side in pixels; output resolution is chosen at export.
