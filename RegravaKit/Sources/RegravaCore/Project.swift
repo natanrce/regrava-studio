@@ -229,7 +229,7 @@ public struct Project: Codable, Hashable, Sendable {
     }
 
     /// Output canvas size in pixels (aspect ratio from `style`).
-    public var canvasSize: Size2 { style.canvasSize(videoSize: recording.videoSize) }
+    public var canvasSize: Size2 { StyleConfig.canvasSize(aspectRatio: stageAspectRatio) }
 
     /// Replaces generated zooms with a fresh set derived from the clicks, keeping user-made ones.
     public mutating func regenerateAutomaticZooms() {

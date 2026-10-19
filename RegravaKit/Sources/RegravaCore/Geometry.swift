@@ -103,24 +103,3 @@ public struct Rect2: Codable, Hashable, Sendable {
 public func clamp<T: Comparable>(_ value: T, _ lower: T, _ upper: T) -> T {
     min(max(value, lower), upper)
 }
-
-public enum ZoomGeometry {
-    /// Where the screen image must be drawn so that it appears zoomed.
-    ///
-    /// The resting screen rectangle is scaled by `scale`, translated so the focus point
-    /// (normalized position inside the screen) lands on the center of `area`, and then
-    /// clamped per axis: if the scaled screen is larger than `area` it must keep covering
-    /// it (no empty gaps), otherwise it must stay fully inside it.
-    public static func zoomedScreenRect(rest: Rect2, scale: Double, focus: Vec2, area: Rect2) -> Rect2 {
-        guard scale > 1 else { return rest }
-        let w = rest.width * scale
-        let h = rest.height * scale
-        let fx = clamp(focus.x, 0, 1)
-        let fy = clamp(focus.y, 0, 1)
-        var x = area.midX - fx * w
-        var y = area.midY - fy * h
-        x = w >= area.width ? clamp(x, area.maxX - w, area.minX) : clamp(x, area.minX, area.maxX - w)
-        y = h >= area.height ? clamp(y, area.maxY - h, area.minY) : clamp(y, area.minY, area.maxY - h)
-        return Rect2(x: x, y: y, width: w, height: h)
-    }
-}

@@ -236,11 +236,11 @@ public struct StyleConfig: Codable, Hashable, Sendable {
     public var inset: InsetConfig
     public var shadow: ShadowConfig
     public var background: BackgroundConfig
-    /// When zoomed, the screen may grow over the padding until it fills the whole canvas.
-    public var zoomFillsCanvas: Bool
     /// "Avoid empty area": the resting screen covers the zoom area instead of fitting in it
     /// (`stage.avoidEmptyZoomArea`).
     public var avoidEmptyZoomArea = false
+    /// Camera corner radius as a fraction of its shortest side (`cameraBorderRadiusRatio01`).
+    public var cameraBorderRadiusRatio = 0.15
 
     public init(
         aspectRatio: Double? = nil,
@@ -248,16 +248,13 @@ public struct StyleConfig: Codable, Hashable, Sendable {
         cornerRadius: Double = 16,
         inset: InsetConfig = InsetConfig(),
         shadow: ShadowConfig = ShadowConfig(),
-        background: BackgroundConfig = BackgroundConfig(),
-        zoomFillsCanvas: Bool = true
-    ) {
+        background: BackgroundConfig = BackgroundConfig()) {
         self.aspectRatio = aspectRatio
         self.paddingRatio = paddingRatio
         self.cornerRadius = cornerRadius
         self.inset = inset
         self.shadow = shadow
         self.background = background
-        self.zoomFillsCanvas = zoomFillsCanvas
     }
 
     public init(from decoder: Decoder) throws {
@@ -269,30 +266,22 @@ public struct StyleConfig: Codable, Hashable, Sendable {
         inset = c.value(.inset, default: d.inset)
         shadow = c.value(.shadow, default: d.shadow)
         background = c.value(.background, default: d.background)
-        zoomFillsCanvas = c.value(.zoomFillsCanvas, default: d.zoomFillsCanvas)
         avoidEmptyZoomArea = c.value(.avoidEmptyZoomArea, default: d.avoidEmptyZoomArea)
+        cameraBorderRadiusRatio = c.value(.cameraBorderRadiusRatio, default: d.cameraBorderRadiusRatio)
     }
 
     /// The canvas long side in pixels; output resolution is chosen at export.
     public static let canvasLongSide: Double = 1920
 
-    /// Canvas size: a fixed ratio, or (Auto) the recording plus its padding on every side.
+    /// Canvas size without camera layouts: a fixed ratio, or (Auto) the recording grown by its
+    /// padding (`sourceRect.padByRatio(p).aspectRatio`).
     public func canvasSize(videoSize: Size2) -> Size2 {
-        let ratio: Double
-        if let aspectRatio {
-            ratio = aspectRatio
-        } else {
-            let r = min(paddingRatio, 0.45)
-            let w = videoSize.width, h = videoSize.height
-            if w >= h {
-                let height = h / (1 - 2 * r)
-                ratio = (w + 2 * r * height) / height
-            } else {
-                let width = w / (1 - 2 * r)
-                ratio = width / (h + 2 * r * width)
-            }
-        }
-        let long = Self.canvasLongSide
+        Self.canvasSize(aspectRatio: aspectRatio ?? Rect2(size: videoSize).padByRatio(paddingRatio).aspectRatio)
+    }
+
+    /// Canvas of a stage aspect ratio, with `canvasLongSide` on its long side.
+    public static func canvasSize(aspectRatio ratio: Double) -> Size2 {
+        let long = canvasLongSide
         return ratio >= 1
             ? Size2(width: long, height: (long / ratio).rounded())
             : Size2(width: (long * ratio).rounded(), height: long)

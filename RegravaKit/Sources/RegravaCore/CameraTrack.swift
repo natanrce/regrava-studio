@@ -1,21 +1,29 @@
 import Foundation
 
-/// Where things sit on the output canvas.
+/// Where things sit on the output canvas. Layouts work in stage units (1080 tall); the canvas
+/// is the stage scaled to `canvas.height / 1080`.
 public struct CanvasLayout: Hashable, Sendable {
     public let canvas: Rect2
-    /// Screen rectangle when not zoomed.
+    /// Stage units to canvas pixels.
+    public let scale: Double
+    /// Screen rectangle of the default layout when not zoomed, in canvas pixels.
     public let restScreen: Rect2
-    /// Area the zoomed screen must cover.
-    public let zoomArea: Rect2
     public let videoSize: Size2
 
-    public init(style: StyleConfig, videoSize: Size2) {
-        canvas = Rect2(size: style.canvasSize(videoSize: videoSize))
-        let padding = min(canvas.width, canvas.height) * style.paddingRatio
-        restScreen = Rect2.aspectFit(videoSize, in: canvas.insetBy(padding))
-        zoomArea = style.zoomFillsCanvas ? canvas : restScreen
-        self.videoSize = videoSize
+    public init(project: Project) {
+        let resolver = project.defaultLayoutResolver
+        canvas = Rect2(size: project.canvasSize)
+        scale = canvas.height / LayoutResolver.stageHeight
+        videoSize = project.recording.videoSize
+        restScreen = Self.scaled(resolver.initialScreenRect, scale)
     }
+
+    static func scaled(_ r: Rect2, _ k: Double) -> Rect2 {
+        Rect2(x: r.x * k, y: r.y * k, width: r.width * k, height: r.height * k)
+    }
+
+    /// Stage units to canvas pixels.
+    public func toCanvas(_ r: Rect2) -> Rect2 { Self.scaled(r, scale) }
 
     /// Maps a point in video pixels to canvas pixels for a given screen placement.
     public func canvasPoint(videoPoint: Vec2, screenRect: Rect2) -> Vec2 {
@@ -47,6 +55,11 @@ public struct CameraFrame: Hashable, Sendable {
     public var previousCursorScale: Double = 1
     /// Mask applied to the recording.
     public var mask: MaskFrame = .none
+    /// Webcam placement in canvas pixels; nil without camera footage.
+    public var cameraRect: Rect2?
+    public var cameraOpacity: Double = 0
+    /// Drawn corner radius in canvas pixels.
+    public var cameraCornerRadius: Double = 0
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -75,8 +88,9 @@ public final class CameraTrack: @unchecked Sendable {
     private let cursorConfig: CursorConfig
 
     public init(project: Project, sampleRateHz: Double? = nil) {
-        let layout = CanvasLayout(style: project.style, videoSize: project.recording.videoSize)
+        let layout = CanvasLayout(project: project)
         self.layout = layout
+        let timeline = LayoutTimeline(project: project)
         let resolver = project.resolver
         self.resolver = resolver
         durationMs = max(resolver.playbackDurationMs, 0)
@@ -92,7 +106,7 @@ public final class CameraTrack: @unchecked Sendable {
         let imageChanges = CursorTypes.imageChangeTimes(typeEvents, config: project.cursor)
         let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
 
-        let planner = CameraPlanner(project: project, layout: layout, cleaned: cleaned, sparse: sparse)
+        let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, sparse: sparse)
 
         let cursorPath = CursorPathCache.shared.path(
             for: CursorPathCache.Key(
@@ -114,7 +128,14 @@ public final class CameraTrack: @unchecked Sendable {
             )
         }
 
-        var screen = SpringRect(layout.restScreen)
+        var screen = SpringRect(timeline.defaultResolver.initialScreenRect)
+        var cameraRect = SpringRect(Rect2(x: 0, y: 0, width: 0, height: 0))
+        var cameraOpacity = SpringValue(0)
+        var cameraRadius = SpringValue(0)
+        var cameraReference = SpringValue(1)
+        let hasCamera = project.recording.hasCamera && !project.camera.hide
+        let samplesFor200Ms = Int((200 / sampleIntervalMs).rounded(.up))
+        var hiddenHistory: [Bool] = []
         var maskAnimator = MaskAnimator(masks: project.masks, recordingSize: project.recording.videoSize)
         var press = SpringValue(1)
         var opacity = SpringValue(1)
@@ -127,12 +148,32 @@ public final class CameraTrack: @unchecked Sendable {
             let t = Double(i) * sampleIntervalMs
             let source = resolver.playbackToSource(t)
             let slice = project.slice(atSource: source)
-            let target = planner.target(at: source)
+            let target = planner.targets(at: source)
             let screenConfig = target.instant ? SpringConfig.instant : project.animation.screenSpring
             if i == 0 {
-                if target.instant { screen = SpringRect(target.rect) }
+                screen = SpringRect(target.screen)
             } else {
-                screen.advance(toward: target.rect, config: screenConfig, milliseconds: sampleIntervalMs)
+                screen.advance(toward: target.screen, config: screenConfig, milliseconds: sampleIntervalMs)
+            }
+
+            // Camera: the fast spring while hidden and for 200 ms after.
+            hiddenHistory.append(target.cameraHidden)
+            let recentlyHidden = hiddenHistory.suffix(samplesFor200Ms + 1).contains(true)
+            let cameraConfig = recentlyHidden ? Self.cameraHideSpring : project.animation.screenSpring
+            if hasCamera, let rect = target.camera {
+                if i == 0 || cameraRect.rect.width == 0 {
+                    cameraRect = SpringRect(rect)
+                    cameraRadius = SpringValue(target.cameraBorderRadius)
+                    cameraReference = SpringValue(target.cameraReferenceWidth)
+                    if i == 0 { cameraOpacity = SpringValue(target.cameraOpacity) }
+                } else {
+                    cameraRect.advance(toward: rect, config: cameraConfig, milliseconds: sampleIntervalMs)
+                    cameraRadius.advance(toward: target.cameraBorderRadius, config: cameraConfig, milliseconds: sampleIntervalMs)
+                    cameraReference.advance(toward: target.cameraReferenceWidth, config: cameraConfig, milliseconds: sampleIntervalMs)
+                }
+                if i > 0 { cameraOpacity.advance(toward: target.cameraOpacity, config: cameraConfig, milliseconds: sampleIntervalMs) }
+            } else if hasCamera {
+                cameraOpacity.advance(toward: 0, config: cameraConfig, milliseconds: sampleIntervalMs)
             }
 
             // Press scale (`pressSpring`): instant without smooth movement or in clips without it.
@@ -142,7 +183,13 @@ public final class CameraTrack: @unchecked Sendable {
             press.setTarget(pressed ? Self.pressedCursorScale : 1, config: pressSpring)
             if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
 
-            var frame = CameraFrame(timeMs: t, screenRect: screen.rect, cursor: cursorPath?.position(at: t))
+            var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPath?.position(at: t))
+            if hasCamera, cameraRect.rect.width > 0 {
+                let rect = cameraRect.rect
+                frame.cameraRect = layout.toCanvas(rect)
+                frame.cameraOpacity = clamp(cameraOpacity.value, 0, 1)
+                frame.cameraCornerRadius = cameraRadius.value * rect.width / max(cameraReference.value, 0.0001) * layout.scale
+            }
             frame.cursorScale = press.value
             frame.isInstantSnap = target.instant
             // Cursor opacity: fades out quickly while typing, otherwise follows visibility.
@@ -187,6 +234,13 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
         frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
         frame.mask = Self.interpolate(a.mask, b.mask, f)
+        if let ca = a.cameraRect, let cb = b.cameraRect {
+            frame.cameraRect = ca.lerp(to: cb, f)
+        } else {
+            frame.cameraRect = a.cameraRect ?? b.cameraRect
+        }
+        frame.cameraOpacity = a.cameraOpacity + (b.cameraOpacity - a.cameraOpacity) * f
+        frame.cameraCornerRadius = a.cameraCornerRadius + (b.cameraCornerRadius - a.cameraCornerRadius) * f
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {
@@ -286,6 +340,9 @@ public final class CameraTrack: @unchecked Sendable {
         return points.sorted { $0.timeMs < $1.timeMs }
     }
 
+    /// Spring of a hiding or reappearing camera.
+    public static let cameraHideSpring = SpringConfig(stiffness: 530, damping: 40, mass: 1)
+
     /// Spring for the cursor fading while typing.
     public static let typingFadeSpring = SpringConfig(stiffness: 600, damping: 50, mass: 1)
     /// Spring for showing and hiding the cursor.
@@ -321,17 +378,30 @@ public final class CameraTrack: @unchecked Sendable {
     }
 }
 
-/// Decides, for any instant, where the camera wants to be (before spring smoothing).
+/// Targets of one instant, in stage units, before spring smoothing.
+struct LayoutTargets {
+    var screen: Rect2
+    var instant: Bool
+    var camera: Rect2?
+    var cameraOpacity: Double
+    var cameraBorderRadius: Double
+    var cameraReferenceWidth: Double
+    var cameraHidden: Bool
+}
+
+/// Decides, for any instant, where the screen and the camera want to be (rects, resolvers).
 struct CameraPlanner {
     let project: Project
-    let layout: CanvasLayout
+    let timeline: LayoutTimeline
     let cleaned: [MouseEvent]
     let zooms: [ZoomRange]
     let groups: [UUID: [FocusGroup]]
+    /// Cursor "moves groups" for the resting focus.
+    let restingGroups: [FocusGroup]
 
-    init(project: Project, layout: CanvasLayout, cleaned: [MouseEvent], sparse: [MouseEvent]) {
+    init(project: Project, timeline: LayoutTimeline, cleaned: [MouseEvent], sparse: [MouseEvent]) {
         self.project = project
-        self.layout = layout
+        self.timeline = timeline
         self.cleaned = cleaned
         zooms = project.zooms
             .filter { !$0.isDisabled && $0.presentation == .screen && $0.scale > 1 && $0.endMs > $0.startMs }
@@ -352,13 +422,27 @@ struct CameraPlanner {
             groups[zoom.id] = FocusGrouping.build(events: events, maxExtent: extent, endMs: zoom.endMs)
         }
         self.groups = groups
+        let visible = timeline.defaultResolver.visibleSourcePart(level: 1)
+        restingGroups = FocusGrouping.build(
+            events: sparse,
+            maxExtent: Size2(width: visible.width * 0.5, height: visible.height * 0.5),
+            endMs: project.recording.durationMs
+        )
     }
 
+    /// The zoom moving the screen (`screenMovingRange`): the active zoom, the next one within its
+    /// lead-in, or the previous one carried behind a fullscreen camera.
     func activeZoom(at t: Double) -> ZoomRange? {
         if let zoom = zooms.last(where: { $0.contains(t) }) { return zoom }
         let lead = project.animation.leadInMs
-        if lead > 0, let next = zooms.first(where: { $0.startMs > t }), !next.isInstant, t >= next.startMs - lead {
+        if !project.zooms.contains(where: { $0.contains(t) }), lead > 0,
+           let next = zooms.first(where: { $0.startMs > t }), !next.isInstant, t >= next.startMs - lead {
             return next
+        }
+        if let range = timeline.activeRange(at: t), range.type == .fullscreenCamera,
+           t < range.startMs + 0.85 * range.durationMs,
+           let previous = zooms.last(where: { $0.startMs <= t }), previous.endMs >= range.startMs {
+            return previous
         }
         return nil
     }
@@ -376,20 +460,74 @@ struct CameraPlanner {
         }
     }
 
+    /// Screen focus at zoom 1 (`restingFocus01`): the centre of the current moves group (or the
+    /// middle), with the cursor bounds over the next 350 ms.
+    func restingFocus(at t: Double) -> (center: Vec2, bounds: Rect2?) {
+        let video = project.recording.videoSize
+        let group = restingGroups.last { ($0.events.first?.timeMs ?? .infinity) <= t }
+        let center = group.map { Vec2($0.center.x / video.width, $0.center.y / video.height) } ?? .center01
+        guard let b = Self.cursorBounds(cleaned, from: t, to: t + 350) else { return (center, nil) }
+        return (center, Rect2(x: b.x / video.width, y: b.y / video.height, width: b.width / video.width, height: b.height / video.height))
+    }
+
+    /// Bounds of the cursor from the event at or before `start` through those up to `end`.
+    static func cursorBounds(_ events: [MouseEvent], from start: Double, to end: Double) -> Rect2? {
+        let floor = MouseProcessing.lastIndex(atOrBefore: start, in: events)
+        let inRange = events.indices.filter { events[$0].timeMs >= start && events[$0].timeMs <= end }
+        guard let first = floor ?? inRange.first, let last = inRange.last ?? floor else { return nil }
+        var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
+        for i in first...last {
+            let p = events[i].position
+            minX = min(minX, p.x); maxX = max(maxX, p.x); minY = min(minY, p.y); maxY = max(maxY, p.y)
+        }
+        return Rect2(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     func isInInstantWindow(_ t: Double) -> Bool {
         zooms.contains { $0.isInstant && t >= $0.startMs && t <= $0.endMs + 50 }
     }
 
-    func target(at t: Double) -> (rect: Rect2, instant: Bool) {
-        let instant = isInInstantWindow(t)
-        guard let zoom = activeZoom(at: t) else { return (layout.restScreen, instant) }
-        let rect = ZoomGeometry.zoomedScreenRect(
-            rest: layout.restScreen,
-            scale: zoom.scale,
-            focus: focus(for: zoom, at: t),
-            area: layout.zoomArea
+    /// Camera hidden by its layout.
+    func isCameraHidden(at t: Double) -> Bool { timeline.isCameraHidden(at: t) }
+
+    func targets(at t: Double) -> LayoutTargets {
+        let hidden = isCameraHidden(at: t)
+        let swapToHideVariant = hidden || project.camera.hide
+        let anyZoom = project.zooms.contains { $0.contains(t) }
+        func variant(_ r: LayoutResolver) -> LayoutResolver {
+            var r = r
+            if swapToHideVariant { r = r.hideCameraVariant }
+            if anyZoom { r = r.zoomedVariant }
+            return r
+        }
+        let screenResolver = variant(timeline.screenResolver(at: t))
+        let cameraResolver = variant(timeline.cameraResolver(at: t))
+        let zoom = activeZoom(at: t)
+        let screen: Rect2
+        if let zoom {
+            screen = screenResolver.screenRect(focus01: focus(for: zoom, at: t), level: zoom.scale)
+        } else {
+            let resting = restingFocus(at: t)
+            screen = screenResolver.screenRect(focus01: resting.center, bounds01: resting.bounds, level: 1)
+        }
+
+        var camera = zoom != nil ? cameraResolver.effectiveZoomedCameraRect : cameraResolver.cameraRect
+        if hidden, let c = camera {
+            // Shrinks toward its centre expressed over the screen size (literal).
+            let origin = Vec2(clamp((c.x + c.width / 2) / screen.width, 0, 1), clamp((c.y + c.height / 2) / screen.height, 0, 1))
+            camera = c.scaled(0.9, origin01: origin)
+        }
+        let initial = cameraResolver.cameraRect
+        let radius = cameraResolver.allowsCameraBorderRadius ? (initial?.shortestSide ?? 0) * project.style.cameraBorderRadiusRatio : 0
+        return LayoutTargets(
+            screen: screen,
+            instant: isInInstantWindow(t),
+            camera: camera,
+            cameraOpacity: hidden || camera == nil ? 0 : 1,
+            cameraBorderRadius: radius,
+            cameraReferenceWidth: initial?.width ?? camera?.width ?? 1,
+            cameraHidden: hidden
         )
-        return (rect, instant)
     }
 }
 

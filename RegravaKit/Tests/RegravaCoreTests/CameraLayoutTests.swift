@@ -67,4 +67,21 @@ struct CameraLayoutTests {
         #expect(timeline.cameraResolver(at: 4500).kind == .fullscreenCamera)
         #expect(timeline.cameraResolver(at: 6000).kind == .overlay)
     }
+
+    @Test func trackPlacesAndHidesTheCamera() {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 2, durationMs: 10000, fps: 60, cameraFileName: "camera.mov", cameraSize: Size2(width: 1280, height: 720)), mouseEvents: [])
+        project.style.aspectRatio = 16.0 / 9
+        project.cameraLayouts = [CameraLayoutRange(startMs: 4000, endMs: 8000, type: .screenOnly)]
+        let track = CameraTrack(project: project)
+        let visible = track.frame(at: 2000)
+        #expect(visible.cameraOpacity > 0.99)
+        let camera = visible.cameraRect!
+        #expect(abs(camera.maxX - (1920 - 60)) < 1 && abs(camera.maxY - (1080 - 60)) < 1)
+        #expect(abs(visible.cameraCornerRadius - 540 * 0.15) < 0.5)
+        #expect(track.frame(at: 7000).cameraOpacity < 0.01)
+        #expect(track.frame(at: 7000).cameraRect!.width < camera.width)
+
+        project.camera.hide = true
+        #expect(CameraTrack(project: project).frame(at: 2000).cameraRect == nil)
+    }
 }

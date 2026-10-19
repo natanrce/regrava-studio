@@ -194,22 +194,23 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
 
 @Suite struct GeometryTests {
     let rest = Rect2(x: 100, y: 100, width: 800, height: 400)
-    let canvas = Rect2(x: 0, y: 0, width: 1000, height: 600)
+    let area = Rect2(x: 0, y: 0, width: 1000, height: 600)
 
-    @Test func scaleOneIsRest() {
-        #expect(ZoomGeometry.zoomedScreenRect(rest: rest, scale: 1, focus: .center01, area: canvas) == rest)
+    @Test func scaleOneCentresTheFittedScreen() {
+        let r = rest.zoom(1, origin01: .center01, area: area)
+        #expect(r.center == area.center && r.width == 800)
     }
 
     @Test func zoomedScreenCoversArea() {
-        let r = ZoomGeometry.zoomedScreenRect(rest: rest, scale: 2, focus: Vec2(0.9, 0.1), area: canvas)
+        let r = rest.zoom(2, origin01: Vec2(0.9, 0.1), area: area)
         #expect(r.width == 1600)
-        #expect(r.minX <= canvas.minX && r.maxX >= canvas.maxX)
-        #expect(r.minY <= canvas.minY && r.maxY >= canvas.maxY)
+        #expect(r.minX <= area.minX && r.maxX >= area.maxX)
+        #expect(r.minY <= area.minY && r.maxY >= area.maxY)
     }
 
     @Test func centerFocusStaysCentered() {
-        let r = ZoomGeometry.zoomedScreenRect(rest: rest, scale: 2, focus: .center01, area: canvas)
-        #expect(r.center == canvas.center)
+        let r = rest.zoom(2, origin01: .center01, area: area)
+        #expect(r.center == area.center)
     }
 }
 
@@ -247,8 +248,9 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         let zoom = ZoomRange(startMs: 0, endMs: 9000, scale: 3, mode: .manual, manualTarget: Vec2(0, 0))
         let track = CameraTrack(project: project(zooms: [zoom], events: []))
         let r = track.frame(at: 8000).screenRect
-        #expect(abs(r.minX - track.layout.canvas.minX) < 0.5)
-        #expect(abs(r.minY - track.layout.canvas.minY) < 0.5)
+        // Pinned to the zoom area's top-left corner (the stage minus its padding).
+        #expect(abs(r.minX - 90) < 0.5)
+        #expect(abs(r.minY - 90) < 0.5)
     }
 
     @Test func disabledZoomIsIgnored() {
@@ -289,7 +291,12 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
     @Test func autoCanvasIsRecordingPlusPadding() {
         let style = StyleConfig(aspectRatio: nil, paddingRatio: 0.1)
         let canvas = style.canvasSize(videoSize: Size2(width: 1600, height: 1000))
-        let layout = CanvasLayout(style: style, videoSize: Size2(width: 1600, height: 1000))
+        let project = Project(
+            recording: RecordingInfo(videoSize: Size2(width: 1600, height: 1000), pointPixelScale: 1, durationMs: 1000, fps: 60),
+            mouseEvents: [],
+            style: style
+        )
+        let layout = CanvasLayout(project: project)
         #expect(canvas.width == 1920)
         // Equal padding on every side.
         #expect(abs(layout.restScreen.minX - layout.restScreen.minY) < 1.5)

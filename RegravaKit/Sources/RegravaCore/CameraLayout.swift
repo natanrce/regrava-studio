@@ -407,11 +407,12 @@ public final class LayoutResolver: @unchecked Sendable {
     // MARK: Screen rect
 
     /// `getScreenRect(focus, level)`: the screen zoomed on `focus01`, anchored where the camera
-    /// does not cover the zoom area. Split screen pins its resting position to an edge.
-    public func screenRect(focus01: Vec2, level: Double, cursor01: Vec2?) -> Rect2 {
+    /// does not cover the zoom area. At rest, split screen pins the focus to the edge it rests
+    /// against. `bounds01` are the cursor bounds of the resting focus (a point at `focus01` when absent).
+    public func screenRect(focus01: Vec2, bounds01: Rect2? = nil, level: Double) -> Rect2 {
         var focus = focus01
         if let split, level <= 1 {
-            let side = restingSide(split, cursor01: cursor01 ?? focus01)
+            let side = restingSide(split, cursorBounds01: bounds01 ?? Rect2(x: focus01.x, y: focus01.y, width: 0, height: 0))
             focus = switch side {
             case .left: Vec2(0, focus.y)
             case .right: Vec2(1, focus.y)
@@ -424,12 +425,17 @@ public final class LayoutResolver: @unchecked Sendable {
     }
 
     /// Edge the overflowing split screen rests against: its own, or the camera's when the cursor
-    /// comes within 12.5% of the camera.
-    private func restingSide(_ split: SplitState, cursor01: Vec2) -> Side {
+    /// bounds come within 12.5% of the camera.
+    private func restingSide(_ split: SplitState, cursorBounds01 b: Rect2) -> Side {
         guard let camera = cameraRect else { return split.screenSide }
         let opposite = split.screenSide.opposite
         let s = initialScreenRect.align(zoomArea, split.screenSide.alignment)
-        let point = Vec2(s.x + cursor01.x * s.width, s.y + cursor01.y * s.height)
+        let edge: Vec2 = switch opposite {
+        case .left, .top: Vec2(b.x, b.y)
+        case .right: Vec2(b.endX, b.y)
+        case .bottom: Vec2(b.x, b.endY)
+        }
+        let point = Vec2(s.x + edge.x * s.width, s.y + edge.y * s.height)
         let distance: Double = switch opposite {
         case .right: camera.x - point.x
         case .left: point.x - camera.endX
@@ -438,6 +444,16 @@ public final class LayoutResolver: @unchecked Sendable {
         }
         let size = (opposite == .left || opposite == .right) ? s.width : s.height
         return distance < 0.125 * size ? opposite : split.screenSide
+    }
+
+    /// Part of the source visible at `level` (`getVisibleSourcePart`). The source is scaled in its
+    /// own pixels and compared with the 1080-tall stage.
+    public func visibleSourcePart(level: Double) -> Size2 {
+        let w = sourceRect.width * level, h = sourceRect.height * level
+        return Size2(
+            width: min(1, stageRect.width / max(w, 0.0001)) * sourceRect.width,
+            height: min(1, stageRect.height / max(h, 0.0001)) * sourceRect.height
+        )
     }
 }
 
