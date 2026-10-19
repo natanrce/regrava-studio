@@ -193,6 +193,11 @@ final class EditorModel: ObservableObject {
 
     // MARK: Rendering
 
+    /// Refresh rate of the fastest display (60, or 120 with ProMotion).
+    static var displayFrameRate: Int {
+        max(NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60, 30)
+    }
+
     private var previewOutputSize: Size2 {
         let canvas = project.canvasSize
         let height = min(canvas.height, Double(preferences.playbackPreviewMaxHeight)) * preferences.playbackPreviewResolution
@@ -209,7 +214,9 @@ final class EditorModel: ObservableObject {
             let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL))
             let asset = media.asset
             let output = previewOutputSize
-            let configuration = try await CompositionFactory.configuration(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output)
+            // Frames at the display's refresh rate: screen recordings have a variable, lower frame rate,
+            // which made zooms and the cursor judder.
+            let configuration = try await CompositionFactory.configuration(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output, fps: Self.displayFrameRate)
             let composition = AVVideoComposition(configuration: configuration)
             baseConfiguration = configuration
             compositionCanvas = project.canvasSize
