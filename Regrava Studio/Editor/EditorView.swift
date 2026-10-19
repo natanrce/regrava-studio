@@ -36,6 +36,8 @@ struct EditorView: View {
                 }
                 .padding(.top, 16)
                 .padding(.horizontal, 14)
+                // The preview row takes the remaining height; the timeline stays at the bottom.
+                .frame(maxHeight: .infinity)
                 if editor.layoutType.showsTimeline {
                     EditorTimeline(editor: editor)
                         .padding(.top, 4)

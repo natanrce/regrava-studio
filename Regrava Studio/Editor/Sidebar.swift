@@ -53,15 +53,18 @@ struct SidebarRail: View {
     @ObservedObject var editor: EditorModel
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: Theme.gap(1)) {
-            ForEach(editor.railEntries, id: \.root) { entry in
-                RailButton(entry: entry, isActive: editor.sidebarItem == nil && editor.sidebarRoot == entry.root && editor.layoutType.showsSidebar) {
-                    editor.openSidebar(entry.root)
+        // Scrolls instead of making the editor taller than small windows.
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .trailing, spacing: Theme.gap(1)) {
+                ForEach(editor.railEntries, id: \.root) { entry in
+                    RailButton(entry: entry, isActive: editor.sidebarItem == nil && editor.sidebarRoot == entry.root && editor.layoutType.showsSidebar) {
+                        editor.openSidebar(entry.root)
+                    }
                 }
             }
-            Spacer(minLength: 0)
+            .padding(.bottom, 40)
         }
-        .padding(.bottom, 40)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -77,11 +80,11 @@ private struct RailButton: View {
                 .font(.system(size: 16))
                 .frame(width: 18, height: 18)
                 .padding(12)
-                .foregroundStyle(isActive ? Theme.Colors.primary.opacity(0.95) : Theme.Colors.text)
+                .foregroundStyle(isActive ? Theme.Colors.primaryActiveText : Theme.Colors.text)
                 .background(RoundedRectangle(cornerRadius: 6).fill(hovered && entry.disabledTooltip == nil ? Theme.Colors.hover : .clear))
                 .overlay(alignment: .trailing) {
                     if isActive {
-                        Circle().fill(Theme.Colors.primary).frame(width: 4, height: 4).padding(.trailing, 5)
+                        Circle().fill(Theme.Colors.primaryActiveText).frame(width: 4, height: 4).padding(.trailing, 5)
                     }
                 }
                 .contentShape(Rectangle())

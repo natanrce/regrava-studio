@@ -78,7 +78,13 @@ struct EditorTimeline: View {
             .onChange(of: geometry.size.width) { _, newWidth in width = newWidth }
             .onDisappear { if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) } }
         }
-        .frame(height: 25 + 20 + 11.3 + 48 + 12 + 48 + 15 + (editor.project.masks.isEmpty ? 0 : 12 + 48))
+        .frame(height: 25 + 20 + 11.3 + 48 + 12 + trackHeight("zooms") + 15 + (editor.project.masks.isEmpty ? 0 : 12 + trackHeight("masks")))
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: editor.focusedTrack)
+    }
+
+    /// Focused tracks are 48 px, the others collapse to 16 px.
+    private func trackHeight(_ track: String) -> CGFloat {
+        editor.focusedTrack == track ? 48 : 16
     }
 
     /// Plain wheel pans (dominant axis), ⌘+wheel zooms ±15%, pinch zooms around the pointer.
