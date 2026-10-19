@@ -119,7 +119,19 @@ enum UISnapshots {
             ("command-menu", { controller.model.openSidebar(.background); controller.model.isCommandMenuOpen = true }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
             ("mask", { if let mask = controller.model.project.masks.first { controller.model.openMask(mask.id) } }),
-            ("slice", { if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
+            ("layout", {
+                controller.model.seek(to: 11_000)
+                controller.model.change {
+                    $0.cameraLayouts = [
+                        CameraLayoutRange(startMs: 10_000, endMs: 14_000, overlayPosition01: Vec2(0, 0)),
+                        CameraLayoutRange(startMs: 17_000, endMs: 20_000, type: .fullscreenCamera),
+                    ]
+                }
+                if let layout = controller.model.project.cameraLayouts.first { controller.model.openLayout(layout.id) }
+            }),
+            ("layout-tool", { controller.model.sidebarItem = nil; controller.model.armOrAddLayout(.cameraOverlay) }),
+            ("slice", { controller.model.isAddLayoutToolArmed = false
+                 if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
         ]
         for (name, apply) in states {
             controller.model.isCommandMenuOpen = false

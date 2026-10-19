@@ -171,7 +171,7 @@ private struct ProjectTitle: View {
 // MARK: - Add-tools rail
 
 /// Floating pill: toolbarGlass, radius 16, padding 6; 38×38 icon buttons, tooltips on the right.
-private struct AddToolsRail: View {
+struct AddToolsRail: View {
     @ObservedObject var editor: EditorModel
 
     var body: some View {
@@ -180,6 +180,8 @@ private struct AddToolsRail: View {
                 RSIconButton(icon: "arrow.up.left.and.down.right.magnifyingglass", kind: editor.isAddZoomToolArmed ? .subtleBg : .transparent, tooltip: "Classic zoom") {
                     editor.isAddZoomToolArmed.toggle()
                     if editor.isAddZoomToolArmed {
+                        editor.isAddMaskToolArmed = false
+                        editor.isAddLayoutToolArmed = false
                         editor.pause()
                         editor.sidebarItem = nil
                     }
@@ -188,6 +190,19 @@ private struct AddToolsRail: View {
                 RSIconButton(icon: "sparkle.magnifyingglass", tooltip: "Loupe zoom") {}
                     .disabled(true)
                     .opacity(Theme.disabledOpacity)
+            }
+            // Camera layout group, only with camera footage. Camera cutout is left out where
+            // person segmentation is unavailable.
+            if editor.project.recording.hasCamera {
+                VStack(spacing: Theme.gap(0)) {
+                    ForEach([CameraLayoutType.cameraOverlay, .splitScreen, .fullscreenCamera, .screenOnly], id: \.self) { type in
+                        RSIconButton(
+                            icon: Self.layoutIcon(type),
+                            kind: editor.isAddLayoutToolArmed && type == .cameraOverlay ? .subtleBg : .transparent,
+                            tooltip: Self.layoutLabel(type) + " layout"
+                        ) { editor.armOrAddLayout(type) }
+                    }
+                }
             }
             // Mask group.
             VStack(spacing: Theme.gap(0)) {
@@ -203,6 +218,27 @@ private struct AddToolsRail: View {
         .padding(6)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.Colors.systemBorder.opacity(0.5)))
+    }
+
+    /// `LAYOUT_TYPE_LABELS` / `LAYOUT_TYPE_ICONS`.
+    static func layoutLabel(_ type: CameraLayoutType) -> String {
+        switch type {
+        case .cameraOverlay: "Camera overlay"
+        case .splitScreen: "Split screen"
+        case .cutoutCamera: "Camera cutout"
+        case .fullscreenCamera: "Fullscreen camera"
+        case .screenOnly: "Hide camera"
+        }
+    }
+
+    static func layoutIcon(_ type: CameraLayoutType) -> String {
+        switch type {
+        case .cameraOverlay: "rectangle.badge.person.crop"
+        case .splitScreen: "rectangle.split.2x1"
+        case .cutoutCamera: "person.and.background.dotted"
+        case .fullscreenCamera: "person.crop.rectangle"
+        case .screenOnly: "person.slash"
+        }
     }
 }
 
@@ -224,6 +260,9 @@ private struct PreviewSpace: View {
                     .frame(width: max(size.width, 420))
                 ZStack {
                     PlayerSurface(player: editor.player)
+                    if editor.isAddLayoutToolArmed && !editor.isPlaying {
+                        OverlayPlacementTool(editor: editor, size: size)
+                    }
                     if editor.isAddZoomToolArmed {
                         Color.white.opacity(0.001)
                             .onContinuousHover { phase in if case .active = phase { NSCursor.crosshair.set() } }
@@ -696,5 +735,65 @@ private struct PresetsButton: View {
         }
         .buttonStyle(RSButtonStyle(kind: isOpen ? .subtleBg : .transparent))
         .popover(isPresented: $isOpen, arrowEdge: .bottom) { PresetsPopover(editor: editor) }
+    }
+}
+
+// MARK: - Camera overlay placement
+
+/// Armed camera overlay tool: the camera rect of every overlay position is laid out on the
+/// canvas; the one nearest to the pointer is outlined and a click adds the layout there.
+private struct OverlayPlacementTool: View {
+    @ObservedObject var editor: EditorModel
+    var size: CGSize
+    /// Starts on the bottom-right position.
+    @State private var highlighted: Vec2 = Vec2(1, 1)
+
+    var body: some View {
+        let candidates = editor.overlayPlacementCandidates
+        ZStack(alignment: .top) {
+            Color.white.opacity(0.001)
+                .onContinuousHover { phase in
+                    guard case .active(let location) = phase else { return }
+                    let nearest = candidates.min { a, b in
+                        distance(location, a.rect01) < distance(location, b.rect01)
+                    }
+                    if let nearest { highlighted = nearest.position01 }
+                }
+                .onTapGesture {
+                    editor.addLayoutAtPlayhead(.cameraOverlay, overlayPosition01: highlighted)
+                }
+            ZStack(alignment: .topLeading) {
+                ForEach(candidates, id: \.position01) { candidate in
+                    let r = candidate.rect01
+                    let radius = candidate.borderRadius01 * size.width
+                    RoundedRectangle(cornerRadius: radius)
+                        .fill(Theme.Colors.primary.opacity(0.1))
+                        .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Theme.Colors.primary.opacity(0.9), lineWidth: 1.5))
+                        .frame(width: r.width * size.width, height: r.height * size.height)
+                        .offset(x: r.x * size.width, y: r.y * size.height)
+                        .opacity(candidate.position01 == highlighted ? 1 : 0)
+                        .animation(.easeOut(duration: 0.15), value: highlighted)
+                }
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .allowsHitTesting(false)
+            // Hint: top 16, pill, background at 0.75 with blur, label weight 500.
+            Text("Click where to place the camera")
+                .font(Theme.Typo.label.weight(.medium))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(Capsule().fill(Theme.Colors.background.opacity(0.75)))
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.top, 16)
+                .allowsHitTesting(false)
+        }
+        .frame(width: size.width, height: size.height)
+        .onContinuousHover { phase in if case .active = phase { NSCursor.pointingHand.set() } }
+    }
+
+    private func distance(_ point: CGPoint, _ rect01: Rect2) -> CGFloat {
+        let cx = (rect01.x + rect01.width / 2) * size.width
+        let cy = (rect01.y + rect01.height / 2) * size.height
+        return (point.x - cx) * (point.x - cx) + (point.y - cy) * (point.y - cy)
     }
 }

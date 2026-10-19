@@ -53,6 +53,13 @@ extension EditorModel {
             EditorAction(name: "Remove all zoom ranges", group: "Zooms", icon: "trash", isEnabled: !project.zooms.isEmpty) { [weak self] in
                 self.map { $0.removeZooms(Set($0.project.zooms.map(\.id))) }
             },
+            // `addLayout` / `removeAllLayouts`, titled after the last layout type.
+            EditorAction(name: addLayoutTitle, group: "Layouts", icon: AddToolsRail.layoutIcon(addLayoutType), shortcut: "⌃ L", isEnabled: project.recording.hasCamera) { [weak self] in
+                self?.toggleAddLayoutTool()
+            },
+            EditorAction(name: "Remove all layouts", group: "Layouts", icon: "trash") { [weak self] in
+                self.map { $0.removeLayouts(Set($0.project.cameraLayouts.map(\.id))) }
+            },
             EditorAction(name: "Add sensitive data mask", group: "Masks", icon: "circle.filled.pattern.diagonalline.rectangle") { [weak self] in self?.armMaskTool(.sensitiveData) },
             EditorAction(name: "Add highlight mask", group: "Masks", icon: "circle.rectangle.filled.pattern.diagonalline") { [weak self] in self?.armMaskTool(.highlight) },
             EditorAction(name: "Disable all masks", group: "Masks", icon: "slash.circle", isEnabled: project.masks.contains { !$0.isDisabled }) { [weak self] in self?.setAllMasks(disabled: true) },
