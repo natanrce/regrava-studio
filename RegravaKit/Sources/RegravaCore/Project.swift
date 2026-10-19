@@ -105,6 +105,9 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
     public var cursors: [RecordedCursor]
     /// Source of each audio track of the recording, in track order.
     public var audioSources: [AudioSource]
+    /// Webcam movie in the project folder, on the same timeline as the screen.
+    public var cameraFileName: String?
+    public var cameraSize: Size2?
 
     public init(
         videoFileName: String = "recording.mov",
@@ -114,7 +117,9 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         fps: Int,
         createdAt: Date = Date(),
         cursors: [RecordedCursor] = [],
-        audioSources: [AudioSource] = []
+        audioSources: [AudioSource] = [],
+        cameraFileName: String? = nil,
+        cameraSize: Size2? = nil
     ) {
         self.videoFileName = videoFileName
         self.videoSize = videoSize
@@ -124,7 +129,11 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.cursors = cursors
         self.audioSources = audioSources
+        self.cameraFileName = cameraFileName
+        self.cameraSize = cameraSize
     }
+
+    public var hasCamera: Bool { cameraFileName != nil }
 
     public var hasMicrophone: Bool { audioSources.contains(.microphone) }
     public var hasSystemAudio: Bool { audioSources.contains(.systemAudio) }
@@ -139,6 +148,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         createdAt = c.value(.createdAt, default: Date())
         cursors = c.value(.cursors, default: [])
         audioSources = c.value(.audioSources, default: [])
+        cameraFileName = c.value(.cameraFileName, default: nil)
+        cameraSize = c.value(.cameraSize, default: nil)
     }
 }
 

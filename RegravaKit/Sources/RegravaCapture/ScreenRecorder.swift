@@ -18,7 +18,14 @@ public struct CaptureOptions: Hashable, Sendable {
     public var microphoneID: String?
     public var hidesDesktopIcons: Bool
 
-    public init(fps: Int = 60, capturesSystemAudio: Bool = false, microphoneID: String? = nil, hidesDesktopIcons: Bool = false) {
+    /// `AVCaptureDevice.uniqueID` of the camera, or nil for none.
+    public var cameraID: String?
+    /// "Max resolution" of the camera (`maximumWebcamHeight`).
+    public var cameraMaxHeight: Int = 1080
+
+    public init(fps: Int = 60, capturesSystemAudio: Bool = false, microphoneID: String? = nil, hidesDesktopIcons: Bool = false, cameraID: String? = nil, cameraMaxHeight: Int = 1080) {
+        self.cameraID = cameraID
+        self.cameraMaxHeight = cameraMaxHeight
         self.fps = fps
         self.capturesSystemAudio = capturesSystemAudio
         self.microphoneID = microphoneID
@@ -34,6 +41,9 @@ public struct CaptureResult: Sendable {
     public var keystrokes: [Keystroke]
     /// Source of each audio track, in track order.
     public var audioSources: [AudioSource]
+    /// Webcam movie on the same timeline as the screen, if a camera was recorded.
+    public var cameraURL: URL?
+    public var cameraSize: Size2?
     public var markersMs: [Double]
     public var videoSize: Size2
     public var pointPixelScale: Double
@@ -84,6 +94,7 @@ public final class ScreenRecorder: NSObject {
     private var stream: SCStream?
     private var currentOutput: SCRecordingOutput?
     private let mouse = MouseTracker()
+    private var camera: CameraRecorder?
     private var expectedAudioSources: [AudioSource] = []
     private let frameSink = FrameSink()
     private var segments: [Segment] = []
@@ -128,11 +139,18 @@ public final class ScreenRecorder: NSObject {
             self.stream = stream
 
             mouse.start()
+            if let cameraID = options.cameraID {
+                let camera = CameraRecorder(url: workDirectory.appendingPathComponent("camera-raw.mov"))
+                try camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
+                self.camera = camera
+            }
             try await stream.startCapture()
             try await beginSegment()
             phase = .recording
         } catch {
             mouse.stop()
+            _ = await camera?.stop()
+            camera = nil
             try? await stream?.stopCapture()
             stream = nil
             phase = .idle
@@ -167,6 +185,8 @@ public final class ScreenRecorder: NSObject {
         defer { phase = .idle }
         if currentOutput != nil { try await endSegment() }
         let samples = mouse.stop()
+        let cameraRecording = await camera?.stop()
+        camera = nil
         try? await stream?.stopCapture()
         stream = nil
 
@@ -204,6 +224,14 @@ public final class ScreenRecorder: NSObject {
                 cursorID: sample.cursorID
             )
         }
+        // Camera movie cut to the same segments, so it lines up with the joined screen movie.
+        var cameraURL: URL?
+        if let cameraRecording {
+            let target = outputURL.deletingLastPathComponent().appendingPathComponent("camera.mov")
+            let ranges = offsets.map { (sourceStart: $0.segment.startUptime - cameraRecording.startUptime, duration: $0.duration, at: $0.offset) }
+            if (try? await Self.cut(cameraRecording.url, ranges: ranges, to: target)) != nil { cameraURL = target }
+            try? FileManager.default.removeItem(at: cameraRecording.url)
+        }
         let audioTrackCount = (try? await AVURLAsset(url: outputURL).loadTracks(withMediaType: .audio).count) ?? 0
         let audioSources = Array(expectedAudioSources.prefix(audioTrackCount))
         return CaptureResult(
@@ -214,6 +242,8 @@ public final class ScreenRecorder: NSObject {
                 timelineMs(sample.uptime).map { Keystroke(kind: sample.kind, timeMs: $0) }
             }.sorted { $0.timeMs < $1.timeMs },
             audioSources: audioSources,
+            cameraURL: cameraURL,
+            cameraSize: cameraRecording.map { Size2(width: Double($0.size.width), height: Double($0.size.height)) },
             markersMs: markerUptimes.compactMap(timelineMs),
             videoSize: videoSize,
             pointPixelScale: pointPixelScale,
@@ -227,6 +257,8 @@ public final class ScreenRecorder: NSObject {
         if let output = currentOutput { try? stream?.removeRecordingOutput(output) }
         currentOutput = nil
         mouse.stop()
+        if let recording = await camera?.stop() { try? FileManager.default.removeItem(at: recording.url) }
+        camera = nil
         try? await stream?.stopCapture()
         stream = nil
         segments.forEach { try? FileManager.default.removeItem(at: $0.url) }
@@ -346,6 +378,28 @@ public final class ScreenRecorder: NSObject {
     }
 
     // MARK: Joining
+
+    /// Copies ranges of a movie (seconds) to new positions on a new timeline.
+    static func cut(_ url: URL, ranges: [(sourceStart: Double, duration: Double, at: Double)], to outputURL: URL) async throws {
+        try? FileManager.default.removeItem(at: outputURL)
+        let asset = AVURLAsset(url: url)
+        let total = try await asset.load(.duration).seconds
+        let composition = AVMutableComposition()
+        for range in ranges {
+            let start = max(range.sourceStart, 0)
+            let end = min(range.sourceStart + range.duration, total)
+            guard end > start else { continue }
+            try await composition.insertTimeRange(
+                CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600)),
+                of: asset,
+                at: CMTime(seconds: range.at + (start - range.sourceStart), preferredTimescale: 600)
+            )
+        }
+        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            throw CaptureError.failed("Could not save the camera recording.")
+        }
+        try await session.export(to: outputURL, as: .mov)
+    }
 
     static func concatenate(_ urls: [URL], to outputURL: URL) async throws {
         try? FileManager.default.removeItem(at: outputURL)

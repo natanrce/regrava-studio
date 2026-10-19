@@ -284,6 +284,20 @@ final class RecordingCoordinator: ObservableObject {
                 )
                 return
             }
+            if cameraID != nil, !(await Permissions.ensureAccess(for: .video)) {
+                Dialogs.info(
+                    title: "Regrava Studio does not have permission to use your camera",
+                    message: "Please check your system privacy settings."
+                )
+                return
+            }
+            if cameraID != nil, microphoneID == nil, !Dialogs.confirm(
+                title: "Record muted camera?",
+                message: "Seems you have selected a camera but no microphone. Do you want to continue recording with muted camera?",
+                confirm: "Record muted camera"
+            ) {
+                return
+            }
             if let duration = preferences.recordingCountdownDuration, duration > 0 {
                 overlays.hide()
                 phase = .countdown(total: duration, startedAt: Date())
@@ -322,7 +336,9 @@ final class RecordingCoordinator: ObservableObject {
             fps: 60,
             capturesSystemAudio: systemAudio,
             microphoneID: microphoneID,
-            hidesDesktopIcons: preferences.hideDesktopContentWhileRecording
+            hidesDesktopIcons: preferences.hideDesktopContentWhileRecording,
+            cameraID: cameraID,
+            cameraMaxHeight: preferences.maximumWebcamHeight
         )
         if case .window(let window) = selection {
             NSRunningApplication(processIdentifier: window.processID)?.activate()
@@ -439,7 +455,9 @@ final class RecordingCoordinator: ObservableObject {
                     durationMs: result.durationMs,
                     fps: result.fps,
                     cursors: cursors,
-                    audioSources: result.audioSources
+                    audioSources: result.audioSources,
+                    cameraFileName: result.cameraURL?.lastPathComponent,
+                    cameraSize: result.cameraSize
                 ),
                 mouseEvents: result.mouseEvents,
                 markersMs: result.markersMs,
