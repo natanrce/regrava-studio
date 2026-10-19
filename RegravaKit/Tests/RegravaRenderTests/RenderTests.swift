@@ -191,6 +191,22 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    @Test func sharpenRaisesEdgeContrast() {
+        let left = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3)).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        let right = CIImage(color: CIColor(red: 0.7, green: 0.7, blue: 0.7)).cropped(to: CGRect(x: 8, y: 0, width: 8, height: 8))
+        let image = right.composited(over: left)
+        let sharp = FrameCompositor.sharpened(image, amount: 1)
+        #expect(sharp.extent == image.extent)
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        var pixels = [UInt8](repeating: 0, count: 16 * 4)
+        context.render(sharp, toBitmap: &pixels, rowBytes: 16 * 4, bounds: CGRect(x: 0, y: 4, width: 16, height: 1), format: .RGBA8, colorSpace: nil)
+        // The dark side of the edge gets darker, the bright side brighter; flat areas stay.
+        #expect(pixels[7 * 4] < 70)
+        #expect(pixels[8 * 4] > 185)
+        #expect(abs(Int(pixels[2 * 4]) - 77) <= 1)
+        #expect(FrameCompositor.sharpened(image, amount: 0) === image)
+    }
+
     @Test func backgroundAudioRepeatsUntilTheEnd() async throws {
         try await withTestVideo { source, dir in
             // 0.5 s tone as background audio in the project's assets folder.

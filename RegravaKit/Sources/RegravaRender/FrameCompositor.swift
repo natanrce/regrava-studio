@@ -148,6 +148,7 @@ public final class FrameCompositor: @unchecked Sendable {
     /// the screen's shadow, and faded and blurred while hiding.
     private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame) -> CIImage {
         var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        content = Self.sharpened(content, amount: camera.sharpen01)
         if let crop = camera.crop01 {
             let e = content.extent
             let window = CGRect(x: crop.x * e.width, y: (1 - crop.y - crop.height) * e.height, width: crop.width * e.width, height: crop.height * e.height)
@@ -180,6 +181,21 @@ public final class FrameCompositor: @unchecked Sendable {
             ])
         }
         return layer
+    }
+
+    private static let sharpenKernel = RenderKernels.general("casSharpen")
+
+    /// Camera sharpen on the whole, uncropped frame before the colour grade. Frames are always decoded
+    /// at full size.
+    static func sharpened(_ image: CIImage, amount: Double) -> CIImage {
+        let amount = clamp(amount, 0, 1)
+        guard amount > 0, let kernel = sharpenKernel else { return image }
+        let extent = image.extent
+        return kernel.apply(
+            extent: extent,
+            roiCallback: { _, rect in rect.insetBy(dx: -1, dy: -1) },
+            arguments: [image.clampedToExtent(), Float(amount)]
+        )?.cropped(to: extent) ?? image
     }
 
     // MARK: Pieces

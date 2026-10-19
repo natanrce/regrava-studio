@@ -70,13 +70,24 @@ struct CameraLayoutPanel: View {
 
 // MARK: - Camera Style
 
-/// Only the controls whose processing exists in this app. Color grading, sharpen, crop, face
-/// tracking and camera delay are not available yet.
+/// Sharpen and mirror. Color grading, crop and face tracking are
+/// added as their processing is implemented.
 struct CameraStylePanel: View {
     @ObservedObject var editor: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            SidebarSection {
+                SliderField(
+                    name: "Sharpen",
+                    icon: "circle.hexagongrid",
+                    value: editor.binding(\.camera.sharpen01),
+                    range: 0...1,
+                    step: 0.01,
+                    preview: { $0 == 0 ? "Off" : percent($0) },
+                    resetValue: 0
+                )
+            }
             SidebarSection(showsDivider: false) {
                 ToggleRow(title: "Mirror horizontally", isOn: editor.binding(\.camera.mirror))
             }
