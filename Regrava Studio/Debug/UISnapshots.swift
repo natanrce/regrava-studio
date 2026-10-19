@@ -125,6 +125,16 @@ enum UISnapshots {
             }
         }
         controller.model.isCommandMenuOpen = false
+        // Responsiveness: the smallest window and a large one.
+        controller.model.openSidebar(.background)
+        for (name, size) in [("min", NSSize(width: 1280, height: 740)), ("large", NSSize(width: 2200, height: 1300))] {
+            window.setFrame(NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: size), display: true)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("editor-size-\(name).png"))
+            }
+        }
         controller.window?.delegate = nil
         window.orderOut(nil)
         try? FileManager.default.removeItem(at: bundle)
