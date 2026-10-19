@@ -108,6 +108,51 @@ public enum CompositionFactory {
     }
 }
 
+extension CompositionFactory {
+    /// Core Image compiles a program the first time it sees a graph, which took 40–1000 ms and
+    /// stalled playback whenever a zoom or a cursor trail first needed a new number of motion
+    /// blur samples. This draws one moving frame per screen/cursor sample count at playback
+    /// quality with the compositor's context, so those programs exist before playing.
+    public static func prewarm(state: RenderState, outputSize: Size2) {
+        let snapshot = state.current
+        let compositor = snapshot.compositor
+        let strength = compositor.motionBlurStrength
+        guard strength > 0 else { return }
+        let layout = snapshot.track.layout
+        let video = layout.videoSize
+        let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        var sourceBuffer: CVPixelBuffer?, outputBuffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, Int(video.width), Int(video.height), kCVPixelFormatType_32BGRA, attributes, &sourceBuffer)
+        CVPixelBufferCreate(nil, Int(outputSize.width), Int(outputSize.height), kCVPixelFormatType_32BGRA, attributes, &outputBuffer)
+        guard let sourceBuffer, let outputBuffer else { return }
+        let source = CIImage(cvPixelBuffer: sourceBuffer)
+        var base = snapshot.track.frame(at: 0)
+        base.isInstantSnap = false
+        base.cursorOpacity = 1
+        let cursor = base.cursor ?? Vec2(video.width / 2, video.height / 2)
+        base.cursor = cursor
+        let videoToCanvas = base.screenRect.width / max(video.width, 1)
+        let texels = RenderQuality.playing.texelsPerSample
+        let counts = [0] + Array(2...RenderQuality.playing.maxSamples)
+        let scale = outputSize.width / max(layout.canvas.width, 1)
+        let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+        for screenSamples in counts {
+            for cursorSamples in counts {
+                var frame = base
+                let screenTravel = screenSamples == 0 ? 0 : (Double(screenSamples) - 0.5) * texels
+                var previous = base.screenRect
+                previous.x += screenTravel / strength
+                frame.previousScreenRect = previous
+                let cursorTravel = cursorSamples == 0 ? 0 : (Double(cursorSamples) - 0.5) * texels
+                frame.previousCursor = Vec2(cursor.x + cursorTravel / strength / max(videoToCanvas, 0.0001), cursor.y)
+                let image = compositor.compose(source: source, frame: frame, quality: .playing)
+                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            }
+        }
+    }
+}
+
 /// Instruction carrying what `CanvasCompositor` needs to draw a frame.
 final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
@@ -135,7 +180,7 @@ final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
 /// Renders each frame with Core Image on the GPU (Metal) at canvas size, scaled to the
 /// output size.
 final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
-    private static let context = CIContext(options: [.cacheIntermediates: false])
+    static let context = CIContext(options: [.cacheIntermediates: false])
 
     let sourcePixelBufferAttributes: [String: any Sendable]? = [
         kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,

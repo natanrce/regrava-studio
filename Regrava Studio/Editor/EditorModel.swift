@@ -219,6 +219,7 @@ final class EditorModel: ObservableObject {
             let configuration = try await CompositionFactory.configuration(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output, fps: Self.displayFrameRate)
             let composition = AVVideoComposition(configuration: configuration)
             baseConfiguration = configuration
+            prewarmRenderer()
             compositionCanvas = project.canvasSize
             compositionOutput = output
             if let item = player.currentItem, !replacingItem {
@@ -297,11 +298,23 @@ final class EditorModel: ObservableObject {
             }.value
             guard !Task.isCancelled, let self else { return }
             self.renderState.replace(with: snapshot)
+            self.prewarmRenderer()
             // Re-assigning the composition drops cached frames.
             if let base = self.baseConfiguration, let item = self.player.currentItem {
                 item.videoComposition = AVVideoComposition(configuration: base)
                 if !self.isPlaying { self.seek(to: self.isScrubbing ? self.scrubTimeMs : self.currentTimeMs, moveHead: false) }
             }
+        }
+    }
+
+    private var prewarmTask: Task<Void, Never>?
+
+    /// Compiles the moving-frame programs in the background so playback does not stall on them.
+    private func prewarmRenderer() {
+        prewarmTask?.cancel()
+        let state = renderState, output = previewOutputSize
+        prewarmTask = Task.detached(priority: .utility) {
+            CompositionFactory.prewarm(state: state, outputSize: output)
         }
     }
 

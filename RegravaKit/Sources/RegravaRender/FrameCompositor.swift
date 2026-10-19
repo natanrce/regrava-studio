@@ -41,6 +41,9 @@ public final class FrameCompositor: @unchecked Sendable {
         CGPoint(x: p.x, y: canvasHeight - p.y)
     }
 
+    /// Trail strength of the screen and cursor while moving (0 = motion blur off).
+    var motionBlurStrength: Double { MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false) }
+
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
         // Masks act on the recording itself, so they follow zoom and motion blur.
