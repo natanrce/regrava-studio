@@ -10,12 +10,7 @@ import RegravaCore
 enum MaskRenderer {
     /// Bilinear field between the four quadrant colours, one per corner of `rect`
     /// (the 2×2 texture sampled at uv × 0.5 + 0.25).
-    nonisolated(unsafe) private static let coverKernel = CIKernel(source: """
-    kernel vec4 maskCover(sampler colors, vec4 rect) {
-        vec2 p = clamp((destCoord() - rect.xy) / rect.zw, 0.0, 1.0);
-        return sample(colors, samplerTransform(colors, p + vec2(0.5)));
-    }
-    """)
+    private static let coverKernel = RenderKernels.general("maskCover")
 
     /// `image` is the recording with its origin at (0, 0) and the recording's pixel size.
     static func apply(_ mask: MaskFrame, to image: CIImage) -> CIImage {

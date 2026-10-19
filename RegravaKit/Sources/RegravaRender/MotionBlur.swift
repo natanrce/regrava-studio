@@ -13,25 +13,9 @@ enum MotionBlur {
     /// `smoothFalloffRatio` used for the screen and the cursor.
     static let smoothFalloffRatio = 2.0
 
-    nonisolated(unsafe) private static let weightedKernel = CIColorKernel(source: """
-    kernel vec4 weighted(__sample s, float ratio) {
-        float w = 1.0 + ratio * smoothstep(0.0, 1.0, 1.0 - s.a);
-        return s * w;
-    }
-    """)
-
-    nonisolated(unsafe) private static let weightKernel = CIColorKernel(source: """
-    kernel vec4 weightOnly(__sample s, float ratio) {
-        float w = 1.0 + ratio * smoothstep(0.0, 1.0, 1.0 - s.a);
-        return vec4(w, w, w, w);
-    }
-    """)
-
-    nonisolated(unsafe) private static let divideKernel = CIColorKernel(source: """
-    kernel vec4 divideByWeight(__sample total, __sample weight) {
-        return weight.r > 0.0 ? total / weight.r : vec4(0.0);
-    }
-    """)
+    private static let weightedKernel = RenderKernels.color("motionBlurWeighted")
+    private static let weightKernel = RenderKernels.color("motionBlurWeight")
+    private static let divideKernel = RenderKernels.color("motionBlurNormalize")
 
     /// Strength of the trail for the current settings.
     static func strength(amount: Double, fps: Int, disabled: Bool) -> Double {
