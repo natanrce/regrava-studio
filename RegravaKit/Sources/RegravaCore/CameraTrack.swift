@@ -58,6 +58,8 @@ public struct CameraFrame: Hashable, Sendable {
     /// Webcam placement in canvas pixels; nil without camera footage.
     public var cameraRect: Rect2?
     public var cameraOpacity: Double = 0
+    /// Point of the (cropped, mirrored) camera image kept at the frame centre (face tracking).
+    public var cameraFocal01 = Vec2(0.5, 0.5)
     /// Drawn corner radius in canvas pixels.
     public var cameraCornerRadius: Double = 0
     /// Camera width over its layout's resting width: scales its shadow.
@@ -89,7 +91,7 @@ public final class CameraTrack: @unchecked Sendable {
     private let typeEvents: [MouseEvent]
     private let cursorConfig: CursorConfig
 
-    public init(project: Project, sampleRateHz: Double? = nil) {
+    public init(project: Project, faces: CameraFaces? = nil, sampleRateHz: Double? = nil) {
         let layout = CanvasLayout(project: project)
         self.layout = layout
         let timeline = LayoutTimeline(project: project)
@@ -141,6 +143,9 @@ public final class CameraTrack: @unchecked Sendable {
         var maskAnimator = MaskAnimator(masks: project.masks, recordingSize: project.recording.videoSize)
         var press = SpringValue(1)
         var opacity = SpringValue(1)
+        // Face tracking: the focal point always uses its own spring.
+        let confidentFaces = project.camera.enableFaceTracking ? FaceTracking.confident(faces) : nil
+        var focalX = SpringValue(0.5), focalY = SpringValue(0.5)
         let buttonEvents = pathEvents.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
@@ -192,6 +197,23 @@ public final class CameraTrack: @unchecked Sendable {
                 frame.cameraOpacity = clamp(cameraOpacity.value, 0, 1)
                 frame.cameraSizeFactor = rect.width / max(cameraReference.value, 0.0001)
                 frame.cameraCornerRadius = cameraRadius.value * frame.cameraSizeFactor * layout.scale
+            }
+            if hasCamera {
+                var focal = FaceTracking.disabledCenter
+                if project.camera.enableFaceTracking {
+                    focal = FaceTracking.faceCenter01(confident: confidentFaces, cameraTimeMs: source + project.camera.delayAdjustmentMs, crop01: project.camera.crop01)
+                }
+                if project.camera.mirror { focal.x = 1 - focal.x }
+                focalX.setTarget(focal.x, config: FaceTracking.spring)
+                focalY.setTarget(focal.y, config: FaceTracking.spring)
+                if i == 0 {
+                    focalX.snapToTarget()
+                    focalY.snapToTarget()
+                } else {
+                    focalX.advance(by: sampleIntervalMs, config: FaceTracking.spring)
+                    focalY.advance(by: sampleIntervalMs, config: FaceTracking.spring)
+                }
+                frame.cameraFocal01 = Vec2(focalX.value, focalY.value)
             }
             frame.cursorScale = press.value
             frame.isInstantSnap = target.instant
@@ -245,6 +267,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cameraOpacity = a.cameraOpacity + (b.cameraOpacity - a.cameraOpacity) * f
         frame.cameraCornerRadius = a.cameraCornerRadius + (b.cameraCornerRadius - a.cameraCornerRadius) * f
         frame.cameraSizeFactor = a.cameraSizeFactor + (b.cameraSizeFactor - a.cameraSizeFactor) * f
+        frame.cameraFocal01 = a.cameraFocal01.lerp(to: b.cameraFocal01, f)
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {

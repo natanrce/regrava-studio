@@ -120,6 +120,31 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         #expect(pixel[3] == 255 && pixel[0] > 30 && abs(Int(pixel[0]) - Int(pixel[2])) < 25, "\(pixel)")
     }
 
+    @Test func focalPointPansTheWebcam() {
+        var project = sampleProject(duration: 2000)
+        project.zooms = []
+        project.style.shadow.intensity = 0
+        project.recording.cameraFileName = "camera.mov"
+        project.recording.cameraSize = Size2(width: 320, height: 180)
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: nil)
+        var frame = snapshot.track.frame(at: 1000)
+        let rect = frame.cameraRect!
+        // Left half red, right half green; the square camera frame shows the middle by default.
+        let red = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 0, width: 160, height: 180))
+        let green = CIImage(color: CIColor(red: 0, green: 1, blue: 0)).cropped(to: CGRect(x: 160, y: 0, width: 160, height: 180))
+        let camera = green.composited(over: red)
+        let screen = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
+        func pixel(_ focal: Vec2, at x: Double) -> [UInt8] {
+            frame.cameraFocal01 = focal
+            var p = [UInt8](repeating: 0, count: 4)
+            CIContext().render(snapshot.compositor.compose(source: screen, camera: camera, frame: frame), toBitmap: &p, rowBytes: 4, bounds: CGRect(x: x, y: 1080 - rect.midY, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+            return p
+        }
+        // A face on the right pans the image left: a point 20% into the frame turns green.
+        #expect(pixel(Vec2(0.5, 0.5), at: rect.x + rect.width * 0.2)[0] > 200)
+        #expect(pixel(Vec2(0.9, 0.5), at: rect.x + rect.width * 0.2)[1] > 200)
+    }
+
     /// Set REGRAVA_SNAPSHOT_DIR to write rest/zoomed PNG frames for visual inspection.
     @Test func writesSnapshotsWhenRequested() throws {
         guard let dir = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_DIR"] else { return }

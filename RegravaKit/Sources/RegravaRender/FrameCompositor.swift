@@ -168,9 +168,12 @@ public final class FrameCompositor: @unchecked Sendable {
         let size = content.extent.size
         let k = max(target.width / max(size.width, 1), target.height / max(size.height, 1))
         let w = size.width * k, h = size.height * k
+        // Cover fill with the focal point at the frame centre, clamped to cover it.
+        let x = FaceTracking.focalAxis(imageOrigin: rect.x + (rect.width - w) / 2, imageLength: w, frameOrigin: rect.x, frameLength: rect.width, focal01: frame.cameraFocal01.x)
+        let yTop = FaceTracking.focalAxis(imageOrigin: rect.y + (rect.height - h) / 2, imageLength: h, frameOrigin: rect.y, frameLength: rect.height, focal01: frame.cameraFocal01.y)
         let placed = content
             .transformed(by: CGAffineTransform(scaleX: k, y: k))
-            .transformed(by: CGAffineTransform(translationX: target.midX - w / 2, y: target.midY - h / 2))
+            .transformed(by: CGAffineTransform(translationX: x, y: canvasHeight - yTop - h))
         let radius = min(frame.cameraCornerRadius, min(target.width, target.height) / 2)
         var layer = masked(placed.cropped(to: target), to: target, radius: radius)
         if style.shadow.intensity > 0 {

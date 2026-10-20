@@ -20,7 +20,8 @@ public final class RenderState: @unchecked Sendable {
 
     /// `assetsDirectory` is the project folder (background images).
     public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil) -> Snapshot {
-        let track = CameraTrack(project: project)
+        let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
+        let track = CameraTrack(project: project, faces: faces)
         let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory)
         return Snapshot(track: track, compositor: compositor)
     }
