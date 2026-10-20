@@ -173,6 +173,7 @@ public struct Project: Codable, Hashable, Sendable {
     public var audio = AudioConfig()
     /// Camera image settings (`cameraConfig`).
     public var camera = CameraConfig()
+    public var captions = CaptionsConfig()
     /// Layout used where no layout range applies (`defaultLayout`).
     public var defaultLayout = DefaultCameraLayout()
     /// Camera layout ranges in source time (`scene.layouts`).
@@ -224,6 +225,7 @@ public struct Project: Codable, Hashable, Sendable {
         masks = c.value(.masks, default: [])
         audio = c.value(.audio, default: AudioConfig())
         camera = c.value(.camera, default: CameraConfig())
+        captions = c.value(.captions, default: CaptionsConfig())
         defaultLayout = c.value(.defaultLayout, default: DefaultCameraLayout())
         cameraLayouts = c.value(.cameraLayouts, default: [])
     }
