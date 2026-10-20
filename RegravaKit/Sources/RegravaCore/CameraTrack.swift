@@ -94,7 +94,7 @@ public final class CameraTrack: @unchecked Sendable {
     private let typeEvents: [MouseEvent]
     private let cursorConfig: CursorConfig
 
-    public init(project: Project, faces: CameraFaces? = nil, sampleRateHz: Double? = nil) {
+    public init(project: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], sampleRateHz: Double? = nil) {
         let layout = CanvasLayout(project: project)
         self.layout = layout
         let timeline = LayoutTimeline(project: project)
@@ -113,7 +113,7 @@ public final class CameraTrack: @unchecked Sendable {
         let imageChanges = CursorTypes.imageChangeTimes(typeEvents, config: project.cursor)
         let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
 
-        let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, sparse: sparse)
+        let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, sparse: sparse, silence: silence)
 
         let cursorPath = CursorPathCache.shared.path(
             for: CursorPathCache.Key(
@@ -437,9 +437,12 @@ struct CameraPlanner {
     let groups: [UUID: [FocusGroup]]
     /// Cursor "moves groups" for the resting focus.
     let restingGroups: [FocusGroup]
+    /// Quiet stretches of the microphone for "Hide during silence".
+    let silence: [SilenceChunk]
 
-    init(project: Project, timeline: LayoutTimeline, cleaned: [MouseEvent], sparse: [MouseEvent]) {
+    init(project: Project, timeline: LayoutTimeline, cleaned: [MouseEvent], sparse: [MouseEvent], silence: [SilenceChunk] = []) {
         self.project = project
+        self.silence = silence
         self.timeline = timeline
         self.cleaned = cleaned
         zooms = project.zooms
@@ -526,8 +529,13 @@ struct CameraPlanner {
         zooms.contains { $0.isInstant && t >= $0.startMs && t <= $0.endMs + 50 }
     }
 
-    /// Camera hidden by its layout.
-    func isCameraHidden(at t: Double) -> Bool { timeline.isCameraHidden(at: t) }
+    /// `getIsHiddenAtTime`: never in a fullscreen-camera range; hidden during a long silence
+    /// when "Hide during silence" is on, or by a screen-only range.
+    func isCameraHidden(at t: Double) -> Bool {
+        if timeline.activeRange(at: t)?.type == .fullscreenCamera { return false }
+        if let ms = project.camera.hideDuringSilenceMs, SilenceDetection.isSilent(silence, at: t, hideDuringSilenceMs: ms) { return true }
+        return timeline.isCameraHidden(at: t)
+    }
 
     func targets(at t: Double) -> LayoutTargets {
         let hidden = isCameraHidden(at: t)
