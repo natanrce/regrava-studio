@@ -70,8 +70,7 @@ struct CameraLayoutPanel: View {
 
 // MARK: - Camera Style
 
-/// Color grading, sharpen, crop, mirror and the advanced camera delay. Face tracking is
-/// added as their processing is implemented.
+/// Color grading, sharpen, crop, mirror, face tracking and the advanced camera delay.
 struct CameraStylePanel: View {
     @ObservedObject var editor: EditorModel
 
@@ -121,6 +120,12 @@ struct CameraStylePanel: View {
             }
             SidebarSection(showsDivider: editor.project.recording.hasCamera) {
                 ToggleRow(title: "Mirror horizontally", isOn: editor.binding(\.camera.mirror))
+                ToggleRow(
+                    icon: "person.fill.viewfinder",
+                    title: "Face tracking",
+                    description: "Regrava Studio will adjust the camera picture to center it on your face. Done locally, no data is sent to the server.",
+                    isOn: editor.binding(\.camera.enableFaceTracking)
+                )
             }
             if editor.project.recording.hasCamera {
                 NamedField(name: "Advanced", togglable: true) {

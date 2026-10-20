@@ -118,6 +118,7 @@ final class EditorModel: ObservableObject {
 
     func prepare() async {
         await rebuildComposition()
+        updateFaceTracking()
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -172,6 +173,7 @@ final class EditorModel: ObservableObject {
             || (updated.audio.backgroundAudioVolume > 0) != (project.audio.backgroundAudioVolume > 0)
         let audioChanged = updated.audio != project.audio
         let cameraDelayChanged = updated.camera.delayAdjustmentMs != project.camera.delayAdjustmentMs
+        let faceTrackingChanged = updated.camera.enableFaceTracking != project.camera.enableFaceTracking
         project = updated
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
@@ -183,6 +185,7 @@ final class EditorModel: ObservableObject {
         isDirty = true
         scheduleAutosave()
         rememberLastProjectConfig()
+        if faceTrackingChanged { updateFaceTracking() }
         if canvasChanged || slicesChanged || backgroundChanged || cameraDelayChanged {
             Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || cameraDelayChanged) }
         } else {
@@ -304,6 +307,28 @@ final class EditorModel: ObservableObject {
                 item.videoComposition = AVVideoComposition(configuration: base)
                 if !self.isPlaying { self.seek(to: self.isScrubbing ? self.scrubTimeMs : self.currentTimeMs, moveHead: false) }
             }
+        }
+    }
+
+    private var faceTrackingTask: Task<Void, Never>?
+
+    /// Turning face tracking on starts the webcam analysis (`project.cameraFaces`); partial
+    /// results are saved and used as they come, so tracking works while it runs.
+    private func updateFaceTracking() {
+        faceTrackingTask?.cancel()
+        faceTrackingTask = nil
+        guard project.camera.enableFaceTracking, let name = project.recording.cameraFileName else { return }
+        let bundle = bundleURL
+        let movie = videoURL.deletingLastPathComponent().appendingPathComponent(name)
+        let existing = CameraFaces.load(bundle: bundle)
+        guard existing?.isComplete != true, FileManager.default.fileExists(atPath: movie.path) else { return }
+        faceTrackingTask = Task.detached(priority: .utility) { [weak self] in
+            let faces = try? await CameraFaceDetector.detect(movie: movie, previous: existing) { partial in
+                try? partial.save(bundle: bundle)
+                Task { @MainActor [weak self] in self?.scheduleRefresh() }
+            }
+            if let faces { try? faces.save(bundle: bundle) }
+            await MainActor.run { [weak self] in self?.scheduleRefresh() }
         }
     }
 
@@ -965,6 +990,7 @@ final class EditorModel: ObservableObject {
     }
 
     func tearDown() {
+        faceTrackingTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         player.pause()

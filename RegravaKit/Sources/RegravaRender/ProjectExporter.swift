@@ -34,6 +34,16 @@ public enum ProjectExporter {
 
     /// Exports and returns the written files (two files for codec "Both").
     @discardableResult
+    /// Finishes the webcam's face detection before rendering when face tracking is on.
+    public static func completeFaceTracking(project: Project, bundle: URL) async throws {
+        guard project.camera.enableFaceTracking, let name = project.recording.cameraFileName else { return }
+        let movie = bundle.appendingPathComponent(name)
+        let existing = CameraFaces.load(bundle: bundle)
+        guard existing?.isComplete != true, FileManager.default.fileExists(atPath: movie.path) else { return }
+        let faces = try await CameraFaceDetector.detect(movie: movie, previous: existing)
+        try faces.save(bundle: bundle)
+    }
+
     public static func export(
         project: Project,
         videoURL: URL,
@@ -45,6 +55,8 @@ public enum ProjectExporter {
     ) async throws -> [URL] {
         let settings = rawSettings.normalized(target: target)
         let outputSize = settings.outputSize(canvas: project.canvasSize)
+        // Export frames wait until face data covers them ("tracking face").
+        try await completeFaceTracking(project: project, bundle: videoURL.deletingLastPathComponent())
         let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent())
 
         switch settings.format {
