@@ -26,6 +26,7 @@ extension EditorModel {
                 let result = SessionTranscript(generator: .system(locale: locale), transcript: words)
                 try result.save(bundle: bundle)
                 transcript = result
+                refreshRendering()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -70,6 +71,7 @@ struct TranscriptPanel: View {
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 SidebarSection(title: "Captions") {
+                    CaptionsSettings(editor: editor)
                     RSButton(title: "Export transcript", kind: .secondary) { editor.exportTranscript() }
                 }
                 SidebarSection(title: "Generate transcript", showsDivider: false) {
@@ -154,5 +156,120 @@ private struct TranscriptGenerationForm: View {
     static func displayName(_ id: String) -> String {
         let bcp = id.replacingOccurrences(of: "_", with: "-", options: [], range: id.range(of: "_"))
         return Locale(identifier: "en").localizedString(forIdentifier: bcp) ?? id
+    }
+}
+
+// MARK: - Captions settings
+
+private struct CaptionsSettings: View {
+    @ObservedObject var editor: EditorModel
+
+    private var config: CaptionsConfig { editor.project.captions }
+
+    var body: some View {
+        ToggleRow(title: "Disable captions", isOn: Binding(get: { !config.enableTranscript }, set: { v in editor.change { $0.captions.enableTranscript = !v } }))
+        if config.enableTranscript {
+            if editor.clientTranscript.contains(where: { $0.type == "sound-label" }) {
+                ToggleRow(title: "Show sound labels", description: "Adds sounds such as [keyboard clacking] to your captions.", isOn: editor.binding(\.captions.showSoundLabels))
+            }
+            SliderField(name: "Caption size", value: editor.binding(\.captions.sizeRatio), range: 0.02...0.125, preview: { String(format: "%.1f×", $0 / 0.05) }, resetValue: 0.05)
+            NamedField(name: "Font style") {
+                SegmentedPicker(options: CaptionsConfig.Font.allCases, label: { ["sans-serif": "Sans-serif", "serif": "Serif", "mono": "Mono"][$0.rawValue] ?? "" }, isWide: true, selection: editor.binding(\.captions.font))
+            }
+            NamedField(name: "Word reveal") {
+                SegmentedPicker(
+                    options: CaptionsConfig.WordsReveal.allCases,
+                    label: { $0 == .lineByLine ? "Line by line" : "Word by word" },
+                    description: { $0 == .lineByLine ? "Show whole caption lines as their words are spoken." : "Show one word at a time. Each spoken word pushes the previous one out." },
+                    isWide: true,
+                    selection: editor.binding(\.captions.wordsReveal)
+                )
+            }
+            if config.wordsReveal == .lineByLine {
+                NamedField(name: "Line growth") {
+                    SegmentedPicker(
+                        options: CaptionsConfig.LineGrowth.allCases,
+                        label: { ["entire-line": "Full line", "left-anchored": "Expanding", "centered": "Centered"][$0.rawValue] ?? "" },
+                        description: {
+                            [
+                                "entire-line": "The line box appears at its full size right away.",
+                                "left-anchored": "The line box grows from its left edge as words are spoken.",
+                                "centered": "The line box grows while staying centered as words are spoken.",
+                            ][$0.rawValue]
+                        },
+                        isWide: true,
+                        selection: editor.binding(\.captions.lineGrowth)
+                    )
+                }
+                NamedField(name: "Word animation") {
+                    SegmentedPicker(
+                        options: CaptionsConfig.WordEntrance.allCases,
+                        label: { ["appear": "Appear", "fade-in": "Fade in", "slide-in": "Slide in"][$0.rawValue] ?? "" },
+                        description: {
+                            [
+                                "appear": "Words pop in as they are spoken.",
+                                "fade-in": "Upcoming words are shown dimmed and light up when spoken.",
+                                "slide-in": "Words slide into place as they are spoken.",
+                            ][$0.rawValue]
+                        },
+                        isWide: true,
+                        selection: editor.binding(\.captions.wordEntrance)
+                    )
+                }
+            }
+            NamedField(name: "Color") {
+                SegmentedPicker(
+                    options: ["dark", "light"],
+                    label: { $0 == "dark" ? "Dark" : "Light" },
+                    isWide: true,
+                    selection: Binding(
+                        get: { config.isDark ? "dark" : "light" },
+                        set: { v in
+                            editor.change {
+                                $0.captions.color = v == "dark" ? "#ffffff" : "#000000"
+                                $0.captions.backgroundColor = v == "dark" ? "#000000" : "#ffffff"
+                            }
+                        }
+                    )
+                )
+            }
+            NamedField(name: "Caption position") {
+                VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                    CaptionPositionPad(position: editor.binding(\.captions.position01, coalesce: "caption-position"))
+                    SegmentedPicker(
+                        options: ["bottom", "center"],
+                        label: { $0 == "bottom" ? "Bottom" : "Center" },
+                        isWide: true,
+                        selection: Binding(
+                            get: { config.position01 == Vec2(0.5, 0.5) ? "center" : "bottom" },
+                            set: { v in editor.change { $0.captions.position01 = v == "center" ? Vec2(0.5, 0.5) : Vec2(0.5, 1) } }
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// A 16:9 pad with a draggable dot for `position01`.
+private struct CaptionPositionPad: View {
+    @Binding var position: Vec2
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.lighterBg)
+                Capsule()
+                    .fill(Theme.Colors.primaryActiveText)
+                    .frame(width: size.width * 0.3, height: 8)
+                    .position(x: 12 + position.x * (size.width - 24), y: 10 + position.y * (size.height - 20))
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                position = Vec2(clamp((value.location.x - 12) / max(size.width - 24, 1), 0, 1), clamp((value.location.y - 10) / max(size.height - 20, 1), 0, 1))
+            })
+        }
+        .aspectRatio(16.0 / 9, contentMode: .fit)
     }
 }

@@ -293,6 +293,9 @@ final class EditorModel: ObservableObject {
         change { $0.apply(entry.preset.config) }
     }
 
+    /// Redraws with files beside the project that changed (transcript, face data).
+    func refreshRendering() { scheduleRefresh() }
+
     private func scheduleRefresh() {
         refreshTask?.cancel()
         let project = self.renderedProject
