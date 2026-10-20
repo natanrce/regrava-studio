@@ -6,77 +6,17 @@ import SwiftUI
 
 // "Crop Camera" window.
 
-/// Child window "camera-crop-window": 960×720 (min 720×680), hidden-inset title bar with the
-/// traffic lights at (23, 22) of a 60 px top bar, sidebar vibrancy, Escape discards.
-@MainActor
-final class CameraCropWindowController: NSWindowController, NSWindowDelegate {
-    private static var open: [ObjectIdentifier: CameraCropWindowController] = [:]
-    private let key: ObjectIdentifier
-
+/// Child window "camera-crop-window" (shell).
+enum CameraCropWindow {
     /// Pauses playback and opens the window, or focuses it when already open.
+    @MainActor
     static func show(for editor: EditorModel) {
         editor.pause()
-        let key = ObjectIdentifier(editor)
-        if let existing = open[key] {
-            existing.window?.makeKeyAndOrderFront(nil)
-            return
-        }
-        let controller = CameraCropWindowController(editor: editor, key: key)
-        open[key] = controller
-        controller.window?.center()
-        controller.showWindow(nil)
-    }
-
-    private init(editor: EditorModel, key: ObjectIdentifier) {
-        self.key = key
-        let window = EscapeClosingWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 960, height: 720),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Crop Camera"
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.contentMinSize = NSSize(width: 720, height: 680)
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.collectionBehavior.insert(.fullScreenNone)
-        window.setFrameAutosaveName("camera-crop-window")
-        let effect = NSVisualEffectView()
-        effect.material = .sidebar
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        window.contentView = effect
-        super.init(window: window)
+        let key = "camera-crop-window-\(ObjectIdentifier(editor).hashValue)"
+        if ToolWindowController.focus(key) { return }
         let model = CameraCropModel(editor: editor)
-        let hosting = NSHostingView(rootView: CameraCropView(model: model, close: { [weak window] in window?.performClose(nil) }))
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-        effect.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: effect.topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
-        ])
-        window.delegate = self
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    func windowWillClose(_ notification: Notification) { Self.open[key] = nil }
-    func windowDidResize(_ notification: Notification) { positionTrafficLights() }
-    func windowDidBecomeKey(_ notification: Notification) { positionTrafficLights() }
-
-    private func positionTrafficLights() {
-        guard let window, let close = window.standardWindowButton(.closeButton),
-              let titlebarView = close.superview, let container = titlebarView.superview else { return }
-        let height: CGFloat = 60
-        container.frame = NSRect(x: 0, y: window.frame.height - height, width: window.frame.width, height: height)
-        titlebarView.frame = container.bounds
-        for (index, type) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].enumerated() {
-            guard let button = window.standardWindowButton(type) else { continue }
-            button.setFrameOrigin(NSPoint(x: 23 + CGFloat(index) * 20, y: height - 22 - button.frame.height))
+        ToolWindowController.open(key: key, title: "Crop Camera", autosaveName: "camera-crop-window") { close in
+            AnyView(CameraCropView(model: model, close: close))
         }
     }
 }

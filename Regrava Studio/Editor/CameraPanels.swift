@@ -110,7 +110,7 @@ struct CameraStylePanel: View {
                     NamedField(name: "Crop", icon: "crop") {
                         HStack(spacing: Theme.gap(1)) {
                             RSButton(title: editor.project.camera.crop01 != nil ? "Edit crop" : "Crop camera", kind: .secondary, isWide: true) {
-                                CameraCropWindowController.show(for: editor)
+                                CameraCropWindow.show(for: editor)
                             }
                             if editor.project.camera.crop01 != nil {
                                 RSButton(title: "Reset", kind: .secondary) { editor.change { $0.camera.crop01 = nil } }
