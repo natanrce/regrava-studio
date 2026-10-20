@@ -141,9 +141,10 @@ struct SliderField: View {
     var preview: ((Double) -> String)?
     var resetValue: Double?
     var suggestedValues: [Double] = []
+    var badge: (icon: String, tooltip: String)?
 
     var body: some View {
-        NamedField(name: name, icon: icon, description: description) {
+        NamedField(name: name, icon: icon, description: description, badge: badge) {
             RSSlider(value: $value, range: range, step: step, preview: preview, resetValue: resetValue, suggestedValues: suggestedValues)
         }
     }

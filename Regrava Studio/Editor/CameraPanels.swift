@@ -32,7 +32,7 @@ struct CameraLayoutPanel: View {
                     case .splitScreen:
                         SplitLayoutOptionsView(editor: editor, options: editor.binding(\.defaultLayout.splitScreen))
                     case .cutoutCamera:
-                        EmptyView()
+                        CutoutLayoutOptionsView(editor: editor, options: editor.binding(\.defaultLayout.cutoutCamera))
                     default:
                         OverlayLayoutOptionsView(options: editor.binding(\.defaultLayout.cameraOverlay))
                     }
@@ -153,21 +153,23 @@ struct CameraLayoutTypePicker: View {
     var types: [CameraLayoutType]
     @Binding var selection: CameraLayoutType
 
-    /// The default layout offers overlay and split (plus cutout where person segmentation is
-    /// supported, which this app does not have); ranges also offer fullscreen and screen only.
+    /// The default layout offers overlay, split and cutout; ranges also offer fullscreen and
+    /// screen only. Apple Vision's person segmentation is available on every supported Mac, so
+    /// cutout is always offered.
     static func availableTypes(isDefaultLayout: Bool) -> [CameraLayoutType] {
         isDefaultLayout
-            ? [.cameraOverlay, .splitScreen]
-            : [.cameraOverlay, .splitScreen, .fullscreenCamera, .screenOnly]
+            ? [.cameraOverlay, .splitScreen, .cutoutCamera]
+            : [.cameraOverlay, .splitScreen, .cutoutCamera, .fullscreenCamera, .screenOnly]
     }
 
     var body: some View {
         if types.count > 1 {
-            let columns = types.count > 4 ? 3 : 2
+            // 3 columns for the default layout's three types or more than four.
+            let columns = types.count == 3 || types.count > 4 ? 3 : 2
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.gap(1)), count: columns), spacing: Theme.gap(1)) {
                 ForEach(types, id: \.self) { type in
                     Button { selection = type } label: {
-                        LayoutTile(type: type, split: editor.project.defaultLayout.splitScreen, wallpaperID: wallpaperID, isActive: type == selection)
+                        LayoutTile(type: type, split: editor.project.defaultLayout.splitScreen, cutoutX: editor.project.defaultLayout.cutoutCamera.positionX01, wallpaperID: wallpaperID, isActive: type == selection)
                     }
                     .buttonStyle(.plain)
                 }
@@ -194,6 +196,7 @@ struct CameraLayoutTypePicker: View {
 private struct LayoutTile: View {
     var type: CameraLayoutType
     var split: SplitLayoutOptions
+    var cutoutX = 1.0
     var wallpaperID: String?
     var isActive: Bool
     @State private var wallpaper: NSImage?
@@ -265,7 +268,17 @@ private struct LayoutTile: View {
         case .fullscreenCamera:
             box(icon: "person", inverted: false, side: side, iconScale: 1.5, radius: q(1))
         case .cutoutCamera:
-            box(icon: "display", inverted: true, side: side, radius: q(1)).padding(q(1))
+            // The screen, and a `person.fill` standing on the bottom edge at left posX × 75%,
+            // bottom −5%, outlined in black.
+            GeometryReader { proxy in
+                box(icon: "display", inverted: true, side: side, radius: q(1)).padding(q(1))
+                Image(systemName: "person.fill")
+                    .font(.system(size: side * 0.175 * 2.5))
+                    .foregroundStyle(Theme.Colors.text)
+                    .shadow(color: .black, radius: 0.5)
+                    .fixedSize()
+                    .position(x: proxy.size.width * max(cutoutX * 0.75, 0.12), y: proxy.size.height * 1.05 - side * 0.175 * 1.25)
+            }
         }
     }
 
@@ -320,6 +333,60 @@ struct OverlayLayoutOptionsView: View {
     }
 }
 
+// MARK: - Cutout options
+
+struct CutoutLayoutOptionsView: View {
+    @ObservedObject var editor: EditorModel
+    @Binding var options: CutoutLayoutOptions
+    var disablePositionPicker = false
+
+    private let edgeBadge = (icon: "cube.transparent", tooltip: "The cutout's edge is shared by every cutout layout in the project.")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.gap(3)) {
+            if !disablePositionPicker {
+                NamedField(name: "Camera Position") {
+                    OptionDotPicker(
+                        value: Binding(get: { Vec2(options.positionX01, 1) }, set: { options.positionX01 = $0.x }),
+                        options: OptionDotPicker.bottomPositions
+                    )
+                }
+            }
+            SliderField(name: "Camera Size", value: $options.sizeRatio01, range: 0.2...1, step: 0.0001, preview: percent, resetValue: CutoutLayoutOptions().sizeRatio01)
+            NamedField(name: "Camera size during zoom", icon: "magnifyingglass.circle", togglable: true) {
+                VStack(alignment: .leading, spacing: Theme.gap(3)) {
+                    ToggleRow(
+                        title: "Make smaller during zoom",
+                        description: "When zooming in, the camera will shrink to avoid covering the recording itself.",
+                        isOn: Binding(get: { options.zoomedScale != 1 }, set: { options.zoomedScale = $0 ? 0.8 : 1 })
+                    )
+                    if options.zoomedScale != 1 {
+                        SliderField(name: "Size during zoom", value: $options.zoomedScale, range: 0.25...1, preview: percent, resetValue: 0.8)
+                    }
+                }
+            }
+            SliderField(
+                name: "Edge softness",
+                value: editor.binding(\.camera.background.edgeFalloff01),
+                range: 0...1,
+                step: 0.0001,
+                preview: percent,
+                resetValue: CameraBackgroundConfig().edgeFalloff01,
+                badge: edgeBadge
+            )
+            SliderField(
+                name: "Edge inset",
+                value: editor.binding(\.camera.background.edgeInsetPx),
+                range: 0...8,
+                step: 0.1,
+                preview: { String(format: "%.1f px", $0) },
+                resetValue: 0,
+                badge: edgeBadge
+            )
+        }
+    }
+}
+
 // MARK: - Split options
 
 struct SplitLayoutOptionsView: View {
@@ -344,9 +411,9 @@ struct SplitLayoutOptionsView: View {
                     value: editor.binding(\.style.paddingRatio),
                     range: 0...0.25,
                     preview: { String(format: "%.1f%%", $0 * 100) },
-                    resetValue: 0.1
+                    resetValue: 0.1,
+                    badge: ("cube.transparent", "Padding value is shared across all layouts in the project.")
                 )
-                .help("Padding value is shared across all layouts in the project.")
             }
         }
     }
@@ -406,6 +473,9 @@ private struct SplitRatioPicker: View {
 struct OptionDotPicker: View {
     @Binding var value: Vec2
     var options: [Vec2]
+
+    /// Cutout positions: on the bottom edge.
+    static let bottomPositions = [Vec2(0, 1), Vec2(0.5, 1), Vec2(1, 1)]
 
     static let eightPositions = [
         Vec2(0, 0), Vec2(0.5, 0), Vec2(1, 0), Vec2(0, 0.5), Vec2(1, 0.5), Vec2(0, 1), Vec2(0.5, 1), Vec2(1, 1),
@@ -484,6 +554,18 @@ struct LayoutInspector: View {
                         case .splitScreen:
                             sharedSettings {
                                 SplitLayoutOptionsView(editor: editor, options: editor.binding(\.defaultLayout.splitScreen))
+                            }
+                        case .cutoutCamera:
+                            SidebarSection {
+                                NamedField(name: "Camera Position") {
+                                    OptionDotPicker(
+                                        value: Binding(get: { Vec2(layout.cutoutPositionX01, 1) }, set: { v in editor.updateLayout(layoutID) { $0.cutoutPositionX01 = v.x } }),
+                                        options: OptionDotPicker.bottomPositions
+                                    )
+                                }
+                            }
+                            sharedSettings {
+                                CutoutLayoutOptionsView(editor: editor, options: editor.binding(\.defaultLayout.cutoutCamera), disablePositionPicker: true)
                             }
                         default:
                             EmptyView()

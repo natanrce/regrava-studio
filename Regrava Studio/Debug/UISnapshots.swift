@@ -115,6 +115,7 @@ enum UISnapshots {
             ("audio", { controller.model.openSidebar(.audio) }),
             ("camera-layout", { controller.model.openSidebar(.cameraLayout) }),
             ("camera-layout-split", { controller.model.change { $0.defaultLayout.type = .splitScreen } }),
+            ("camera-layout-cutout", { controller.model.change { $0.defaultLayout.type = .cutoutCamera } }),
             ("camera-style", { controller.model.change { $0.defaultLayout.type = .cameraOverlay }; controller.model.openSidebar(.cameraStyle) }),
             ("command-menu", { controller.model.openSidebar(.background); controller.model.isCommandMenuOpen = true }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),

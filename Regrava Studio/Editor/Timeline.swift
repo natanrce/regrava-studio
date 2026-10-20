@@ -1225,10 +1225,8 @@ private struct LayoutItem: View {
     private var menu: some View {
         Button { setType(.cameraOverlay) } label: { Label("Overlay", systemImage: "square.grid.3x3") }
             .keyboardShortcut("1", modifiers: [])
-        // Cutout needs person segmentation, which this app does not have (`isEnabled`).
-        Button {} label: { Label("Cutout", systemImage: "person.and.background.dotted") }
+        Button { setType(.cutoutCamera) } label: { Label("Cutout", systemImage: "person.and.background.dotted") }
             .keyboardShortcut("4", modifiers: [])
-            .disabled(true)
         Button { setType(.fullscreenCamera) } label: { Label("Fullscreen", systemImage: "person.crop.rectangle") }
             .keyboardShortcut("2", modifiers: [])
         Button { setType(.screenOnly) } label: { Label("Hide camera", systemImage: "macwindow") }

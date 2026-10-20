@@ -154,10 +154,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                       editor.project.recording.hasCamera else { return false }
                 editor.change { $0.camera.hide.toggle() }
             case ("l", [.control]): editor.toggleAddLayoutTool()
-            case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil, ("3", []) where editor.openLayoutID != nil:
-                // Layout mode: Overlay / Fullscreen / Hide camera. 4 = Cutout is unavailable without
-                // person segmentation.
-                let types: [String: CameraLayoutType] = ["1": .cameraOverlay, "2": .fullscreenCamera, "3": .screenOnly]
+            case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil,
+                 ("3", []) where editor.openLayoutID != nil, ("4", []) where editor.openLayoutID != nil:
+                // Layout mode: Overlay / Fullscreen / Hide camera / Cutout.
+                let types: [String: CameraLayoutType] = ["1": .cameraOverlay, "2": .fullscreenCamera, "3": .screenOnly, "4": .cutoutCamera]
                 guard let layout = editor.openLayoutID, let type = types[key] else { return false }
                 editor.updateLayout(layout) { $0.type = type }
             case ("z", [.command]): editor.undo()

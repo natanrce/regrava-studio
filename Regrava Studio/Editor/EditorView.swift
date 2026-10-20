@@ -191,11 +191,10 @@ struct AddToolsRail: View {
                     .disabled(true)
                     .opacity(Theme.disabledOpacity)
             }
-            // Camera layout group, only with camera footage. Camera cutout is left out where
-            // person segmentation is unavailable.
+            // Camera layout group, only with camera footage.
             if editor.project.recording.hasCamera {
                 VStack(spacing: Theme.gap(0)) {
-                    ForEach([CameraLayoutType.cameraOverlay, .splitScreen, .fullscreenCamera, .screenOnly], id: \.self) { type in
+                    ForEach([CameraLayoutType.cameraOverlay, .splitScreen, .cutoutCamera, .fullscreenCamera, .screenOnly], id: \.self) { type in
                         RSIconButton(
                             icon: Self.layoutIcon(type),
                             kind: editor.isAddLayoutToolArmed && type == .cameraOverlay ? .subtleBg : .transparent,
