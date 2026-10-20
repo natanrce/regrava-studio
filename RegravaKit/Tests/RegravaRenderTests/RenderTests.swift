@@ -108,6 +108,18 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         #expect(centre(project)[0] > 240)
     }
 
+    @Test func swatchThumbnailRendersThroughALook() throws {
+        let size = 256
+        let swatch = CIImage(bitmapData: Data(ColorGrading.swatchPixels(size: size)), bytesPerRow: size * 4, size: CGSize(width: size, height: size), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        let graded = ColorGradeFilter.apply(ColorGrading.lut(for: ColorGrading.builtInLooks.last!), to: swatch)
+        let image = try #require(CIContext().createCGImage(graded, from: CGRect(x: 0, y: 0, width: size, height: size)))
+        #expect(image.width == size)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        CIContext().render(graded, toBitmap: &pixel, rowBytes: 4, bounds: CGRect(x: 10, y: 128, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        // The swatch is colourful; Mono makes it a warm gray.
+        #expect(pixel[3] == 255 && pixel[0] > 30 && abs(Int(pixel[0]) - Int(pixel[2])) < 25, "\(pixel)")
+    }
+
     /// Set REGRAVA_SNAPSHOT_DIR to write rest/zoomed PNG frames for visual inspection.
     @Test func writesSnapshotsWhenRequested() throws {
         guard let dir = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_DIR"] else { return }

@@ -70,7 +70,7 @@ struct CameraLayoutPanel: View {
 
 // MARK: - Camera Style
 
-/// Sharpen, crop, mirror and the advanced camera delay. Color grading and face tracking are
+/// Color grading, sharpen, crop, mirror and the advanced camera delay. Face tracking is
 /// added as their processing is implemented.
 struct CameraStylePanel: View {
     @ObservedObject var editor: EditorModel
@@ -78,6 +78,23 @@ struct CameraStylePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarSection {
+                NamedField(name: "Color grading") {
+                    ColorGradingPicker(editor: editor)
+                }
+                if editor.project.camera.lut != nil {
+                    VStack(alignment: .leading, spacing: Theme.gap(2)) {
+                        SliderField(
+                            name: "Color grading intensity",
+                            value: editor.binding(\.camera.lutIntensity),
+                            range: 0...1,
+                            step: 0.01,
+                            preview: percent,
+                            resetValue: 1
+                        )
+                        // Only clears the field; the asset stays in the project.
+                        RSButton(title: "Disable color grading", kind: .secondary) { editor.change { $0.camera.lut = nil } }
+                    }
+                }
                 SliderField(
                     name: "Sharpen",
                     icon: "circle.hexagongrid",

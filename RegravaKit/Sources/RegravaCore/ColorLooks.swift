@@ -410,6 +410,24 @@ public enum ColorGrading {
         ])
     }
 
+    /// The swatch shown on tiles without a webcam: hue across, OKLCh lightness 0.92 at the
+    /// top to 0.18 at the bottom, chroma 0.16. RGBA8, top row first.
+    public static func swatchPixels(size: Int = 256) -> [UInt8] {
+        var pixels = [UInt8](repeating: 255, count: size * size * 4)
+        for y in 0..<size {
+            let lightness = mix(0.92, 0.18, (Double(y) + 0.5) / Double(size))
+            for x in 0..<size {
+                let hue = (Double(x) + 0.5) / Double(size) * 2 * .pi
+                let rgb = srgb(fromLinear: clamp01(linear(fromOklab: (lightness, cos(hue) * 0.16, sin(hue) * 0.16))))
+                let i = (y * size + x) * 4
+                pixels[i] = UInt8((clamp01(rgb.0) * 255).rounded())
+                pixels[i + 1] = UInt8((clamp01(rgb.1) * 255).rounded())
+                pixels[i + 2] = UInt8((clamp01(rgb.2) * 255).rounded())
+            }
+        }
+        return pixels
+    }
+
     /// Display name of a LUT asset: without the `-<10 alphanumerics>.cube` suffix.
     public static func displayName(ofAsset name: String) -> String {
         name.replacingOccurrences(of: "-[a-zA-Z0-9]{10}\\.cube$", with: "", options: .regularExpression)

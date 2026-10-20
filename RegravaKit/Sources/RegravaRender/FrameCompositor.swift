@@ -213,33 +213,13 @@ public final class FrameCompositor: @unchecked Sendable {
         guard intensity >= 0.001, let name = camera.lut, let bundle = assetsDirectory,
               let text = try? String(contentsOf: ProjectStore.assetsURL(bundle: bundle).appendingPathComponent(name), encoding: .utf8),
               let lut = try? ColorLUT(cube: text) else { return nil }
-        let n = lut.size
-        var values = [Float](repeating: 1, count: n * n * n * 4)
-        let step = 1 / Float(n - 1), k = Float(intensity)
-        for b in 0..<n {
-            for g in 0..<n {
-                for r in 0..<n {
-                    let i = (b * n + g) * n + r
-                    let identity = [Float(r) * step, Float(g) * step, Float(b) * step]
-                    for c in 0..<3 {
-                        let graded = Float(lut.texels[i * 4 + c]) / 255
-                        values[i * 4 + c] = identity[c] + (graded - identity[c]) * k
-                    }
-                }
-            }
-        }
-        return (values.withUnsafeBufferPointer { Data(buffer: $0) }, n)
+        return (ColorGradeFilter.cubeData(lut, intensity: intensity), lut.size)
     }
 
     /// Grade after sharpening, before cropping (`[cameraSharpen, cameraLutGrade]`).
     private func graded(_ image: CIImage) -> CIImage {
-        guard let cameraGrade, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return image }
-        let filter = CIFilter.colorCubeWithColorSpace()
-        filter.inputImage = image
-        filter.cubeDimension = Float(cameraGrade.size)
-        filter.cubeData = cameraGrade.data
-        filter.colorSpace = space
-        return filter.outputImage ?? image
+        guard let cameraGrade else { return image }
+        return ColorGradeFilter.apply(data: cameraGrade.data, size: cameraGrade.size, to: image)
     }
 
     // MARK: Pieces
