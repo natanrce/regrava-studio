@@ -44,3 +44,21 @@ struct ColorGradingTests {
         #expect(ColorGrading.displayName(ofAsset: "Studio.cube") == "Studio.cube")
     }
 }
+
+struct ColorPresetIntentTests {
+    @Test func contrastCurveKeepsRising() {
+        let strong = ColorPresetIntent.contrastCurve(-1)
+        #expect(strong[0].y == 0.06 && abs(strong[1].y - 0.145) < 1e-9 && abs(strong[4].y - 0.95) < 1e-9)
+        for i in 1..<strong.count { #expect(strong[i].y >= strong[i - 1].y + 0.02 - 1e-12) }
+    }
+
+    @Test func defaultIntentDescribesTheBaseLook() {
+        let look = ColorPresetIntent().look
+        #expect(look.name == "My preset" && look.hueRegions.isEmpty)
+        #expect(abs(look.skinProtection - 0.78) < 1e-9 && abs(look.chromaPop - (0.042 + 0.07)) < 1e-9)
+        var warm = ColorPresetIntent()
+        warm.warmth = 1
+        #expect(warm.look.hueRegions.count == 1 && abs(warm.look.temperature - 0.42) < 1e-9)
+        #expect(warm.cube.contains("# screenstudio-intent:v1 {\"backgroundPop\":0.2,\"colorIntensity\":0.15,\"contrast\":0.25,\"warmth\":1}"))
+    }
+}

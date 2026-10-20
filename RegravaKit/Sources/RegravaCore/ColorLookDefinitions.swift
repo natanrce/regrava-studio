@@ -131,3 +131,66 @@ public extension ColorGrading {
         },
     ]
 }
+
+/// "Color preset studio" settings.
+public struct ColorPresetIntent: Codable, Equatable, Sendable {
+    public var name = "My preset"
+    public var warmth = 0.0
+    public var contrast = 0.25
+    public var colorIntensity = 0.15
+    public var backgroundPop = 0.2
+
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey { case warmth, contrast, colorIntensity, backgroundPop }
+
+    /// Five points, each at least 0.02 above the previous, at most 1.
+    static func contrastCurve(_ c: Double) -> [(x: Double, y: Double)] {
+        let p = max(0, c), n = max(0, -c)
+        var points: [(x: Double, y: Double)] = [
+            (0, 0.06 * n),
+            (0.1, min(max(0.1 - 0.038 * p + 0.045 * n, 0.02), 0.2)),
+            (0.5, 0.5),
+            (0.9, min(max(0.9 + 0.02 * p - 0.018 * n, 0.82), 0.965)),
+            (1, 1 - 0.05 * n),
+        ]
+        for i in 1..<points.count { points[i].y = min(max(points[i].y, points[i - 1].y + 0.02), 1) }
+        return points
+    }
+
+    /// The look these settings describe.
+    public var look: ColorLook {
+        func c(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(max(v, lo), hi) }
+        let w = c(warmth, -1, 1), k = c(contrast, -1, 1), ci = c(colorIntensity, -1, 1), bp = c(backgroundPop, 0, 1)
+        let ciP = max(0, ci), ciN = max(0, -ci)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var l = ColorLook(
+            name: trimmed.isEmpty ? "My preset" : trimmed,
+            description: "Custom preset created in the Regrava Studio preset studio.",
+            skinProtection: c(0.75 + 0.15 * bp + 0.05 * max(0, -w), 0.75, 0.93)
+        )
+        if w > 0.15 { l.hueRegions = [ColorLook.HueRegion(centerDeg: 250, widthDeg: 40, chromaScale: 1 - 0.18 * w)] }
+        l.temperature = 0.42 * w
+        l.toneCurve = Self.contrastCurve(k)
+        l.perChannelMix = 0.4 + 0.2 * max(0, k)
+        l.saturation = 1 + 0.05 * ciP - 0.22 * ciN
+        l.vibrance = 0.06 * (1 - ciN) + 0.15 * ciP
+        l.chromaPop = c(0.28 * ciP + 0.35 * bp, 0, 0.5)
+        l.colorDensity = c(0.35 + 0.15 * ciP + 0.1 * ciN + 0.25 * bp, 0, 0.75)
+        l.satByLumaShadows = 0.9 - 0.06 * ciN
+        l.satByLumaHighlights = 0.92
+        l.splitShadows = ColorLook.Tone(hueDeg: 215, amount: 0.028 * bp)
+        l.splitHighlights = ColorLook.Tone(hueDeg: 65, amount: 0.01 * bp)
+        l.skinRefineHueConvergence = 0.5
+        l.skinRefineChromaTame = 0.35
+        return l
+    }
+
+    /// The `.cube` written to the library: the intent is kept as a comment.
+    public var cube: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let json = (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return ColorGrading.lut(for: look).cube(title: look.name, comments: ["Custom color preset created in Regrava Studio.", "screenstudio-intent:v1 " + json])
+    }
+}

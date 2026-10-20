@@ -143,6 +143,7 @@ enum UISnapshots {
             }
         }
         controller.model.isCommandMenuOpen = false
+        write(ColorPresetStudioView(model: ColorPresetStudioModel(editor: controller.model), close: {}, onCreated: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("color-preset-studio.png"))
         let crop = CameraCropModel(editor: controller.model)
         crop.state.setCrop(Rect2(x: 500, y: 150, width: 800, height: 700))
         write(CameraCropView(model: crop, close: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("camera-crop.png"))

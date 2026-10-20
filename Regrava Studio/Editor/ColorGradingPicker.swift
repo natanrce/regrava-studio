@@ -282,6 +282,9 @@ private struct PlusTile: View {
     var body: some View {
         Menu {
             Button {
+                ColorPresetStudio.show(for: editor, onCreated: onLibraryChange)
+            } label: { Label("Create your color preset...", systemImage: "paintpalette") }
+            Button {
                 editor.loadLUTFile()
                 onLibraryChange()
             } label: { Label("Load your LUT file...", systemImage: "folder") }
