@@ -80,6 +80,34 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         #expect(pixel[0] > 240 && pixel[2] < 15)
     }
 
+    @Test func gradesTheWebcamWithTheProjectLUT() throws {
+        let bundle = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let assets = ProjectStore.assetsURL(bundle: bundle)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bundle) }
+        try ColorGrading.builtInCube(for: ColorGrading.builtInLooks.last!).write(to: assets.appendingPathComponent("Mono-abcdefghij.cube"), atomically: true, encoding: .utf8)
+        var project = sampleProject(duration: 2000)
+        project.zooms = []
+        project.style.shadow.intensity = 0
+        project.recording.cameraFileName = "camera.mov"
+        project.recording.cameraSize = Size2(width: 320, height: 180)
+        let camera = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let screen = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 640, height: 360))
+        func centre(_ project: Project) -> [UInt8] {
+            let snapshot = RenderState.makeSnapshot(project: project, cursors: nil, assetsDirectory: bundle)
+            let frame = snapshot.track.frame(at: 1000)
+            let rect = frame.cameraRect!
+            var pixel = [UInt8](repeating: 0, count: 4)
+            CIContext().render(snapshot.compositor.compose(source: screen, camera: camera, frame: frame), toBitmap: &pixel, rowBytes: 4, bounds: CGRect(x: rect.midX, y: 1080 - rect.midY, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            return pixel
+        }
+        project.camera.lut = "Mono-abcdefghij.cube"
+        let mono = centre(project)
+        #expect(abs(Int(mono[0]) - Int(mono[1])) < 16, "\(mono)")
+        project.camera.lutIntensity = 0
+        #expect(centre(project)[0] > 240)
+    }
+
     /// Set REGRAVA_SNAPSHOT_DIR to write rest/zoomed PNG frames for visual inspection.
     @Test func writesSnapshotsWhenRequested() throws {
         guard let dir = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_DIR"] else { return }

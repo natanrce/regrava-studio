@@ -17,6 +17,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let motionBlurAmount: Double
     private let fps: Int
     private let camera: CameraConfig
+    /// The colour grade already mixed with the identity by `lutIntensity`.
+    private let cameraGrade: (data: Data, size: Int)?
 
     /// `assetsDirectory` is the project folder (for background images).
     public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil) {
@@ -28,6 +30,7 @@ public final class FrameCompositor: @unchecked Sendable {
         motionBlurAmount = project.animation.motionBlurAmount
         fps = project.recording.fps
         camera = project.camera
+        cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
@@ -152,6 +155,7 @@ public final class FrameCompositor: @unchecked Sendable {
     private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame) -> CIImage {
         var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         content = Self.sharpened(content, amount: camera.sharpen01)
+        content = graded(content)
         if let crop = camera.crop01 {
             let e = content.extent
             let window = CGRect(x: crop.x * e.width, y: (1 - crop.y - crop.height) * e.height, width: crop.width * e.width, height: crop.height * e.height)
@@ -199,6 +203,43 @@ public final class FrameCompositor: @unchecked Sendable {
             roiCallback: { _, rect in rect.insetBy(dx: -1, dy: -1) },
             arguments: [image.clampedToExtent(), Float(amount)]
         )?.cropped(to: extent) ?? image
+    }
+
+    /// The `.cube` asset as Core Image cube data. Mixing `straight` and `lut(straight)` by the
+    /// intensity on sRGB-encoded values: trilinear lookup of a cube mixed with the identity gives
+    /// the same result, so the mix is baked in.
+    static func loadGrade(_ camera: CameraConfig, assetsDirectory: URL?) -> (data: Data, size: Int)? {
+        let intensity = min(max(camera.lutIntensity, 0), 1)
+        guard intensity >= 0.001, let name = camera.lut, let bundle = assetsDirectory,
+              let text = try? String(contentsOf: ProjectStore.assetsURL(bundle: bundle).appendingPathComponent(name), encoding: .utf8),
+              let lut = try? ColorLUT(cube: text) else { return nil }
+        let n = lut.size
+        var values = [Float](repeating: 1, count: n * n * n * 4)
+        let step = 1 / Float(n - 1), k = Float(intensity)
+        for b in 0..<n {
+            for g in 0..<n {
+                for r in 0..<n {
+                    let i = (b * n + g) * n + r
+                    let identity = [Float(r) * step, Float(g) * step, Float(b) * step]
+                    for c in 0..<3 {
+                        let graded = Float(lut.texels[i * 4 + c]) / 255
+                        values[i * 4 + c] = identity[c] + (graded - identity[c]) * k
+                    }
+                }
+            }
+        }
+        return (values.withUnsafeBufferPointer { Data(buffer: $0) }, n)
+    }
+
+    /// Grade after sharpening, before cropping (`[cameraSharpen, cameraLutGrade]`).
+    private func graded(_ image: CIImage) -> CIImage {
+        guard let cameraGrade, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return image }
+        let filter = CIFilter.colorCubeWithColorSpace()
+        filter.inputImage = image
+        filter.cubeDimension = Float(cameraGrade.size)
+        filter.cubeData = cameraGrade.data
+        filter.colorSpace = space
+        return filter.outputImage ?? image
     }
 
     // MARK: Pieces

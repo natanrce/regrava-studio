@@ -147,6 +147,8 @@ public struct CameraConfig: Codable, Hashable, Sendable {
     /// "Hide during silence" minimum silence (ms), nil = off.
     public var hideDuringSilenceMs: Double?
     public var sharpen01 = 0.0
+    /// Colour grade: the `.cube` asset name in the project's assets, nil = Original.
+    public var lut: String?
     public var lutIntensity = 1.0
     /// Crop of the camera image (fractions), nil = whole image.
     public var crop01: Rect2?
@@ -162,6 +164,7 @@ public struct CameraConfig: Codable, Hashable, Sendable {
         enableFaceTracking = c.value(.enableFaceTracking, default: d.enableFaceTracking)
         hideDuringSilenceMs = c.value(.hideDuringSilenceMs, default: nil)
         sharpen01 = c.value(.sharpen01, default: d.sharpen01)
+        lut = c.value(.lut, default: nil)
         lutIntensity = c.value(.lutIntensity, default: d.lutIntensity)
         crop01 = c.value(.crop01, default: nil)
         delayAdjustmentMs = c.value(.delayAdjustmentMs, default: d.delayAdjustmentMs)
