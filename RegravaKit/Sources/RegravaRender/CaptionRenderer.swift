@@ -19,14 +19,29 @@ final class CaptionRenderer: @unchecked Sendable {
     private let lock = NSLock()
     static let padding = 2.0
 
-    /// The system's serif and monospaced designs stand in for Instrument Serif and Geist Mono.
+    /// Sans-serif is the system font (SF Pro); serif and mono are the bundled Instrument Serif
+    /// and Geist Mono (SIL Open Font License, see Resources/Fonts).
     static func font(_ style: CaptionsConfig.Font, size: Double) -> CTFont {
         let base = NSFont.systemFont(ofSize: size)
         switch style {
         case .sansSerif: return base
-        case .serif: return NSFont(descriptor: base.fontDescriptor.withDesign(.serif) ?? base.fontDescriptor, size: size) ?? base
-        case .mono: return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        case .serif: return bundledFont("InstrumentSerif-Regular", size: size) ?? NSFont(descriptor: base.fontDescriptor.withDesign(.serif) ?? base.fontDescriptor, size: size) ?? base
+        case .mono: return bundledFont("GeistMono-Variable", size: size) ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
         }
+    }
+
+    private static let descriptors: [String: CTFontDescriptor] = {
+        var out: [String: CTFontDescriptor] = [:]
+        for name in ["InstrumentSerif-Regular", "GeistMono-Variable"] {
+            guard let url = Bundle.module.url(forResource: name, withExtension: "ttf", subdirectory: "Fonts"),
+                  let list = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor], let first = list.first else { continue }
+            out[name] = first
+        }
+        return out
+    }()
+
+    static func bundledFont(_ name: String, size: Double) -> CTFont? {
+        descriptors[name].map { CTFontCreateWithFontDescriptor($0, size, nil) }
     }
 
     /// The text box: measured width + 2·padding, line height 1.2 + 2·padding.

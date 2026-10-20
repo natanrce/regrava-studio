@@ -1,4 +1,5 @@
 import CoreImage
+import CoreText
 import Foundation
 import Testing
 @testable import RegravaCore
@@ -29,5 +30,12 @@ struct CaptionRenderTests {
         let plain = FrameCompositor(project: project, layout: layout, cursors: nil, transcript: words).compose(source: source, frame: track.frame(at: 2300))
         CIContext().render(plain, toBitmap: &p, rowBytes: 4, bounds: CGRect(x: canvas.width / 2, y: canvas.height - padded.endY + 4, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
         #expect(p[2] > 100)
+    }
+}
+
+struct CaptionFontTests {
+    @Test func bundlesTheCaptionFonts() {
+        #expect((CaptionRenderer.bundledFont("InstrumentSerif-Regular", size: 20).map { CTFontCopyFamilyName($0) as String }) == "Instrument Serif")
+        #expect((CaptionRenderer.bundledFont("GeistMono-Variable", size: 20).map { CTFontCopyFamilyName($0) as String }) == "Geist Mono")
     }
 }

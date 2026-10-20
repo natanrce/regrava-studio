@@ -14,7 +14,7 @@ let package = Package(
         // Pure, platform-independent logic: models, auto-zoom, grouping, springs, camera track.
         .target(name: "RegravaCore"),
         // Core Image / AVFoundation frame compositing, preview composition and export.
-        .target(name: "RegravaRender", dependencies: ["RegravaCore"], resources: [.copy("Resources/Wallpapers"), .copy("RegravaKernels.metallib")]),
+        .target(name: "RegravaRender", dependencies: ["RegravaCore"], resources: [.copy("Resources/Wallpapers"), .copy("Resources/Fonts"), .copy("RegravaKernels.metallib")]),
         // ScreenCaptureKit recording + mouse event tracking.
         .target(name: "RegravaCapture", dependencies: ["RegravaCore"]),
         .testTarget(name: "RegravaCoreTests", dependencies: ["RegravaCore"]),
