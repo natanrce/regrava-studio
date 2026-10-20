@@ -37,3 +37,24 @@ struct TranscriptTests {
         #expect(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("transcripts/microphone-session-0.json").path))
     }
 }
+
+struct CaptionWordsTests {
+    @Test func keepsWordsInsideClipsAndExportsSRT() {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 640, height: 360), pointPixelScale: 1, durationMs: 10_000, fps: 30), mouseEvents: [])
+        project.splitSlice(at: 2000)
+        project.splitSlice(at: 4000)
+        project.removeSlice(project.slices[1].id)
+        let words = [
+            TranscriptWord(index: 0, startMs: 500, endMs: 900, text: "Hello"),
+            TranscriptWord(index: 1, startMs: 2500, endMs: 3000, text: " cut"),
+            TranscriptWord(index: 2, startMs: 4500, endMs: 5000, text: " world"),
+            TranscriptWord(index: 3, startMs: 6000, endMs: 6500, text: " [clacking]", type: "sound-label"),
+            TranscriptWord(index: 4, startMs: 7000, endMs: 7200, text: " hidden", isHidden: true),
+        ]
+        let visible = CaptionWords.visible(words, resolver: project.resolver, showSoundLabels: false)
+        #expect(visible.map(\.index) == [0, 2])
+        #expect(CaptionWords.visible(words, resolver: project.resolver, showSoundLabels: true).map(\.index) == [0, 2, 3])
+        let srt = CaptionWords.srt(visible, resolver: project.resolver)
+        #expect(srt == "1\n00:00:00,500 --> 00:00:00,900\nHello\n\n2\n00:00:02,500 --> 00:00:03,000\nworld\n")
+    }
+}

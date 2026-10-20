@@ -38,7 +38,7 @@ extension EditorModel {
             SidebarRailEntry(root: .cursor, name: "Cursor", icon: "cursorarrow", key: "2", disabledTooltip: project.mouseEvents.isEmpty ? "There is no mouse cursor recorded" : nil),
             SidebarRailEntry(root: .cameraLayout, name: "Camera Layout", icon: "inset.filled.rectangle.and.person.filled", key: "3", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
             SidebarRailEntry(root: .cameraStyle, name: "Camera Style", icon: "person.fill.viewfinder", key: "4", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
-            SidebarRailEntry(root: .captions, name: "Captions", icon: "captions.bubble", key: "5", disabledTooltip: notYet),
+            SidebarRailEntry(root: .captions, name: "Captions", icon: "captions.bubble", key: "5", disabledTooltip: project.recording.hasMicrophone ? nil : "No microphone recorded"),
             SidebarRailEntry(root: .transcript, name: "Edit by transcript", icon: "text.quote", key: "6", disabledTooltip: notYet),
             SidebarRailEntry(root: .audio, name: "Audio", icon: "speaker.wave.1", key: "7"),
             SidebarRailEntry(root: .shortcuts, name: "Keyboard Shortcuts", icon: "command", key: "8", disabledTooltip: "No keyboard shortcuts during recording"),
@@ -130,6 +130,7 @@ struct SidebarPanel: View {
                     case .audio: AudioPanel(editor: editor)
                     case .cameraLayout: CameraLayoutPanel(editor: editor)
                     case .cameraStyle: CameraStylePanel(editor: editor)
+                    case .captions: TranscriptPanel(editor: editor)
                     default: GeneralPanel(editor: editor)
                     }
                 }

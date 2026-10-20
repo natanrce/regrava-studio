@@ -122,3 +122,26 @@ public enum TranscriptTiming {
         }
     }
 }
+
+public enum CaptionWords {
+    /// `visibleCaptionWords`: not hidden, sound labels only when shown, and at least partly
+    /// inside a clip.
+    public static func visible(_ transcript: [TranscriptWord], resolver: TimeResolver, showSoundLabels: Bool) -> [TranscriptWord] {
+        transcript.filter { w in
+            w.isHidden != true
+                && !(!showSoundLabels && w.type == "sound-label")
+                && resolver.isSourceRangePresent(w.startMs, w.endMs)
+        }
+    }
+
+    /// "Export transcript": one SRT cue per word in playback time, 1-based.
+    public static func srt(_ words: [TranscriptWord], resolver: TimeResolver) -> String {
+        func stamp(_ ms: Double) -> String {
+            let total = Int(max(ms, 0).rounded())
+            return String(format: "%02d:%02d:%02d,%03d", total / 3_600_000, total / 60_000 % 60, total / 1000 % 60, total % 1000)
+        }
+        return words.enumerated().map { i, w in
+            "\(i + 1)\n\(stamp(resolver.sourceToPlayback(w.startMs))) --> \(stamp(resolver.sourceToPlayback(w.endMs)))\n\(w.text.trimmingCharacters(in: .whitespaces))\n"
+        }.joined(separator: "\n")
+    }
+}

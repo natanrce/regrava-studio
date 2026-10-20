@@ -61,6 +61,10 @@ final class EditorModel: ObservableObject {
     @Published var addMaskType: MaskType = .sensitiveData
     /// Layout add tool (`activeAddTool = "layout"`); only camera overlay arms it.
     @Published var isAddLayoutToolArmed = false
+    /// The microphone transcript (`transcripts/microphone-session-0.json`), nil until generated.
+    @Published var transcript: SessionTranscript?
+    /// "Generating transcript" task running.
+    @Published var isGeneratingTranscript = false
     /// Last layout type chosen from the add tools (`addLayoutType`), used by ⌃L.
     @Published var addLayoutType: CameraLayoutType = .cameraOverlay
     @Published var isSplitToolActive = false
@@ -103,6 +107,7 @@ final class EditorModel: ObservableObject {
         self.project = project
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
         renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
+        transcript = SessionTranscript.load(bundle: bundleURL)
         let saved = UserDefaults.standard.double(forKey: "project-view-timeline-zoom.\(bundleURL.path)")
         visibleDurationMs = clampVisibleDuration(saved > 0 ? saved : 30_000)
         Publishers.Merge(preferences.$playbackPreviewResolution.map { _ in () }, preferences.$playbackPreviewMaxHeight.map { _ in () })

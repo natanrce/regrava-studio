@@ -125,6 +125,11 @@ public struct TimeResolver: Sendable, Hashable {
         linkIndex(atSource: t).map { links[$0].sourceToPlayback(t) } ?? 0
     }
 
+    /// `getIsSourceRangePresent`: a strictly positive overlap with a clip.
+    public func isSourceRangePresent(_ start: Double, _ end: Double) -> Bool {
+        links.contains { min(end, $0.sourceEndMs) - max(start, $0.sourceStartMs) > 0 }
+    }
+
     public func isSourceTimePresent(_ t: Double) -> Bool {
         guard let i = linkIndex(atSource: t) else { return false }
         return t >= links[i].sourceStartMs && t <= links[i].sourceEndMs
