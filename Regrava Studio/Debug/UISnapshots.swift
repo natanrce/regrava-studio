@@ -121,6 +121,14 @@ enum UISnapshots {
             ("captions-ready", {
                 controller.model.transcript = SessionTranscript(generator: .system(locale: "en_US"), transcript: [TranscriptWord(index: 0, startMs: 1000, endMs: 1400, text: "Hello")])
             }),
+            ("transcript-edit", {
+                let text = ["So", " um", " today", " we", " look", " at", " the", " new", " editor.", " It", " cuts", " words", " out", " of", " the", " video."]
+                controller.model.transcript = SessionTranscript(generator: .system(locale: "en_US"), transcript: text.enumerated().map { i, w in
+                    let start = 2000 + Double(i) * 300 + (i >= 9 ? 1500 : 0)
+                    return TranscriptWord(index: i, startMs: start, endMs: start + 250, text: w)
+                })
+                controller.model.openSidebar(.transcript)
+            }),
             ("command-menu", { controller.model.transcript = nil
                  controller.model.openSidebar(.background); controller.model.isCommandMenuOpen = true }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
