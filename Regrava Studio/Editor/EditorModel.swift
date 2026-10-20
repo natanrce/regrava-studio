@@ -337,9 +337,9 @@ final class EditorModel: ObservableObject {
     /// Compiles the moving-frame programs in the background so playback does not stall on them.
     private func prewarmRenderer() {
         prewarmTask?.cancel()
-        let state = renderState, output = previewOutputSize
+        let state = renderState, output = previewOutputSize, cameraSize = project.recording.cameraSize
         prewarmTask = Task.detached(priority: .utility) {
-            CompositionFactory.prewarm(state: state, outputSize: output)
+            CompositionFactory.prewarm(state: state, outputSize: output, cameraSize: cameraSize)
         }
     }
 

@@ -114,7 +114,8 @@ extension CompositionFactory {
     /// stalled playback whenever a zoom or a cursor trail first needed a new number of motion
     /// blur samples. This draws one moving frame per screen/cursor sample count at playback
     /// quality with the compositor's context, so those programs exist before playing.
-    public static func prewarm(state: RenderState, outputSize: Size2) {
+    public static func prewarm(state: RenderState, outputSize: Size2, cameraSize: Size2? = nil) {
+        prewarmCutout(state: state, outputSize: outputSize, cameraSize: cameraSize)
         let snapshot = state.current
         let compositor = snapshot.compositor
         let strength = compositor.motionBlurStrength
@@ -147,6 +148,35 @@ extension CompositionFactory {
                 let cursorTravel = cursorSamples == 0 ? 0 : (Double(cursorSamples) - 0.5) * texels
                 frame.previousCursor = Vec2(cursor.x + cursorTravel / strength / max(videoToCanvas, 0.0001), cursor.y)
                 let image = compositor.compose(source: source, frame: frame, quality: .playing)
+                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            }
+        }
+    }
+}
+
+extension CompositionFactory {
+    /// The cutout passes and Vision's model for the playing and paused qualities, fully cut out
+    /// and mid-reveal, so the first cutout frame does not stall either.
+    static func prewarmCutout(state: RenderState, outputSize: Size2, cameraSize: Size2?) {
+        let snapshot = state.current
+        guard snapshot.compositor.mattesCamera, let cameraSize, cameraSize.width > 0, cameraSize.height > 0 else { return }
+        var frame = snapshot.track.frame(at: 0)
+        guard frame.cameraRect != nil else { return }
+        let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        var screenBuffer: CVPixelBuffer?, cameraBuffer: CVPixelBuffer?, outputBuffer: CVPixelBuffer?
+        let video = snapshot.track.layout.videoSize
+        CVPixelBufferCreate(nil, Int(video.width), Int(video.height), kCVPixelFormatType_32BGRA, attributes, &screenBuffer)
+        CVPixelBufferCreate(nil, Int(cameraSize.width), Int(cameraSize.height), kCVPixelFormatType_32BGRA, attributes, &cameraBuffer)
+        CVPixelBufferCreate(nil, Int(outputSize.width), Int(outputSize.height), kCVPixelFormatType_32BGRA, attributes, &outputBuffer)
+        guard let screenBuffer, let cameraBuffer, let outputBuffer else { return }
+        let scale = outputSize.width / max(snapshot.track.layout.canvas.width, 1)
+        let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+        for quality in [RenderQuality.playing, .pausedHigh] {
+            for cutout in [1.0, 0.5] {
+                frame.cameraCutout01 = cutout
+                frame.cameraOpacity = 1
+                let image = snapshot.compositor.compose(source: CIImage(cvPixelBuffer: screenBuffer), camera: CIImage(cvPixelBuffer: cameraBuffer), frame: frame, quality: quality)
                     .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
                 CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
             }

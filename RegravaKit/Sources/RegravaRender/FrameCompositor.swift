@@ -47,6 +47,9 @@ public final class FrameCompositor: @unchecked Sendable {
         CGPoint(x: p.x, y: canvasHeight - p.y)
     }
 
+    /// Camera frames go through the person matte (a cutout layout is used).
+    var mattesCamera: Bool { isCameraMatted }
+
     /// Trail strength of the screen and cursor while moving (0 = motion blur off).
     var motionBlurStrength: Double { MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false) }
 

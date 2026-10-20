@@ -47,3 +47,15 @@ struct CutoutTests {
         }
     }
 }
+
+struct CutoutPrewarmTests {
+    @Test func prewarmsTheCutoutPasses() {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 640, height: 360), pointPixelScale: 1, durationMs: 2000, fps: 30, cameraFileName: "camera.mov", cameraSize: Size2(width: 320, height: 180)), mouseEvents: [], style: StyleConfig(aspectRatio: 16.0 / 9))
+        project.defaultLayout.type = .cutoutCamera
+        let state = RenderState(project: project, cursors: nil)
+        #expect(state.current.compositor.mattesCamera)
+        let start = CFAbsoluteTimeGetCurrent()
+        CompositionFactory.prewarm(state: state, outputSize: Size2(width: 480, height: 270), cameraSize: Size2(width: 320, height: 180))
+        print(String(format: "cutout prewarm %.0f ms", (CFAbsoluteTimeGetCurrent() - start) * 1000))
+    }
+}
