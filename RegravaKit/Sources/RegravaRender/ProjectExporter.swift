@@ -57,6 +57,8 @@ public enum ProjectExporter {
         let outputSize = settings.outputSize(canvas: project.canvasSize)
         // Export frames wait until face data covers them ("tracking face").
         try await completeFaceTracking(project: project, bundle: videoURL.deletingLastPathComponent())
+        // And for the microphone's silences when the camera hides during them.
+        try await SilenceAnalyzer.ensure(project: project, bundle: videoURL.deletingLastPathComponent(), recording: videoURL)
         let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent())
 
         switch settings.format {
