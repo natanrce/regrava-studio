@@ -19,11 +19,13 @@ public final class FrameCompositor: @unchecked Sendable {
     private let camera: CameraConfig
     /// A cutout layout is used somewhere, so camera frames are matted (`isCameraMatted`).
     private let isCameraMatted: Bool
+    /// Burned-in captions, drawn above everything.
+    private let captions: CaptionRenderer?
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
 
     /// `assetsDirectory` is the project folder (for background images).
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil) {
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = []) {
         self.layout = layout
         style = project.style
         cursorConfig = project.cursor
@@ -33,6 +35,7 @@ public final class FrameCompositor: @unchecked Sendable {
         fps = project.recording.fps
         camera = project.camera
         isCameraMatted = project.isCutoutLayoutUsed
+        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
@@ -127,6 +130,7 @@ public final class FrameCompositor: @unchecked Sendable {
         if let cameraImage, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
             output = cameraLayer(cameraImage, rect: rect, frame: frame, quality: quality).composited(over: output)
         }
+        if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs) }
 
         return output.cropped(to: canvasRect)
     }
