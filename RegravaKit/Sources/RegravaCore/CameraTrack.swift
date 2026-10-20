@@ -60,6 +60,9 @@ public struct CameraFrame: Hashable, Sendable {
     public var cameraOpacity: Double = 0
     /// Point of the (cropped, mirrored) camera image kept at the frame centre (face tracking).
     public var cameraFocal01 = Vec2(0.5, 0.5)
+    /// 1 in a cutout layout, sprung with the camera (`cutout01`): drives the background reveal
+    /// (1 − cutout01) and the silhouette shadow.
+    public var cameraCutout01 = 0.0
     /// Drawn corner radius in canvas pixels.
     public var cameraCornerRadius: Double = 0
     /// Camera width over its layout's resting width: scales its shadow.
@@ -146,6 +149,7 @@ public final class CameraTrack: @unchecked Sendable {
         // Face tracking: the focal point always uses its own spring.
         let confidentFaces = project.camera.enableFaceTracking ? FaceTracking.confident(faces) : nil
         var focalX = SpringValue(0.5), focalY = SpringValue(0.5)
+        var cutout = SpringValue(0)
         let buttonEvents = pathEvents.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
@@ -172,13 +176,17 @@ public final class CameraTrack: @unchecked Sendable {
                     cameraRect = SpringRect(rect)
                     cameraRadius = SpringValue(target.cameraBorderRadius)
                     cameraReference = SpringValue(target.cameraReferenceWidth)
+                    cutout = SpringValue(target.cameraCutout ? 1 : 0)
                     if i == 0 { cameraOpacity = SpringValue(target.cameraOpacity) }
                 } else {
                     cameraRect.advance(toward: rect, config: cameraConfig, milliseconds: sampleIntervalMs)
                     cameraRadius.advance(toward: target.cameraBorderRadius, config: cameraConfig, milliseconds: sampleIntervalMs)
                     cameraReference.advance(toward: target.cameraReferenceWidth, config: cameraConfig, milliseconds: sampleIntervalMs)
                 }
-                if i > 0 { cameraOpacity.advance(toward: target.cameraOpacity, config: cameraConfig, milliseconds: sampleIntervalMs) }
+                if i > 0 {
+                    cameraOpacity.advance(toward: target.cameraOpacity, config: cameraConfig, milliseconds: sampleIntervalMs)
+                    cutout.advance(toward: target.cameraCutout ? 1 : 0, config: cameraConfig, milliseconds: sampleIntervalMs)
+                }
             } else if hasCamera {
                 cameraOpacity.advance(toward: 0, config: cameraConfig, milliseconds: sampleIntervalMs)
             }
@@ -197,6 +205,7 @@ public final class CameraTrack: @unchecked Sendable {
                 frame.cameraOpacity = clamp(cameraOpacity.value, 0, 1)
                 frame.cameraSizeFactor = rect.width / max(cameraReference.value, 0.0001)
                 frame.cameraCornerRadius = cameraRadius.value * frame.cameraSizeFactor * layout.scale
+                frame.cameraCutout01 = clamp(cutout.value, 0, 1)
             }
             if hasCamera {
                 var focal = FaceTracking.disabledCenter
@@ -268,6 +277,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cameraCornerRadius = a.cameraCornerRadius + (b.cameraCornerRadius - a.cameraCornerRadius) * f
         frame.cameraSizeFactor = a.cameraSizeFactor + (b.cameraSizeFactor - a.cameraSizeFactor) * f
         frame.cameraFocal01 = a.cameraFocal01.lerp(to: b.cameraFocal01, f)
+        frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {
@@ -414,6 +424,8 @@ struct LayoutTargets {
     var cameraBorderRadius: Double
     var cameraReferenceWidth: Double
     var cameraHidden: Bool
+    /// The camera's layout is a cutout (`isCutout`).
+    var cameraCutout: Bool
 }
 
 /// Decides, for any instant, where the screen and the camera want to be (rects, resolvers).
@@ -553,7 +565,8 @@ struct CameraPlanner {
             cameraOpacity: hidden || camera == nil ? 0 : 1,
             cameraBorderRadius: radius,
             cameraReferenceWidth: initial?.width ?? camera?.width ?? 1,
-            cameraHidden: hidden
+            cameraHidden: hidden,
+            cameraCutout: cameraResolver.kind == .cutout
         )
     }
 }

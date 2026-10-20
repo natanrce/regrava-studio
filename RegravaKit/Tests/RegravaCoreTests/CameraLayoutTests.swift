@@ -106,3 +106,19 @@ struct CameraLayoutTests {
         #expect(project.freeLayoutRange(startingAt: 9000)! == (9000, 10000))
     }
 }
+
+struct CutoutTrackTests {
+    @Test func cutoutSpringsWithTheLayout() {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 2, durationMs: 8000, fps: 60, cameraFileName: "camera.mov", cameraSize: Size2(width: 1280, height: 720)), mouseEvents: [])
+        #expect(!project.isCutoutLayoutUsed)
+        project.cameraLayouts = [CameraLayoutRange(startMs: 3000, endMs: 6000, type: .cutoutCamera)]
+        #expect(project.isCutoutLayoutUsed)
+        let track = CameraTrack(project: project)
+        #expect(track.frame(at: 1000).cameraCutout01 == 0)
+        #expect(track.frame(at: 5500).cameraCutout01 > 0.99)
+        let middle = track.frame(at: 3100).cameraCutout01
+        #expect(middle > 0 && middle < 1)
+        project.camera.hide = true
+        #expect(!project.isCutoutLayoutUsed)
+    }
+}

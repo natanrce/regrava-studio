@@ -139,6 +139,22 @@ public struct CameraLayoutRange: Codable, Hashable, Sendable, Identifiable {
     public func contains(_ t: Double) -> Bool { t >= startMs && t <= endMs }
 }
 
+/// `cameraConfig.background`: the cutout edge, shared by every cutout layout.
+public struct CameraBackgroundConfig: Codable, Hashable, Sendable {
+    /// "Edge softness": 1 keeps the matte as is, 0 makes the edge hard except in soft areas.
+    public var edgeFalloff01 = 0.2
+    /// "Edge inset": shrinks the matte by this many footage pixels.
+    public var edgeInsetPx = 0.0
+
+    public init() {}
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        edgeFalloff01 = c.value(.edgeFalloff01, default: 0.2)
+        edgeInsetPx = c.value(.edgeInsetPx, default: 0)
+    }
+}
+
 /// `cameraConfig`; image processing fields are kept for the panels.
 public struct CameraConfig: Codable, Hashable, Sendable {
     public var hide = false
@@ -153,6 +169,7 @@ public struct CameraConfig: Codable, Hashable, Sendable {
     /// Crop of the camera image (fractions), nil = whole image.
     public var crop01: Rect2?
     public var delayAdjustmentMs = 0.0
+    public var background = CameraBackgroundConfig()
 
     public init() {}
 
@@ -168,6 +185,7 @@ public struct CameraConfig: Codable, Hashable, Sendable {
         lutIntensity = c.value(.lutIntensity, default: d.lutIntensity)
         crop01 = c.value(.crop01, default: nil)
         delayAdjustmentMs = c.value(.delayAdjustmentMs, default: d.delayAdjustmentMs)
+        background = c.value(.background, default: CameraBackgroundConfig())
     }
 }
 
@@ -520,6 +538,12 @@ public extension Project {
         case .screenOnly:
             return .screenOnly(info)
         }
+    }
+
+    /// `isCutoutLayoutUsed`: then every camera frame is matted.
+    var isCutoutLayoutUsed: Bool {
+        recording.hasCamera && !camera.hide
+            && (defaultLayout.type == .cutoutCamera || cameraLayouts.contains { !$0.isDisabled && $0.type == .cutoutCamera })
     }
 
     var sortedCameraLayouts: [CameraLayoutRange] { cameraLayouts.sorted { $0.startMs < $1.startMs } }
