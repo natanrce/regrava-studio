@@ -17,6 +17,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let motionBlurAmount: Double
     private let fps: Int
     private let camera: CameraConfig
+    /// A cutout layout is used somewhere, so camera frames are matted (`isCameraMatted`).
+    private let isCameraMatted: Bool
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
 
@@ -30,6 +32,7 @@ public final class FrameCompositor: @unchecked Sendable {
         motionBlurAmount = project.animation.motionBlurAmount
         fps = project.recording.fps
         camera = project.camera
+        isCameraMatted = project.isCutoutLayoutUsed
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
@@ -119,7 +122,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
         // The webcam is drawn above everything.
         if let cameraImage, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
-            output = cameraLayer(cameraImage, rect: rect, frame: frame).composited(over: output)
+            output = cameraLayer(cameraImage, rect: rect, frame: frame, quality: quality).composited(over: output)
         }
 
         return output.cropped(to: canvasRect)
@@ -152,8 +155,17 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// The webcam covering `rect` (centred focal point), cropped, mirrored, with rounded corners,
     /// the screen's shadow, and faded and blurred while hiding.
-    private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame) -> CIImage {
+    private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame, quality: RenderQuality) -> CIImage {
         var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        // Cutout: the person matte goes first, before sharpen and the grade.
+        if isCameraMatted, frame.cameraCutout01 > 0.001, let matte = PersonMatter.shared.matte(for: content, quality: quality) {
+            let fullSize = content.extent.size
+            content = CameraCutout.apply(frame: content, matte: matte, edge: camera.background, reveal01: 1 - frame.cameraCutout01, crop01: camera.crop01, density: quality == .playing ? 0.5 : 1)
+            // Back to footage size so the crop window keeps its meaning.
+            if content.extent.size != fullSize {
+                content = content.transformed(by: CGAffineTransform(scaleX: fullSize.width / content.extent.width, y: fullSize.height / content.extent.height))
+            }
+        }
         content = Self.sharpened(content, amount: camera.sharpen01)
         content = graded(content)
         if let crop = camera.crop01 {
@@ -177,7 +189,14 @@ public final class FrameCompositor: @unchecked Sendable {
         let radius = min(frame.cameraCornerRadius, min(target.width, target.height) / 2)
         var layer = masked(placed.cropped(to: target), to: target, radius: radius)
         if style.shadow.intensity > 0 {
-            layer = layer.composited(over: shadow(for: target, radius: radius, zoomFactor: frame.cameraSizeFactor))
+            // Rectangle shadow blended with the person's silhouette by cutout01 (`silhouette01`).
+            let c = frame.cameraCutout01
+            var cast = shadow(for: target, radius: radius, zoomFactor: frame.cameraSizeFactor)
+            if c > 0.001 {
+                let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor)
+                cast = c >= 0.999 ? silhouette : Self.scaled(silhouette, c).composited(over: Self.scaled(cast, 1 - c))
+            }
+            layer = layer.composited(over: cast)
         }
         let opacity = frame.cameraOpacity
         if opacity < 1 {
@@ -257,6 +276,35 @@ public final class FrameCompositor: @unchecked Sendable {
         let opacity = min(s.intensity / 0.6, 1) * 0.85
         let shape = roundedRect(screen.offsetBy(dx: offset.width, dy: offset.height), radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(opacity)))
         return shape.applyingGaussianBlur(sigma: max(blur, 0.1))
+    }
+
+    /// The shadow cast by the camera's own alpha (`getContentShadowMask`), same offset and blur.
+    private func silhouetteShadow(of layer: CIImage, zoomFactor: Double) -> CIImage {
+        let s = style.shadow
+        let scale = layout.canvas.height / 1080 * zoomFactor
+        var offset = CGSize.zero
+        if s.isDirectional {
+            let angle = (s.angle - 90) * .pi / 180
+            offset = CGSize(width: cos(angle) * s.distance * scale, height: sin(angle) * s.distance * scale)
+        }
+        let blur = (s.isDirectional ? s.blur : 30) * scale
+        let opacity = min(s.intensity / 0.6, 1) * 0.85
+        let shape = layer.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity)),
+        ]).transformed(by: CGAffineTransform(translationX: offset.width, y: offset.height))
+        return shape.applyingGaussianBlur(sigma: max(blur, 0.1))
+    }
+
+    private static func scaled(_ image: CIImage, _ k: Double) -> CIImage {
+        image.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: CGFloat(k), y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: CGFloat(k), z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: CGFloat(k), w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(k)),
+        ])
     }
 
     /// The cursor drawn with its hotspot at `tip` (canvas pixels).
