@@ -145,6 +145,17 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         #expect(pixel(Vec2(0.9, 0.5), at: rect.x + rect.width * 0.2)[1] > 200)
     }
 
+    @Test func detectorSamplesTheWebcamEvery100ms() async throws {
+        try await withTestVideo { _, dir in
+            let movie = dir.appendingPathComponent("camera.mov")
+            try await makeTestVideo(url: movie, width: 320, height: 180, frames: 30, fps: 30)
+            let faces = try await CameraFaceDetector.detect(movie: movie)
+            #expect(faces.isComplete && faces.samples.count == 10)
+            #expect(faces.samples.map(\.timeMs) == stride(from: 0.0, to: 1000, by: 100).map { $0 })
+            #expect(faces.samples.allSatisfy { $0.confidence < 0.5 })
+        }
+    }
+
     /// Set REGRAVA_SNAPSHOT_DIR to write rest/zoomed PNG frames for visual inspection.
     @Test func writesSnapshotsWhenRequested() throws {
         guard let dir = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_DIR"] else { return }
