@@ -309,6 +309,23 @@ private struct ClipTrack: View {
             ForEach(editor.project.pendingTypingSuggestions, id: \.startMs) { range in
                 TypingSuggestionChip(editor: editor, range: range, geometry: geometry)
             }
+            // Transcript words near the hover position, while paused.
+            if !editor.isPlaying, let hoverPlaybackMs, editor.transcript != nil {
+                let labels = TimelineWords.labels(editor.clientTranscript, resolver: geometry.resolver, previewMs: hoverPlaybackMs, pxPerMs: geometry.pxPerMs)
+                ForEach(labels, id: \.id) { label in
+                    Text(label.text)
+                        .font(Theme.Typo.label)
+                        .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                        .shadow(color: .black.opacity(0.8), radius: 2)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .opacity(label.opacity)
+                        .position(x: geometry.x(hoverPlaybackMs) + label.offset, y: -12)
+                        .zIndex(label.opacity * 100)
+                        .animation(.interpolatingSpring(mass: 1.6, stiffness: 500, damping: 32), value: label.offset)
+                        .allowsHitTesting(false)
+                }
+            }
             ForEach(editor.project.markersMs.filter { geometry.resolver.isSourceTimePresent($0) }, id: \.self) { marker in
                 Image(systemName: "flag.fill")
                     .font(.system(size: 10))

@@ -377,3 +377,78 @@ public enum TranscriptEditing {
         return SessionTranscript.normalized(out)
     }
 }
+
+/// Transcript words floating over the clip track while hovering.
+public enum TimelineWords {
+    public struct Label: Hashable, Sendable {
+        /// The word's index in the transcript (stable identity).
+        public var id: Int
+        public var text: String
+        /// Offset from the hover position, in points.
+        public var offset: Double
+        public var opacity: Double
+    }
+
+    static let maxWords = 120
+    static let maxDistanceMs = 1200.0
+    static let spread = 1.5
+
+    static func width(_ text: String) -> Double { Double(text.count) * 6.5 + 4 }
+
+    /// The words near `previewMs` (playback) with decluttered offsets.
+    public static func labels(_ words: [TranscriptWord], resolver: TimeResolver, previewMs: Double, pxPerMs: Double) -> [Label] {
+        guard !words.isEmpty else { return [] }
+        let source = resolver.playbackToSource(previewMs)
+        var lo = 0, hi = words.count
+        while lo < hi { let m = (lo + hi) / 2; if words[m].startMs <= source { lo = m + 1 } else { hi = m } }
+        let start = max(lo - 1, 0)
+        func playback(_ w: TranscriptWord) -> (Double, Double) { (resolver.sourceToPlayback(w.startMs), resolver.sourceToPlayback(w.endMs)) }
+        func distance(_ r: (Double, Double)) -> Double { previewMs < r.0 ? r.0 - previewMs : previewMs > r.1 ? previewMs - r.1 : 0 }
+        func usable(_ w: TranscriptWord) -> Bool {
+            let r = playback(w)
+            return r.1 - r.0 >= 1 && !w.text.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        var picked: [TranscriptWord] = []
+        var i = start, count = 0
+        while i >= 0 && count < maxWords {
+            if distance(playback(words[i])) >= maxDistanceMs { break }
+            if usable(words[i]) { picked.insert(words[i], at: 0) }
+            i -= 1; count += 1
+        }
+        i = start + 1; count = 0
+        while i < words.count && count < maxWords {
+            if distance(playback(words[i])) >= maxDistanceMs { break }
+            if usable(words[i]) { picked.append(words[i]) }
+            i += 1; count += 1
+        }
+        var offsets = picked.map { w -> Double in
+            let r = playback(w)
+            return ((r.0 + r.1) / 2 - previewMs) * pxPerMs * spread
+        }
+        let widths = picked.map { width($0.text.trimmingCharacters(in: .whitespaces)) }
+        declutter(&offsets, widths)
+        return zip(picked, offsets).map { w, offset in
+            let px = distance(playback(w)) * pxPerMs
+            return Label(id: w.index, text: w.text.trimmingCharacters(in: .whitespaces), offset: offset, opacity: clamp(1 - px / 450, 0, 1))
+        }
+    }
+
+    /// Pushes labels apart from the hover position outwards.
+    static func declutter(_ off: inout [Double], _ w: [Double]) {
+        let n = off.count
+        guard n > 0 else { return }
+        func gap(_ i: Int, _ j: Int) -> Double { (w[i] + w[j]) / 2 + 8 }
+        let k = off.firstIndex { $0 >= 0 } ?? n
+        if k > 0 && k < n {
+            let over = off[k - 1] + gap(k - 1, k) - off[k]
+            if over > 0 {
+                let a = abs(off[k]), b = abs(off[k - 1])
+                let s = a + b == 0 ? 1 : a + b
+                off[k] += a / s * over
+                off[k - 1] -= b / s * over
+            }
+        }
+        if k + 1 < n { for i in (k + 1)..<n { off[i] = max(off[i], off[i - 1] + gap(i - 1, i)) } }
+        if k - 2 >= 0 { for i in stride(from: k - 2, through: 0, by: -1) { off[i] = min(off[i], off[i + 1] - gap(i, i + 1)) } }
+    }
+}

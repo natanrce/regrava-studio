@@ -67,3 +67,16 @@ struct TranscriptEditingTests {
         #expect(TranscriptEditing.setHidden(words, from: 1, to: 2, hidden: true).map { $0.isHidden == true } == [false, true, true, false, false])
     }
 }
+
+struct TimelineWordsTests {
+    @Test func labelsAreNearbyAndDoNotOverlap() {
+        let p = Project(recording: RecordingInfo(videoSize: Size2(width: 640, height: 360), pointPixelScale: 1, durationMs: 20_000, fps: 30), mouseEvents: [])
+        let words = (0..<30).map { TranscriptWord(index: $0, startMs: Double($0) * 200, endMs: Double($0) * 200 + 150, text: $0 == 0 ? "w\($0)" : " w\($0)") }
+        let labels = TimelineWords.labels(words, resolver: p.resolver, previewMs: 3000, pxPerMs: 0.1)
+        #expect(!labels.isEmpty && labels.count < 30)
+        for (a, b) in zip(labels, labels.dropFirst()) {
+            #expect(b.offset - a.offset >= (TimelineWords.width(a.text) + TimelineWords.width(b.text)) / 2 + 8 - 1e-9)
+        }
+        #expect(labels.contains { $0.text == "w15" && $0.opacity == 1 })
+    }
+}
