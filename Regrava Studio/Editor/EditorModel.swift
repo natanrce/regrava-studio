@@ -93,8 +93,15 @@ final class EditorModel: ObservableObject {
     private var timeObserver: Any?
     private var refreshTask: Task<Void, Never>?
     private var autosaveTask: Task<Void, Never>?
-    private var undoStack: [Project] = []
-    private var redoStack: [Project] = []
+    /// Transcript edits share the project's history (`project.history.update(client, …)`).
+    private struct HistoryEntry {
+        var project: Project
+        var transcript: SessionTranscript?
+    }
+
+    private var undoStack: [HistoryEntry] = []
+    private var redoStack: [HistoryEntry] = []
+    private var transcriptSaveTask: Task<Void, Never>?
     private var lastCoalesceKey: String?
     private var lastChangeAt = Date.distantPast
     private var isScrubbing = false {
@@ -145,29 +152,64 @@ final class EditorModel: ObservableObject {
         var updated = project
         body(&updated)
         guard updated != project else { return }
+        recordHistory(coalesce: key)
+        apply(updated)
+    }
+
+    /// An undoable transcript edit, optionally with project changes (cuts) in the same step.
+    func changeTranscript(_ words: [TranscriptWord]?, project body: ((inout Project) -> Void)? = nil) {
+        var updatedProject = project
+        body?(&updatedProject)
+        var updatedTranscript = transcript
+        if let words, updatedTranscript != nil { updatedTranscript!.transcript = words }
+        guard updatedProject != project || updatedTranscript != transcript else { return }
+        recordHistory(coalesce: nil)
+        applyTranscript(updatedTranscript)
+        if updatedProject != project { apply(updatedProject) }
+    }
+
+    private func recordHistory(coalesce key: String?) {
         let now = Date()
         if !(key != nil && key == lastCoalesceKey && now.timeIntervalSince(lastChangeAt) < 1) {
-            undoStack.append(project)
+            undoStack.append(HistoryEntry(project: project, transcript: transcript))
             if undoStack.count > 200 { undoStack.removeFirst() }
             redoStack.removeAll()
         }
         lastCoalesceKey = key
         lastChangeAt = now
-        apply(updated)
     }
 
     func undo() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append(project)
+        redoStack.append(HistoryEntry(project: project, transcript: transcript))
         lastCoalesceKey = nil
-        apply(previous)
+        applyTranscript(previous.transcript)
+        apply(previous.project)
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(project)
+        undoStack.append(HistoryEntry(project: project, transcript: transcript))
         lastCoalesceKey = nil
-        apply(next)
+        applyTranscript(next.transcript)
+        apply(next.project)
+    }
+
+    /// Edited transcripts are saved 800 ms after the last change.
+    private func applyTranscript(_ updated: SessionTranscript?) {
+        guard updated != transcript else { return }
+        transcript = updated
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+        scheduleRefresh()
+        transcriptSaveTask?.cancel()
+        guard let updated else { return }
+        let bundle = bundleURL
+        transcriptSaveTask = Task {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            try? updated.save(bundle: bundle)
+        }
     }
 
     private func apply(_ updated: Project) {
@@ -998,6 +1040,11 @@ final class EditorModel: ObservableObject {
     }
 
     func tearDown() {
+        // A pending transcript edit is written right away.
+        if transcriptSaveTask != nil, let transcript {
+            transcriptSaveTask?.cancel()
+            try? transcript.save(bundle: bundleURL)
+        }
         faceTrackingTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
