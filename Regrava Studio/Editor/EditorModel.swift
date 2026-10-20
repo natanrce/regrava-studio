@@ -131,6 +131,7 @@ final class EditorModel: ObservableObject {
     func prepare() async {
         await rebuildComposition()
         updateFaceTracking()
+        updateSilence()
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -221,6 +222,7 @@ final class EditorModel: ObservableObject {
         let audioChanged = updated.audio != project.audio
         let cameraDelayChanged = updated.camera.delayAdjustmentMs != project.camera.delayAdjustmentMs
         let faceTrackingChanged = updated.camera.enableFaceTracking != project.camera.enableFaceTracking
+        let silenceChanged = updated.camera.hideDuringSilenceMs != project.camera.hideDuringSilenceMs
         project = updated
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
@@ -233,6 +235,7 @@ final class EditorModel: ObservableObject {
         scheduleAutosave()
         rememberLastProjectConfig()
         if faceTrackingChanged { updateFaceTracking() }
+        if silenceChanged { updateSilence() }
         if canvasChanged || slicesChanged || backgroundChanged || cameraDelayChanged {
             Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || cameraDelayChanged) }
         } else {
@@ -361,6 +364,22 @@ final class EditorModel: ObservableObject {
     }
 
     private var faceTrackingTask: Task<Void, Never>?
+    private var silenceTask: Task<Void, Never>?
+
+    /// "Hide during silence": finds the microphone's silences for the current minimum duration
+    /// (`project.silenceChunks`), after the slider settles.
+    private func updateSilence() {
+        silenceTask?.cancel()
+        guard project.camera.hideDuringSilenceMs != nil else { return }
+        let project = self.project, bundle = bundleURL, recording = videoURL
+        silenceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            try? await SilenceAnalyzer.ensure(project: project, bundle: bundle, recording: recording)
+            guard !Task.isCancelled else { return }
+            self?.scheduleRefresh()
+        }
+    }
 
     /// Turning face tracking on starts the webcam analysis (`project.cameraFaces`); partial
     /// results are saved and used as they come, so tracking works while it runs.

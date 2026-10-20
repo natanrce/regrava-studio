@@ -114,7 +114,9 @@ enum UISnapshots {
             ("animations", { controller.model.openSidebar(.animation) }),
             ("audio", { controller.model.openSidebar(.audio) }),
             ("camera-layout", { controller.model.openSidebar(.cameraLayout) }),
-            ("camera-layout-split", { controller.model.change { $0.defaultLayout.type = .splitScreen } }),
+            ("camera-layout-silence", { controller.model.change { $0.camera.hideDuringSilenceMs = 5000 } }),
+            ("camera-layout-split", { controller.model.change { $0.camera.hideDuringSilenceMs = nil }
+                 controller.model.change { $0.defaultLayout.type = .splitScreen } }),
             ("camera-layout-cutout", { controller.model.change { $0.defaultLayout.type = .cutoutCamera } }),
             ("camera-style", { controller.model.change { $0.defaultLayout.type = .cameraOverlay }; controller.model.openSidebar(.cameraStyle) }),
             ("captions", { controller.model.openSidebar(.captions) }),
@@ -158,6 +160,9 @@ enum UISnapshots {
         }
         controller.model.isCommandMenuOpen = false
         write(ColorPresetStudioView(model: ColorPresetStudioModel(editor: controller.model), close: {}, onCreated: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("color-preset-studio.png"))
+        controller.model.change { $0.camera.hideDuringSilenceMs = 5000 }
+        write(CameraLayoutPanel(editor: controller.model).padding(24).background(Theme.Colors.backgroundAccent), width: 360, height: nil, to: directory.appendingPathComponent("panel-camera-layout.png"))
+        controller.model.change { $0.camera.hideDuringSilenceMs = nil }
         let crop = CameraCropModel(editor: controller.model)
         crop.state.setCrop(Rect2(x: 500, y: 150, width: 800, height: 700))
         write(CameraCropView(model: crop, close: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("camera-crop.png"))

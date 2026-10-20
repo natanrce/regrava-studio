@@ -50,7 +50,7 @@ struct CameraLayoutPanel: View {
                 let isCutout = layout.type == .cutoutCamera
                 let isUnpaddedSplit = layout.type == .splitScreen && !layout.splitScreen.enablePadding
                 if !isCutout && !isUnpaddedSplit {
-                    SidebarSection(showsDivider: false) {
+                    SidebarSection {
                         SliderField(
                             name: "Camera rounded corners",
                             value: editor.binding(\.style.cameraBorderRadiusRatio),
@@ -61,6 +61,24 @@ struct CameraLayoutPanel: View {
                         if layout.type == .splitScreen && project.style.paddingRatio == 0 {
                             Callout(kind: .secondary, icon: nil, message: "For split screen layout, when padding is 0, the camera border radius will only be applied during zoom.")
                         }
+                    }
+                }
+                // "Hide during silence".
+                SidebarSection(showsDivider: false) {
+                    ToggleRow(
+                        icon: "person.wave.2.fill",
+                        title: "Hide during silence",
+                        description: "Hide the camera during silence.",
+                        isOn: Binding(get: { project.camera.hideDuringSilenceMs != nil }, set: { on in editor.change { $0.camera.hideDuringSilenceMs = on ? 5000 : nil } })
+                    )
+                    if project.camera.hideDuringSilenceMs != nil {
+                        SliderField(
+                            name: "Minimum silence duration",
+                            value: Binding(get: { project.camera.hideDuringSilenceMs ?? 5000 }, set: { v in editor.change(coalesce: "silence-duration") { $0.camera.hideDuringSilenceMs = v } }),
+                            range: 2000...15000,
+                            preview: { String(format: "%.1fs", $0 / 1000) },
+                            resetValue: 5000
+                        )
                     }
                 }
             }
