@@ -49,6 +49,8 @@ public struct CaptureResult: Sendable {
     public var pointPixelScale: Double
     public var durationMs: Double
     public var fps: Int
+    /// The iPhone/iPad of a device recording.
+    public var externalDevice: ExternalDeviceInfo?
 }
 
 public enum CaptureError: LocalizedError {
