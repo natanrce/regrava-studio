@@ -135,25 +135,48 @@ final class ShortcutRenderer: @unchecked Sendable {
         ])
     }
 
-    /// The overlay over `output` at a playback time.
-    func draw(over output: CIImage, atPlayback time: Double) -> CIImage {
-        let nodes = track.scene(atPlayback: time)
-        guard !nodes.isEmpty else { return output }
+    /// One key: shadow, then the artwork clipped to the sprung rect, faded by its opacity.
+    private func key(_ node: ShortcutKeyNode, rect r: Rect2) -> CIImage {
         let ratio = track.sizeRatio
         let radius = ratio * 128 * unit
-        let shadowBlur = ratio * 200 * unit
-        let shadowOffset = ratio * 25 * unit
+        let rect = ciRect(r)
+        // Black at 0.33, blur ratio·200, offset (0, ratio·25) below the key, Classic.
+        let shadow = SmoothShapes.shadow(rect, radius: radius, .init(alpha: 0.33, blur: ratio * 200 * unit, offset: CGVector(dx: 0, dy: -ratio * 25 * unit), directional: nil, unit: unit))
+        // Artwork at its resting scale, placed at the sprung rect and clipped to it with
+        // smooth corners (`borderRoundness` 1).
+        let art = artwork(node.cap, height: node.restingHeight)
+        let placed = art.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.maxY - art.extent.height))
+        let clipped = SmoothShapes.clip(placed, to: rect, radius: radius)
+        return faded(clipped.composited(over: shadow), opacity: node.opacity)
+    }
+
+    /// The overlay over `output` at a playback time. With motion blur on, a moving key trails
+    /// from `lerp(now, before, strength)` to now like every sprung node (uniform weights,
+    /// `smoothFalloffRatio` 0).
+    func draw(over output: CIImage, atPlayback time: Double, motionBlurStrength strength: Double = 0, quality: RenderQuality = .export) -> CIImage {
+        let nodes = track.scene(atPlayback: time)
+        guard !nodes.isEmpty else { return output }
+        var before: [Int: ShortcutKeyNode] = [:]
+        if strength > 0 {
+            for node in track.scene(atPlayback: max(0, time - 1000 / track.fps)) { before[node.instance] = node }
+        }
         var result = output
         for node in nodes {
-            let rect = ciRect(node.rect)
-            // Black at 0.33, blur ratio·200, offset (0, ratio·25) below the key, Classic.
-            let shadow = SmoothShapes.shadow(rect, radius: radius, .init(alpha: 0.33, blur: shadowBlur, offset: CGVector(dx: 0, dy: -shadowOffset), directional: nil, unit: unit))
-            // Artwork at its resting scale, placed at the sprung rect and clipped to it with
-            // smooth corners (`borderRoundness` 1).
-            let art = artwork(node.cap, height: node.restingHeight)
-            let placed = art.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.maxY - art.extent.height))
-            let key = SmoothShapes.clip(placed, to: rect, radius: radius)
-            result = faded(key.composited(over: shadow), opacity: node.opacity).composited(over: result)
+            var image = key(node, rect: node.rect)
+            if let previous = before[node.instance] {
+                let trailStart = node.rect.lerp(to: previous.rect, strength)
+                let travel = node.rect.cornerTravel(to: trailStart)
+                if travel >= 1 {
+                    let reach = track.sizeRatio * 250 * unit + 8
+                    let bounds = ciRect(node.rect).union(ciRect(trailStart)).insetBy(dx: -reach, dy: -reach).integral
+                    if let blurred = MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel, quality: quality), bounds: bounds, layer: { t in
+                        self.key(node, rect: trailStart.lerp(to: node.rect, t))
+                    }) {
+                        image = blurred
+                    }
+                }
+            }
+            result = image.composited(over: result)
         }
         return result
     }

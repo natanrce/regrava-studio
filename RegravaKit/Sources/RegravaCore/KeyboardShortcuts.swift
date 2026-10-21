@@ -352,6 +352,8 @@ public struct ShortcutKeyInstance: Hashable, Sendable {
 
 /// One key on screen.
 public struct ShortcutKeyNode: Hashable, Sendable {
+    /// Index of its instance, to pair it with the previous frame's node for motion blur.
+    public var instance: Int
     public var cap: ShortcutKeyCap
     /// Sprung rect in canvas pixels (top-left origin).
     public var rect: Rect2
@@ -372,7 +374,7 @@ public struct ShortcutTrack: Sendable {
     let rowHeight: Double
     public let sizeRatio: Double
     let resolver: TimeResolver
-    let fps: Double
+    public let fps: Double
     let fullscreenCameraRanges: [TimeRange]
 
     /// nil when shortcuts are off or there is nothing to show. `captionsShown`: transcript
@@ -479,7 +481,7 @@ public struct ShortcutTrack: Sendable {
         let sources = (0...steps).map { resolver.playbackToSource(max(time - Double(steps - $0) * step, 0)) }
         guard let lo = sources.min(), let hi = sources.max() else { return [] }
         var nodes: [ShortcutKeyNode] = []
-        for instance in instances where displayStart(instance) - 200 <= hi && displayEnd(instance) + Self.influenceMs >= lo {
+        for (index, instance) in instances.enumerated() where displayStart(instance) - 200 <= hi && displayEnd(instance) + Self.influenceMs >= lo {
             var rect: SpringRect?
             var opacity = SpringValue(0)
             for t in sources {
@@ -494,7 +496,7 @@ public struct ShortcutTrack: Sendable {
             }
             let alpha = clamp(opacity.value, 0, 1)
             guard let rect, alpha > 0.001 else { continue }
-            nodes.append(ShortcutKeyNode(cap: instance.cap, rect: rect.rect, restingHeight: restingHeight(instance, atSource: sources[sources.count - 1]), opacity: alpha))
+            nodes.append(ShortcutKeyNode(instance: index, cap: instance.cap, rect: rect.rect, restingHeight: restingHeight(instance, atSource: sources[sources.count - 1]), opacity: alpha))
         }
         return nodes
     }
