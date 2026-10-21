@@ -286,5 +286,222 @@ float4 partShadow(float4 shape, float4 corner, float4 shadow, float4 light, floa
     return float4(0.0, 0.0, 0.0, shadow.w * mask);
 }
 
+
+// MARK: Glass loupe
+// Lengths are canvas pixels; `rel` is the position relative to the lens centre (y up).
+
+struct LoupeParams {
+    float2 center; float radius; float bevel;
+    float zoom; float chroma; float presence; float shadowAlpha;
+    float2 light; float shineExponent; float lightTilt;
+    float shadowSize; float maxReads;
+};
+
+LoupeParams loupeParams(float4 g0, float4 g1, float4 g2, float4 g3) {
+    LoupeParams L;
+    L.center = g0.xy; L.radius = g0.z; L.bevel = g0.w;
+    L.zoom = max(g1.x, 0.05); L.chroma = g1.y; L.presence = g1.z; L.shadowAlpha = g1.w;
+    L.light = g2.xy; L.shineExponent = g2.z; L.lightTilt = g2.w;
+    L.shadowSize = g3.x; L.maxReads = g3.y;
+    return L;
+}
+
+float bevelArcSlope(float t) {
+    float t2 = t * t;
+    return min(t2 * rsqrt(1.0 - min(t2, 0.99)), 6.0);
+}
+
+/// `$getLoupeOffsets`: xy = how far to read back (magnification + bevel bend), zw = fringe.
+float4 loupeOffsets(float2 rel, LoupeParams L) {
+    float d = length(rel);
+    if (d >= L.radius || d < 0.001) return float4(0.0);
+    float2 base = rel * (1.0 - 1.0 / L.zoom);
+    float B = max(L.bevel, 1.0);
+    if (d <= L.radius - B) return float4(base, 0.0, 0.0);
+    float2 n = rel / d;
+    float t = clamp((d - (L.radius - B)) / B, 0.0, 1.0);
+    float bend = bevelArcSlope(t) * (1.0 - 1.0 / 1.5) * L.bevel;
+    return float4(base + n * bend, n * bend * 0.35 * L.chroma);
+}
+
+float loupeOuterShadow(float2 rel, LoupeParams L) {
+    if (L.shadowAlpha <= 0.001) return 0.0;
+    float S = max(L.shadowSize, 1.0);
+    float reach = min(S, L.radius * 0.25);
+    float throwBy = min(L.lightTilt * reach, S * 0.45);
+    float dd = length(rel + L.light * throwBy);
+    float fall = max(S - throwBy, S * 0.4);
+    float v = clamp(1.0 - (dd - L.radius) / fall, 0.0, 1.0);
+    float side = (dot(rel, L.light) / max(length(rel), 0.001) + 1.0) * 0.5;
+    return L.shadowAlpha * mix(1.0, 0.6, side) * v * v;
+}
+
+float3 loupePoolLight(float t, float start, float rainbow) {
+    float s = clamp((t - start) / (1.0 - start), 0.0, 1.0);
+    float prog = pow(s, 0.6);
+    float hue = mix(1.0, 0.0, prog) * 2.0 * M_PI_F;
+    float sat = smoothstep(0.0, 0.4, s);
+    float ch = rainbow * 0.35 * sat;
+    float lvl = mix(0.5, 1.0, sat);
+    float w = 0.125;
+    return float3((1.0 + ch * cos(hue)) * (1.0 + w * 0.878),
+                  (1.0 + ch * cos(hue - 2.0943951)) * (1.0 - w * 0.023),
+                  (1.0 + ch * cos(hue - 4.1887902)) * (1.0 - w * 0.851)) * lvl;
+}
+
+float maxComp(float3 c) { return max(c.r, max(c.g, c.b)); }
+
+float4 composeRelight(float4 c, float shadow, float3 light, float dS, float sS) {
+    float3 dif = light * dS, sh = light * sS;
+    float3 rgb = c.rgb * ((1.0 - shadow) + dif - sh) + sh;
+    rgb /= max(maxComp(rgb), 1.0);
+    return float4(rgb, min(c.a + (1.0 - c.a) * shadow + maxComp(sh), 1.0));
+}
+
+float shineArc(float width, float edgeK, float spread, float shift, float x) {
+    float e0 = 1.0 - width + shift;
+    return smoothstep(e0, e0 + max(mix(width, 0.02, edgeK) * (1.0 + spread * 0.5), 0.01), x);
+}
+
+/// `$applyLoupeShading`: shadow and caustic pools, then the specular rim.
+float4 loupeShade(float4 color, float2 rel, float coverage, float bayer, LoupeParams L) {
+    const float3 lamp = float3(1.0, 0.98, 0.95);
+    float S = max(L.shadowSize, 1.0), B = max(L.bevel, 1.0);
+    float4 out = color;
+    float shadow = coverage < 1.0 ? loupeOuterShadow(rel, L) * (1.0 - coverage) : 0.0;
+    float3 light = float3(0.0);
+    float pk = min(L.bevel * 0.5, 1.0) * L.presence;
+    if (pk > 0.001) {
+        if (coverage > 0.001) {
+            float sz = L.radius;
+            float f = clamp((length(rel - L.light * sz) - L.radius) / sz, 0.0, 1.0);
+            light += loupePoolLight(f, 0.0, 0.5) * f * f * 0.25 * pk * coverage;
+        }
+        if (coverage < 1.0) {
+            float k = min(L.radius * 0.5, S * 0.45);
+            float f = clamp((L.radius - length(rel + L.light * k)) / k, 0.0, 1.0);
+            light += loupePoolLight(1.0 - f, 0.0, 0.5) * f * f * 0.3 * pk * (1.0 - coverage);
+        }
+    }
+    if (shadow + light.r + light.g + light.b > 0.0) out = composeRelight(out, shadow, lamp * light, 1.0, 0.35);
+    float d = length(rel);
+    if (coverage <= 0.0 || d >= L.radius || d < 0.001) return out;
+    float pol = pow(3.0, -0.8);
+    float band = max(L.radius * 0.036 * pol, 1.0);
+    float inner = band * 50.0;
+    if (d < L.radius - max(B, inner)) return out;
+    float2 n = rel / d;
+    float tb = clamp((d - (L.radius - B)) / B, 0.0, 1.0);
+    float bk = min(L.bevel * 0.5, 1.0);
+    float facing = dot(n, L.light);
+    float edge = L.radius - d;
+    float bandF = pow(clamp(1.0 - edge / band, 0.0, 1.0), 2.5);
+    float s = clamp(1.0 - edge / inner, 0.0, 1.0);
+    float innerF = s * s * (3.0 - 2.0 * s) * 0.1;
+    float spread = clamp(4.0 / max(L.shineExponent, 1.0), 0.0, 1.0);
+    float main = shineArc(0.3, 0.25, spread, 0.0, max(facing, 0.0));
+    float opp = 0.28 * shineArc(0.3, 0.25, spread, 0.3 * 0.25, max(-facing, 0.0));
+    float imain = shineArc(0.55, 0.125, spread, 0.0, max(facing, 0.0));
+    float iopp = 0.28 * shineArc(0.55, 0.125, spread, 0.55 * 0.25, max(-facing, 0.0));
+    float diffuse = main * bandF + imain * innerF;
+    float sheen = opp * bandF + iopp * innerF;
+    float amb = bandF + innerF;
+    float str = bk * coverage * L.presence * 1.05;
+    float3 rgb = (lamp * diffuse + lamp * float3(0.9, 0.96, 1.05) * sheen + lamp * 0.05 * amb) * str * (1.0 + (bayer - 0.5) * 0.8);
+    out.rgb *= 1.0 - 0.14 * tb * tb * bk * coverage;
+    if (rgb.r + rgb.g + rgb.b > 0.0) out = composeRelight(out, 0.0, rgb, 0.9, 0.55);
+    return out;
+}
+
+float4 loupeView(sampler c0, sampler c2, sampler c4, float2 pos, float lod) {
+    float4 a = c0.sample(c0.transform(pos));
+    if (lod < 0.05) return a;
+    float4 b = c2.sample(c2.transform(pos));
+    if (lod <= 2.0) return mix(a, b, lod / 2.0);
+    return mix(b, c4.sample(c4.transform(pos)), (lod - 2.0) / 2.0);
+}
+
+float spectrumW(float x) { float c = clamp(x, -1.0, 1.0); return c * (1.0 - 2.0 / 3.0 * c * c + c * c * c * c / 5.0); }
+float spectrumBand(float s0, float s1, float c0, float w) { return (spectrumW((s1 - c0) / w) - spectrumW((s0 - c0) / w)) * w; }
+
+float bayer4(float2 px) {
+    int x = int(fmod(floor(px.x), 4.0)), y = int(fmod(floor(px.y), 4.0));
+    const float m[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+    return (m[y * 4 + x] + 0.5) / 16.0;
+}
+
+float4 loupeGlass(sampler content0, sampler content2, sampler content4, sampler plain, sampler frost,
+                  float4 g0, float4 g1, float4 g2, float4 g3, destination dest) {
+    LoupeParams L = loupeParams(g0, g1, g2, g3);
+    float2 pos = dest.coord();
+    float4 scene = plain.sample(plain.transform(pos));
+    float aa = 1.5;
+    float2 rel = pos - L.center;
+    float d = length(rel);
+    if (d > L.radius + L.shadowSize + aa) return scene;
+    float bayer = bayer4(pos);
+    float coverage = clamp((L.radius - d) / aa, 0.0, 1.0);
+    if (coverage <= 0.0) return loupeShade(scene, rel, 0.0, bayer, L);
+
+    float4 off = loupeOffsets(rel, L);
+    float2 baseInside = (d < L.radius && d >= 0.001) ? rel * (1.0 - 1.0 / L.zoom) : float2(0.0);
+    float2 bendPos = pos - (off.xy - baseInside);
+    float2 fullPos = pos - off.xy;
+    // Read footprint on the compressed rim blurs it (`$getLoupeSampleLodBias`).
+    float lodBias = 0.0;
+    if (d >= 1.0 && d < L.radius) {
+        float2 n = rel / d;
+        float2 a = rel - off.xy;
+        float2 b = (rel - n) - loupeOffsets(rel - n, L).xy;
+        lodBias = clamp(log2(max(length(a - b), 0.01)), -2.0, 4.0);
+    }
+    float lod = clamp(lodBias + log2(L.zoom), 0.0, 4.0);
+
+    float4 color;
+    float2 fr = off.zw;
+    float frLen = length(fr);
+    if (frLen < 0.75) {
+        color = loupeView(content0, content2, content4, bendPos, lod);
+    } else {
+        int N = int(clamp(ceil(frLen), 3.0, L.maxReads));
+        float3 rgb = float3(0.0), wsum = float3(0.0);
+        float alpha = 0.0;
+        for (int i = 0; i < 16; i++) {
+            if (i >= N) break;
+            float a = 1.0 - 2.0 * float(i) / float(N);
+            float b = a - 2.0 / float(N);
+            float s = a - fract(bayer + float(i) * 0.61803398875) * 2.0 / float(N);
+            float4 c = loupeView(content0, content2, content4, bendPos + fr * s, lod);
+            float3 w = float3(spectrumBand(b, a, 0.85, 0.7) + 0.3 * spectrumBand(b, a, -0.95, 0.35),
+                              spectrumBand(b, a, 0.05, 0.65),
+                              spectrumBand(b, a, -0.75, 0.65));
+            rgb += c.rgb * w; wsum += w; alpha += c.a;
+        }
+        color = float4(rgb / max(wsum, float3(0.0001)), alpha / float(N));
+    }
+    if (color.a < 1.0) color = color + frost.sample(frost.transform(fullPos)) * (1.0 - color.a);
+
+    // Fresnel rim reflection of the stage just outside the lens (`$getLoupeRimReflection`).
+    float k = min(L.bevel * 0.5, 1.0) * L.presence;
+    if (k > 0.001 && d < L.radius && d >= 0.001) {
+        float band = max(min(L.bevel * 1.5, L.radius), 1.0);
+        if (d > L.radius - band) {
+            float t = clamp((d - (L.radius - band)) / band, 0.0, 1.0);
+            float slope = bevelArcSlope(t);
+            float cosI = rsqrt(1.0 + slope * slope);
+            float weight = clamp((0.04 + 0.96 * pow(1.0 - cosI, 5.0)) * smoothstep(1.0, 1.5, slope) * k, 0.0, 1.0);
+            if (weight > 0.004) {
+                float hover = L.radius * 0.25;
+                float dist = max(d + min(2.0 * hover * slope / max(slope * slope - 1.0, 0.05), L.radius), L.radius + 1.0);
+                float2 sp = L.center + rel / d * dist;
+                float4 s = plain.sample(plain.transform(sp));
+                color = mix(color, float4(s.rgb * (1.0 - loupeOuterShadow(sp - L.center, L)), s.a), weight);
+            }
+        }
+    }
+    if (coverage >= 1.0) return loupeShade(color, rel, 1.0, bayer, L);
+    return loupeShade(mix(scene, color, coverage), rel, coverage, bayer, L);
+}
+
 }
 }

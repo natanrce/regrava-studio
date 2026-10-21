@@ -63,6 +63,20 @@ public final class FrameCompositor: @unchecked Sendable {
         let canvasRect = ciRect(layout.canvas)
         // Masks act on the recording itself, so they follow zoom and motion blur.
         let src = MaskRenderer.apply(frame.mask, to: source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)))
+        var output = session(over: background, source: src, camera: cameraImage, frame: frame, quality: quality)
+        // The glass loupe over the whole session, camera and cursor included.
+        if let lens = frame.loupe {
+            output = loupe(lens, over: output, source: src, camera: cameraImage, frame: frame, quality: quality)
+        }
+        if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs) }
+        if let shortcuts { output = shortcuts.draw(over: output, atPlayback: frame.timeMs) }
+
+        return output.cropped(to: canvasRect)
+    }
+
+    /// Screen, cursor and camera over `base`, laid out through `perspective` (the loupe's
+    /// magnification, identity on the stage).
+    private func session(over base: CIImage, source src: CIImage, camera cameraImage: CIImage?, frame: CameraFrame, quality: RenderQuality, perspective: Perspective = .identity) -> CIImage {
         let strength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: frame.isInstantSnap)
 
         // Screen trail: from lerp(now, before, strength) to now (`rf.trailStart`).
@@ -70,12 +84,12 @@ public final class FrameCompositor: @unchecked Sendable {
         let trailStart = strength > 0 ? now.lerp(to: frame.previousScreenRect ?? now, strength) : now
         let isStatic = strength == 0 || now.isClose(to: trailStart, tolerance: 1)
 
-        var output = background
+        var output = base
         if style.shadow.intensity > 0 {
             // One shadow at the trail's middle, under the inset and the content.
             let middle = isStatic ? now : trailStart.lerp(to: now, 0.5)
             let reference = frame.screenReferenceWidth > 0 ? frame.screenReferenceWidth : layout.restScreen.width
-            output = partShadow(ciRect(middle), radius: screenRadius(middle, frame: frame), zoomFactor: middle.width / max(reference, 1)).composited(over: output)
+            output = partShadow(ciRect(middle), radius: screenRadius(middle, frame: frame), zoomFactor: middle.width / max(reference, 1), perspective: perspective).composited(over: output)
         }
         var screenImage = screenLayer(src, rect: now, frame: frame)
         if !isStatic {
@@ -130,12 +144,73 @@ public final class FrameCompositor: @unchecked Sendable {
 
         // The webcam is drawn above everything.
         if let cameraImage, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
-            output = cameraLayer(cameraImage, rect: rect, frame: frame, quality: quality).composited(over: output)
+            output = cameraLayer(cameraImage, rect: rect, frame: frame, quality: quality, perspective: perspective).composited(over: output)
         }
-        if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs) }
-        if let shortcuts { output = shortcuts.draw(over: output, atPlayback: frame.timeMs) }
+        return output
+    }
 
-        return output.cropped(to: canvasRect)
+    // MARK: Glass loupe
+
+    private static let glassKernel = RenderKernels.general("loupeGlass")
+
+    /// The session magnified around the lens centre, read through the glass over `scene`.
+    private func loupe(_ lens: LoupeFrame, over scene: CIImage, source: CIImage, camera: CIImage?, frame: CameraFrame, quality: RenderQuality) -> CIImage {
+        guard let kernel = Self.glassKernel else { return scene }
+        let screen = frame.screenRect
+        let w = screen.width
+        guard lens.isVisible(recordingWidth: layout.videoSize.width, k: 1) else { return scene }
+        let canvasRect = ciRect(layout.canvas)
+        // Lens geometry in canvas pixels: centre through the screen rect, radius in screen widths.
+        let center = Vec2(screen.x + lens.center.x * screen.width, screen.y + lens.center.y * screen.height)
+        let radius = max(0, lens.radius) * w
+        let zoom = max(lens.zoom, 0.05)
+
+        // Content: screen, cursor and camera laid out through `magnify(center, zoom)`, the
+        // camera fading by 1 − presence (`cameraOpacityFactor`).
+        func magnify(_ r: Rect2) -> Rect2 {
+            Rect2(x: center.x + (r.x - center.x) * zoom, y: center.y + (r.y - center.y) * zoom, width: r.width * zoom, height: r.height * zoom)
+        }
+        var inner = frame
+        inner.screenRect = magnify(frame.screenRect)
+        inner.previousScreenRect = frame.previousScreenRect.map(magnify)
+        inner.cameraRect = frame.cameraRect.map(magnify)
+        inner.previousCameraRect = frame.previousCameraRect.map(magnify)
+        inner.cameraCornerRadius *= zoom
+        inner.cameraSizeFactor *= zoom
+        inner.cameraOpacity *= clamp(1 - lens.presence, 0, 1)
+        let perspective = Perspective(center: ciPoint(center), scale: zoom)
+        let clear = CIImage(color: .clear).cropped(to: canvasRect)
+        let content = session(over: clear, source: source, camera: camera, frame: inner, quality: quality, perspective: perspective).cropped(to: canvasRect)
+        // Blurrier reads on the compressed rim (lod 2 and 4: 0.58·(2^lod − 1) texels).
+        let content2 = content.applyingGaussianBlur(sigma: 0.58 * 3 * 0.5).cropped(to: canvasRect)
+        let content4 = content.applyingGaussianBlur(sigma: 0.58 * 15 * 0.5).cropped(to: canvasRect)
+        // Frosted backdrop: the background blurred by 0.5% of the stage width.
+        let frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005).cropped(to: canvasRect)
+
+        // Light from the screen shadow's light.
+        let canvas = layout.canvas
+        let a = style.shadow.angle * .pi / 180
+        let reach = 1.5 * hypot(canvas.width / 2, canvas.height / 2)
+        let light = Vec2(canvas.width / 2 - cos(a) * reach, canvas.height / 2 - sin(a) * reach)
+        let toLight = Vec2(light.x - center.x, light.y - center.y)
+        let dist = hypot(toLight.x, toLight.y)
+        let direction = dist < 0.001 ? Vec2(0, -1) : Vec2(toLight.x / dist, toLight.y / dist)
+        let shineExponent = clamp(dist / (0.1 * w), 1.5, 24)
+        let lightTilt = min(dist / max(canvas.width, canvas.height), 2)
+        let maxReads: Double = quality == .export || quality == .pausedHigh ? 16 : 4
+        let c = ciPoint(center)
+
+        return kernel.apply(
+            extent: canvasRect,
+            roiCallback: { _, _ in canvasRect },
+            arguments: [
+                content, content2, content4, scene.cropped(to: canvasRect), frost,
+                CIVector(x: c.x, y: c.y, z: radius, w: radius * clamp(lens.bevelRatio, 0, 1)),
+                CIVector(x: zoom, y: clamp(lens.chromaticAberration, 0, 1), z: clamp(lens.presence, 0, 1), w: clamp(lens.shadowAlpha, 0, 1)),
+                CIVector(x: direction.x, y: -direction.y, z: shineExponent, w: lightTilt),
+                CIVector(x: LoupeFrame.shadowSize * w, y: maxReads, z: 0, w: 0),
+            ]
+        ) ?? scene
     }
 
     /// Recording points to canvas pixels at `rect`'s width (`sourcePixelScale × k`).
@@ -169,7 +244,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// The webcam covering `rect` (centred focal point), cropped, mirrored, with rounded corners,
     /// the screen's shadow, and faded and blurred while hiding.
-    private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame, quality: RenderQuality) -> CIImage {
+    private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame, quality: RenderQuality, perspective: Perspective = .identity) -> CIImage {
         var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         // Cutout: the person matte goes first, before sharpen and the grade.
         if isCameraMatted, frame.cameraCutout01 > 0.001, let matte = PersonMatter.shared.matte(for: content, quality: quality) {
@@ -209,9 +284,9 @@ public final class FrameCompositor: @unchecked Sendable {
             if style.shadow.intensity > 0 {
                 // Rectangle shadow blended with the person's silhouette by cutout01 (`silhouette01`).
                 let c = frame.cameraCutout01
-                var cast = partShadow(target, radius: radius, zoomFactor: frame.cameraSizeFactor)
+                var cast = partShadow(target, radius: radius, zoomFactor: frame.cameraSizeFactor, perspective: perspective)
                 if c > 0.001 {
-                    let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor)
+                    let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor, perspective: perspective)
                     cast = c >= 0.999 ? silhouette : Self.scaled(silhouette, c).composited(over: Self.scaled(cast, 1 - c))
                 }
                 layer = layer.composited(over: cast)
@@ -288,20 +363,32 @@ public final class FrameCompositor: @unchecked Sendable {
         return CGVector(dx: s.distance * cos(a) * layout.scale, dy: -s.distance * sin(a) * layout.scale)
     }
 
+    /// Points move to `center + (p − center)·scale`; shadow offsets scale and the shadow light
+    /// moves with it. Core Image coordinates.
+    struct Perspective {
+        var center: CGPoint
+        var scale: Double
+        static let identity = Perspective(center: .zero, scale: 1)
+
+        func point(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: center.x + (p.x - center.x) * scale, y: center.y + (p.y - center.y) * scale)
+        }
+    }
+
     /// The screen's or the camera's shadow: black at the intensity, blur `blur × 8 × k`;
     /// Directional marches toward a light fixed on the stage.
-    private func partShadow(_ rect: CGRect, radius: Double, zoomFactor k: Double) -> CIImage {
+    private func partShadow(_ rect: CGRect, radius: Double, zoomFactor k: Double, perspective: Perspective = .identity) -> CIImage {
         let s = style.shadow
         let unit = layout.scale
         let blur = s.blur * 8 * k * unit
-        let offset = shadowOffset
+        let offset = CGVector(dx: shadowOffset.dx * perspective.scale, dy: shadowOffset.dy * perspective.scale)
         var directional: (light: CGPoint, radius: Double, falloff: Double)?
         if s.isDirectional {
             // Stage centre − polar(angle, 1.5 × |stage / 2|), y down.
             let canvas = layout.canvas
             let a = s.angle * .pi / 180
             let reach = 1.5 * hypot(canvas.width / 2, canvas.height / 2)
-            let light = CGPoint(x: canvas.width / 2 - cos(a) * reach, y: canvas.height - (canvas.height / 2 - sin(a) * reach))
+            let light = perspective.point(CGPoint(x: canvas.width / 2 - cos(a) * reach, y: canvas.height - (canvas.height / 2 - sin(a) * reach)))
             directional = (light, max(blur * 2.5, 4 * unit), max(hypot(offset.dx, offset.dy) * 6, 40 * unit))
         }
         return SmoothShapes.shadow(rect, radius: radius, .init(alpha: s.intensity, blur: blur, offset: offset, directional: directional, unit: unit))
@@ -309,9 +396,9 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// The shadow cast by the camera's own alpha (`getContentShadowMask`), with the same alpha
     /// and offset; its blur kernel is not known, a Gaussian stands in.
-    private func silhouetteShadow(of layer: CIImage, zoomFactor: Double) -> CIImage {
+    private func silhouetteShadow(of layer: CIImage, zoomFactor: Double, perspective: Perspective = .identity) -> CIImage {
         let s = style.shadow
-        let offset = shadowOffset
+        let offset = CGVector(dx: shadowOffset.dx * perspective.scale, dy: shadowOffset.dy * perspective.scale)
         let blur = s.blur * 8 * zoomFactor * layout.scale
         let shape = layer.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
