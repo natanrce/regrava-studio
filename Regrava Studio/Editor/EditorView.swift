@@ -177,19 +177,24 @@ struct AddToolsRail: View {
     var body: some View {
         VStack(spacing: Theme.gap(2)) {
             VStack(spacing: Theme.gap(0)) {
-                RSIconButton(icon: "arrow.up.left.and.down.right.magnifyingglass", kind: editor.isAddZoomToolArmed ? .subtleBg : .transparent, tooltip: "Classic zoom") {
-                    editor.isAddZoomToolArmed.toggle()
-                    if editor.isAddZoomToolArmed {
-                        editor.isAddMaskToolArmed = false
-                        editor.isAddLayoutToolArmed = false
-                        editor.pause()
-                        editor.sidebarItem = nil
+                // `Wo = ["screen", "loupe"]`: clicking the armed one disarms it.
+                ForEach([ZoomPresentation.screen, .loupe], id: \.self) { presentation in
+                    let armed = editor.isAddZoomToolArmed && editor.addZoomPresentation == presentation
+                    RSIconButton(
+                        icon: presentation == .screen ? "arrow.up.left.and.down.right.magnifyingglass" : "sparkle.magnifyingglass",
+                        kind: armed ? .subtleBg : .transparent,
+                        tooltip: presentation == .screen ? "Classic zoom" : "Loupe zoom"
+                    ) {
+                        editor.addZoomPresentation = presentation
+                        editor.isAddZoomToolArmed = !armed
+                        if editor.isAddZoomToolArmed {
+                            editor.isAddMaskToolArmed = false
+                            editor.isAddLayoutToolArmed = false
+                            editor.pause()
+                            editor.sidebarItem = nil
+                        }
                     }
                 }
-                // The Glass Loupe effect is not rendered by this app yet.
-                RSIconButton(icon: "sparkle.magnifyingglass", tooltip: "Loupe zoom") {}
-                    .disabled(true)
-                    .opacity(Theme.disabledOpacity)
             }
             // Camera layout group, only with camera footage.
             if editor.project.recording.hasCamera {
@@ -263,15 +268,8 @@ private struct PreviewSpace: View {
                         OverlayPlacementTool(editor: editor, size: size)
                     }
                     if editor.isAddZoomToolArmed {
-                        Color.white.opacity(0.001)
-                            .onContinuousHover { phase in if case .active = phase { NSCursor.crosshair.set() } }
-                            .onTapGesture { location in
-                                // "Click the canvas to place a zoom".
-                                let target = Vec2(clamp(location.x / size.width, 0, 1), clamp(location.y / size.height, 0, 1))
-                                editor.addZoom(startMs: editor.currentSourceTimeMs, manualTarget: target)
-                                editor.isAddZoomToolArmed = false
-                            }
-                        Text("Click the canvas to place a zoom")
+                        ZoomPlacementPreview(editor: editor, size: size)
+                        Text(editor.addZoomPresentation == .loupe ? "Click where to place the loupe" : "Click the canvas to place a zoom")
                             .font(Theme.Typo.label.weight(.medium))
                             .padding(.vertical, 6)
                             .padding(.horizontal, 12)
@@ -794,5 +792,47 @@ private struct OverlayPlacementTool: View {
         let cx = (rect01.x + rect01.width / 2) * size.width
         let cy = (rect01.y + rect01.height / 2) * size.height
         return (point.x - cx) * (point.x - cx) + (point.y - cy) * (point.y - cy)
+    }
+}
+
+/// The add-zoom tool's pointer preview: a circle of the loupe's size, or the classic
+/// zoom's visible area, centred on the pointer.
+private struct ZoomPlacementPreview: View {
+    @ObservedObject var editor: EditorModel
+    var size: CGSize
+    @State private var pointer: CGPoint?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.white.opacity(0.001)
+                .onContinuousHover { phase in
+                    if case .active(let location) = phase {
+                        NSCursor.crosshair.set()
+                        pointer = location
+                    } else {
+                        pointer = nil
+                    }
+                }
+                .onTapGesture { location in
+                    let target = Vec2(clamp(location.x / size.width, 0, 1), clamp(location.y / size.height, 0, 1))
+                    editor.addZoom(startMs: editor.currentSourceTimeMs, manualTarget: target, presentation: editor.addZoomPresentation)
+                    editor.isAddZoomToolArmed = false
+                }
+            if let pointer {
+                let isLoupe = editor.addZoomPresentation == .loupe
+                let zoom = Preferences.shared.defaultZoomLevel ?? 2
+                // Loupe: diameter radius01 × 2 × overlay width. Classic: width/zoom × height/zoom.
+                let w = isLoupe ? LoupeOptions().radius01 * 2 * size.width : size.width / zoom
+                let h = isLoupe ? w : size.height / zoom
+                let shape = RoundedRectangle(cornerRadius: isLoupe ? w / 2 : 8)
+                shape
+                    .fill(Theme.Colors.primary.opacity(0.08))
+                    .overlay { shape.strokeBorder(Theme.Colors.primary.opacity(0.9), lineWidth: 1.5) }
+                    .background { shape.inset(by: -1).stroke(Theme.Colors.background.opacity(0.4), lineWidth: 1) }
+                    .frame(width: w, height: h)
+                    .offset(x: pointer.x - w / 2, y: pointer.y - h / 2)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }

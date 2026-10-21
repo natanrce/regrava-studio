@@ -23,6 +23,11 @@ struct PreviewMarkers: View {
                     ) {
                         open(.background, "Opened background settings")
                     }
+                    if let lens = editor.loupeAreaRect {
+                        MarkerArea(rect: CGRect(x: lens.x * scale, y: lens.y * scale, width: lens.width * scale, height: lens.height * scale), cornerRadius: lens.width * scale / 2) {
+                            editor.openLoupeAtPlayhead()
+                        }
+                    }
                     // The shortcut keys.
                     if let keys = editor.shortcutsAreaRect {
                         MarkerArea(rect: CGRect(x: keys.x * scale, y: keys.y * scale, width: keys.width * scale, height: keys.height * scale), cornerRadius: editor.shortcutsCornerRadius * scale) {

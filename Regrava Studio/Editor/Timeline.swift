@@ -878,7 +878,9 @@ private struct ZoomItem: View {
         Button { editor.updateZoom(zoom.id) { $0.presentation = .screen } } label: {
             Label("Classic zoom", systemImage: "arrow.up.left.and.down.right.magnifyingglass")
         }
-        Button {} label: { Label("Loupe zoom", systemImage: "sparkle.magnifyingglass") }.disabled(true)
+        Button { editor.updateZoom(zoom.id) { $0.presentation = .loupe } } label: {
+            Label("Loupe zoom", systemImage: "sparkle.magnifyingglass")
+        }
         Divider()
         Menu("Change zoom level") {
             ForEach(Array(EditorShortcuts.zoomLevels.enumerated()), id: \.offset) { index, level in

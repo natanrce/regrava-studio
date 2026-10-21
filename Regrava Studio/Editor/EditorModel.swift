@@ -54,6 +54,8 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomIDs: Set<UUID> = []
     /// Zoom add tool armed from the add-tools rail.
     @Published var isAddZoomToolArmed = false
+    /// Which zoom the add tool places (`view.addZoomPresentation`).
+    @Published var addZoomPresentation = ZoomPresentation.screen
     /// Command menu (⌘K).
     @Published var isCommandMenuOpen = false
     /// Mask add tool (`activeAddTool = "mask"`, `addMaskType`).
@@ -627,6 +629,24 @@ final class EditorModel: ObservableObject {
         project.captions.shortcutsSizeRatio * 128 * renderState.current.track.layout.canvas.height / 1080
     }
 
+    /// The lens circle in canvas units while it is mostly there (`LOUPE` marker).
+    var loupeAreaRect: Rect2? {
+        let frame = renderState.current.track.frame(at: currentTimeMs)
+        guard let lens = frame.loupe, lens.radius > 0, lens.presence >= 0.5 else { return nil }
+        let s = frame.screenRect
+        let r = lens.radius * s.width
+        return Rect2(x: s.x + lens.center.x * s.width - r, y: s.y + lens.center.y * s.height - r, width: 2 * r, height: 2 * r)
+    }
+
+    /// Opens the enabled loupe at the playhead, its lead-in included.
+    func openLoupeAtPlayhead() {
+        let t = currentSourceTimeMs
+        let lead = project.animation.leadInMs
+        guard let zoom = project.zooms.first(where: { !$0.isDisabled && $0.presentation == .loupe && t >= $0.startMs - lead && t <= $0.endMs }) else { return }
+        openZoom(zoom.id)
+        showToast("Opened zoom settings", durationMs: 1000)
+    }
+
     var recordingAreaRect: Rect2 {
         renderState.current.track.frame(at: currentTimeMs).screenRect
     }
@@ -877,7 +897,7 @@ final class EditorModel: ObservableObject {
 
     /// Adds a zoom, constrained to the free gap around `startMs`.
     @discardableResult
-    func addZoom(startMs: Double, durationMs requested: Double = ZoomRange.initialDurationMs, manualTarget: Vec2? = nil) -> UUID? {
+    func addZoom(startMs: Double, durationMs requested: Double = ZoomRange.initialDurationMs, manualTarget: Vec2? = nil, presentation: ZoomPresentation = .screen) -> UUID? {
         guard let gap = freeRange(around: startMs + 1) else { return nil }
         let start = clamp(startMs, gap.start, gap.end)
         let end = min(start + requested, gap.end)
@@ -887,7 +907,8 @@ final class EditorModel: ObservableObject {
             endMs: end,
             scale: preferences.defaultZoomLevel ?? 2,
             mode: manualTarget == nil ? .auto : .manual,
-            manualTarget: manualTarget ?? .center01
+            manualTarget: manualTarget ?? .center01,
+            presentation: presentation
         )
         change { $0.zooms.append(zoom) }
         UserDefaults.standard.set(true, forKey: "onboarding.creating-zoom")

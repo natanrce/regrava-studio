@@ -154,6 +154,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                       editor.project.recording.hasCamera else { return false }
                 editor.change { $0.camera.hide.toggle() }
             case ("l", [.control]): editor.toggleAddLayoutTool()
+            case ("l", []):
+                // "Toggle zoom loupe mode".
+                let source = editor.currentSourceTimeMs
+                guard let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id else { return false }
+                editor.updateZoom(target) { $0.presentation = $0.presentation == .loupe ? .screen : .loupe }
             case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil,
                  ("3", []) where editor.openLayoutID != nil, ("4", []) where editor.openLayoutID != nil:
                 // Layout mode: Overlay / Fullscreen / Hide camera / Cutout.

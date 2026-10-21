@@ -456,16 +456,23 @@ struct ZoomInspector: View {
                             options: ZoomPresentation.allCases,
                             label: { $0 == .screen ? "Classic" : "Glass Loupe" },
                             icon: { $0 == .screen ? "arrow.up.left.and.arrow.down.right.square.fill" : "magnifyingglass.circle.fill" },
-                            // The Glass Loupe effect is not rendered by this app yet.
-                            isDisabled: { $0 == .loupe },
                             size: .hero,
                             isWide: true,
                             selection: editor.zoomBinding(zoomID, \.presentation)
                         )
                     }
-                    if zoom.presentation == .screen {
-                        NestedPanel {
+                    NestedPanel {
+                        if zoom.presentation == .screen {
                             ToggleRow(title: "Instant animation", description: "If enabled, the zoom will be applied instantly without any animation.", isOn: editor.zoomBinding(zoomID, \.isInstant))
+                        } else {
+                            // "Glass Loupe size".
+                            SliderField(
+                                name: "Glass Loupe size",
+                                value: editor.zoomBinding(zoomID, \.loupeOptions.radius01),
+                                range: 0.25...0.75,
+                                preview: { "\(Int(($0 * 100).rounded()))%" },
+                                resetValue: LoupeOptions().radius01
+                            )
                         }
                     }
                 }
