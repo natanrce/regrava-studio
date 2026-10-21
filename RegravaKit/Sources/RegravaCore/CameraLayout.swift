@@ -484,7 +484,8 @@ public extension Project {
     var stageInfo: StageInfo {
         StageInfo(
             aspectRatio: style.aspectRatio,
-            sourceSize: recording.videoSize,
+            // With a device frame the layout fits the whole device body (`recordingBodySize`).
+            sourceSize: activeDeviceFrame.map { Size2(width: $0.device.width, height: $0.device.height) } ?? recording.videoSize,
             paddingRatio01: style.paddingRatio,
             avoidEmptyZoomArea: style.avoidEmptyZoomArea,
             cameraSourceAspectRatio: cameraSourceAspectRatio

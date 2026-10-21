@@ -19,21 +19,21 @@ enum SmoothShapes {
         /// The circular radius `min(r, minSide/2)` of the far shadow caster.
         var circular: Double
 
-        init(size: CGSize, radius: Double) {
+        init(size: CGSize, radius: Double, smoothing: Double = 1) {
             let r = max(radius, 0)
-            extent = SmoothCorners.extent(width: size.width, height: size.height, radius: r, smoothing: 1)
+            extent = SmoothCorners.extent(width: size.width, height: size.height, radius: r, smoothing: smoothing)
             circular = min(r, min(size.width, size.height) / 2)
-            let table = SmoothCorners.lut(width: size.width, height: size.height, radius: r)
+            let table = SmoothCorners.lut(width: size.width, height: size.height, radius: r, smoothing: smoothing)
             lut = stride(from: 0, to: 16, by: 4).map { CIVector(x: table[$0], y: table[$0 + 1], z: table[$0 + 2], w: table[$0 + 3]) }
         }
     }
 
     /// White coverage of `rect` with smooth corners of `radius`; `edge` grows the shape outward
     /// (the inset band's threshold).
-    static func coverage(_ rect: CGRect, radius: Double, half: CGSize? = nil, center: CGPoint? = nil, edge: Double = 0) -> CIImage {
+    static func coverage(_ rect: CGRect, radius: Double, smoothing: Double = 1, half: CGSize? = nil, center: CGPoint? = nil, edge: Double = 0) -> CIImage {
         let c = center ?? CGPoint(x: rect.midX, y: rect.midY)
         let h = half ?? CGSize(width: rect.width / 2, height: rect.height / 2)
-        let corner = Corner(size: CGSize(width: rect.width, height: rect.height), radius: radius)
+        let corner = Corner(size: CGSize(width: rect.width, height: rect.height), radius: radius, smoothing: smoothing)
         let pad = edge + antialias + 1
         let extent = CGRect(x: c.x - h.width - pad, y: c.y - h.height - pad, width: 2 * (h.width + pad), height: 2 * (h.height + pad))
         guard let kernel = coverageKernel, rect.width > 0, rect.height > 0 else { return CIImage.empty() }
@@ -48,8 +48,8 @@ enum SmoothShapes {
     }
 
     /// `image` clipped to `rect` with smooth corners.
-    static func clip(_ image: CIImage, to rect: CGRect, radius: Double) -> CIImage {
-        image.applyingFilter("CISourceInCompositing", parameters: [kCIInputBackgroundImageKey: coverage(rect, radius: radius)])
+    static func clip(_ image: CIImage, to rect: CGRect, radius: Double, smoothing: Double = 1) -> CIImage {
+        image.applyingFilter("CISourceInCompositing", parameters: [kCIInputBackgroundImageKey: coverage(rect, radius: radius, smoothing: smoothing)])
     }
 
     /// The inset: a band `size` thick outside `rect`, shifted by `(1 − 2·origin01)·size` (y
@@ -73,12 +73,19 @@ enum SmoothShapes {
         var directional: (light: CGPoint, radius: Double, falloff: Double)?
         /// Pixels per stage unit, for the ray-march steps.
         var unit: Double
+        /// Corner smoothing of the caster (a device body's `frameBorderRoundness`).
+        var smoothing: Double = 1
+        /// How far the caster shrinks inside the shape (a device body's `frameBodyInset`).
+        var inset: Double = 0
     }
 
     /// The black shadow of a smooth-cornered `rect`, to draw under it.
     static func shadow(_ rect: CGRect, radius: Double, _ s: Shadow) -> CIImage {
         guard let kernel = shadowKernel, s.alpha > 0, rect.width > 0, rect.height > 0 else { return CIImage.empty() }
-        let corner = Corner(size: rect.size, radius: radius)
+        // The caster shrinks by the inset, at most a quarter of the shorter side.
+        let inset = clamp(s.inset, 0, min(rect.width, rect.height) * 0.25)
+        let rect = rect.insetBy(dx: inset, dy: inset)
+        let corner = Corner(size: rect.size, radius: radius, smoothing: s.smoothing)
         let center = CGPoint(x: rect.midX, y: rect.midY)
         // `fieldExtents`: half + reach + 16.
         let reach = s.directional.map { $0.falloff } ?? (max(abs(s.offset.dx), abs(s.offset.dy)) + s.blur)

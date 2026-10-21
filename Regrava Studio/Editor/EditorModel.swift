@@ -633,7 +633,7 @@ final class EditorModel: ObservableObject {
     var loupeAreaRect: Rect2? {
         let frame = renderState.current.track.frame(at: currentTimeMs)
         guard let lens = frame.loupe, lens.radius > 0, lens.presence >= 0.5 else { return nil }
-        let s = frame.screenRect
+        let s = project.videoRect(inScreen: frame.screenRect)
         let r = lens.radius * s.width
         return Rect2(x: s.x + lens.center.x * s.width - r, y: s.y + lens.center.y * s.height - r, width: 2 * r, height: 2 * r)
     }

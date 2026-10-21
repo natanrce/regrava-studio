@@ -23,6 +23,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let captions: CaptionRenderer?
     /// Keyboard shortcuts, the top-most layer.
     private let shortcuts: ShortcutRenderer?
+    /// The device frame around an iPhone/iPad recording, when on.
+    private let deviceFrame: ResolvedDeviceFrame?
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
 
@@ -40,6 +42,7 @@ public final class FrameCompositor: @unchecked Sendable {
         captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas)
         shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
+        deviceFrame = project.activeDeviceFrame
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
@@ -89,7 +92,12 @@ public final class FrameCompositor: @unchecked Sendable {
             // One shadow at the trail's middle, under the inset and the content.
             let middle = isStatic ? now : trailStart.lerp(to: now, 0.5)
             let reference = frame.screenReferenceWidth > 0 ? frame.screenReferenceWidth : layout.restScreen.width
-            output = partShadow(ciRect(middle), radius: screenRadius(middle, frame: frame), zoomFactor: middle.width / max(reference, 1), perspective: perspective).composited(over: output)
+            // A device body casts it with its own smoothing, shrunk by its inset.
+            let body = deviceFrame?.device
+            output = partShadow(
+                ciRect(middle), radius: screenRadius(middle, frame: frame), zoomFactor: middle.width / max(reference, 1), perspective: perspective,
+                smoothing: body?.roundness ?? 1, inset: (body?.bodyInset ?? 0) * pointsToCanvas(middle)
+            ).composited(over: output)
         }
         var screenImage = screenLayer(src, rect: now, frame: frame)
         if !isStatic {
@@ -149,6 +157,32 @@ public final class FrameCompositor: @unchecked Sendable {
         return output
     }
 
+    // MARK: Device frame
+
+    /// The video rect inside the device body.
+    func videoRect(inBody body: Rect2) -> Rect2 {
+        guard let region = deviceFrame?.device.videoRegion01 else { return body }
+        return Rect2(x: body.x + region.x * body.width, y: body.y + region.y * body.height, width: region.width * body.width, height: region.height * body.height)
+    }
+
+    /// `$sampleComposite`: the video stretched into the screen hole and clipped to a circular
+    /// rounded rect of the device's screen radius, with the frame art drawn over it. Not
+    /// clipped by the body's shape; the art's alpha gives the silhouette.
+    private func deviceLayer(_ src: CIImage, body: Rect2, frame: ResolvedDeviceFrame) -> CIImage {
+        let device = frame.device
+        let hole = ciRect(videoRect(inBody: body))
+        let video = src
+            .transformed(by: CGAffineTransform(scaleX: hole.width / max(src.extent.width, 1), y: hole.height / max(src.extent.height, 1)))
+            .transformed(by: CGAffineTransform(translationX: hole.minX, y: hole.minY))
+        let r = min(device.screenRadius / max(device.screenWidth, 0.0001) * hole.width, min(hole.width, hole.height) / 2)
+        var layer = SmoothShapes.clip(video, to: hole, radius: r, smoothing: 0)
+        let bodyRect = ciRect(body)
+        if let art = DeviceFrameArt.shared.image(for: frame.key, in: bodyRect) {
+            layer = art.composited(over: layer)
+        }
+        return layer.cropped(to: bodyRect)
+    }
+
     // MARK: Glass loupe
 
     private static let glassKernel = RenderKernels.general("loupeGlass")
@@ -156,7 +190,8 @@ public final class FrameCompositor: @unchecked Sendable {
     /// The session magnified around the lens centre, read through the glass over `scene`.
     private func loupe(_ lens: LoupeFrame, over scene: CIImage, source: CIImage, camera: CIImage?, frame: CameraFrame, quality: RenderQuality) -> CIImage {
         guard let kernel = Self.glassKernel else { return scene }
-        let screen = frame.screenRect
+        // The lens is placed over the video (inside a device frame's screen hole).
+        let screen = videoRect(inBody: frame.screenRect)
         let w = screen.width
         guard lens.isVisible(recordingWidth: layout.videoSize.width, k: 1) else { return scene }
         let canvasRect = ciRect(layout.canvas)
@@ -215,12 +250,16 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// Recording points to canvas pixels at `rect`'s width (`sourcePixelScale × k`).
     private func pointsToCanvas(_ rect: Rect2) -> Double {
-        rect.width / max(layout.videoSize.width / max(pointPixelScale, 0.0001), 1)
+        // With a device frame the screen rect is the body, measured in device points.
+        if let device = deviceFrame?.device { return rect.width / max(device.width, 0.0001) }
+        return rect.width / max(layout.videoSize.width / max(pointPixelScale, 0.0001), 1)
     }
 
     /// `screenBorderRadius` in points, scaled with the drawn screen; 0 without padding or when
     /// the active layout disallows it.
     private func screenRadius(_ rect: Rect2, frame: CameraFrame) -> Double {
+        // A device body's radius, whatever the padding or layout.
+        if let device = deviceFrame?.device { return device.bodyRadius * pointsToCanvas(rect) }
         guard frame.allowsScreenBorderRadius, style.paddingRatio > 0 else { return 0 }
         return style.cornerRadius * pointsToCanvas(rect)
     }
@@ -229,10 +268,15 @@ public final class FrameCompositor: @unchecked Sendable {
     private func screenLayer(_ src: CIImage, rect: Rect2, frame: CameraFrame) -> CIImage {
         let screen = ciRect(rect)
         let radius = screenRadius(rect, frame: frame)
-        let scaled = src
-            .transformed(by: CGAffineTransform(scaleX: screen.width / max(src.extent.width, 1), y: screen.height / max(src.extent.height, 1)))
-            .transformed(by: CGAffineTransform(translationX: screen.minX, y: screen.minY))
-        var image = SmoothShapes.clip(scaled, to: screen, radius: radius)
+        var image: CIImage
+        if let deviceFrame {
+            image = deviceLayer(src, body: rect, frame: deviceFrame)
+        } else {
+            let scaled = src
+                .transformed(by: CGAffineTransform(scaleX: screen.width / max(src.extent.width, 1), y: screen.height / max(src.extent.height, 1)))
+                .transformed(by: CGAffineTransform(translationX: screen.minX, y: screen.minY))
+            image = SmoothShapes.clip(scaled, to: screen, radius: radius)
+        }
 
         // Inset: a band outside the screen, behind it, only while the background shows.
         if style.inset.isOn, frame.isBackgroundVisible {
@@ -377,7 +421,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// The screen's or the camera's shadow: black at the intensity, blur `blur × 8 × k`;
     /// Directional marches toward a light fixed on the stage.
-    private func partShadow(_ rect: CGRect, radius: Double, zoomFactor k: Double, perspective: Perspective = .identity) -> CIImage {
+    private func partShadow(_ rect: CGRect, radius: Double, zoomFactor k: Double, perspective: Perspective = .identity, smoothing: Double = 1, inset: Double = 0) -> CIImage {
         let s = style.shadow
         let unit = layout.scale
         let blur = s.blur * 8 * k * unit
@@ -391,7 +435,7 @@ public final class FrameCompositor: @unchecked Sendable {
             let light = perspective.point(CGPoint(x: canvas.width / 2 - cos(a) * reach, y: canvas.height - (canvas.height / 2 - sin(a) * reach)))
             directional = (light, max(blur * 2.5, 4 * unit), max(hypot(offset.dx, offset.dy) * 6, 40 * unit))
         }
-        return SmoothShapes.shadow(rect, radius: radius, .init(alpha: s.intensity, blur: blur, offset: offset, directional: directional, unit: unit))
+        return SmoothShapes.shadow(rect, radius: radius, .init(alpha: s.intensity, blur: blur, offset: offset, directional: directional, unit: unit, smoothing: smoothing, inset: inset))
     }
 
     /// The shadow cast by the camera's own alpha (`getContentShadowMask`), with the same alpha

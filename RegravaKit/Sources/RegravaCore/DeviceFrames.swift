@@ -163,6 +163,13 @@ public extension Project {
         return ResolvedDeviceFrame(device: best, color: best.colors.first)
     }
 
+    /// Where the video is drawn for a screen rect: the device's screen hole when a frame is
+    /// on, the rect itself otherwise.
+    func videoRect(inScreen screen: Rect2) -> Rect2 {
+        guard let region = activeDeviceFrame?.device.videoRegion01 else { return screen }
+        return Rect2(x: screen.x + region.x * screen.width, y: screen.y + region.y * screen.height, width: region.width * screen.width, height: region.height * screen.height)
+    }
+
     /// The frame drawn around the recording (`hwD.t`): resolved and turned on.
     var activeDeviceFrame: ResolvedDeviceFrame? { isUsingDeviceFrame ? resolvedDeviceFrame : nil }
 
