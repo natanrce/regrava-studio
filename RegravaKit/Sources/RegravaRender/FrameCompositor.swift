@@ -72,18 +72,17 @@ public final class FrameCompositor: @unchecked Sendable {
 
         var output = background
         if style.shadow.intensity > 0 {
+            // One shadow at the trail's middle, under the inset and the content.
             let middle = isStatic ? now : trailStart.lerp(to: now, 0.5)
-            let screen = ciRect(middle)
-            let zoomFactor = middle.width / max(layout.restScreen.width, 1)
-            let radius = min(style.cornerRadius * zoomFactor, min(screen.width, screen.height) / 2)
-            output = shadow(for: screen, radius: radius, zoomFactor: zoomFactor).composited(over: output)
+            let reference = frame.screenReferenceWidth > 0 ? frame.screenReferenceWidth : layout.restScreen.width
+            output = partShadow(ciRect(middle), radius: screenRadius(middle, frame: frame), zoomFactor: middle.width / max(reference, 1)).composited(over: output)
         }
-        var screenImage = screenLayer(src, rect: now)
+        var screenImage = screenLayer(src, rect: now, frame: frame)
         if !isStatic {
             let bounds = ciRect(now).union(ciRect(trailStart)).integral
             let samples = MotionBlur.sampleCount(travel: now.cornerTravel(to: trailStart), quality: quality)
             if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in
-                self.screenLayer(src, rect: trailStart.lerp(to: now, t))
+                self.screenLayer(src, rect: trailStart.lerp(to: now, t), frame: frame)
             }) {
                 screenImage = blurred
             }
@@ -139,27 +138,31 @@ public final class FrameCompositor: @unchecked Sendable {
         return output.cropped(to: canvasRect)
     }
 
-    /// The recording placed into `rect` with rounded corners and the inset border.
-    private func screenLayer(_ src: CIImage, rect: Rect2) -> CIImage {
+    /// Recording points to canvas pixels at `rect`'s width (`sourcePixelScale × k`).
+    private func pointsToCanvas(_ rect: Rect2) -> Double {
+        rect.width / max(layout.videoSize.width / max(pointPixelScale, 0.0001), 1)
+    }
+
+    /// `screenBorderRadius` in points, scaled with the drawn screen; 0 without padding or when
+    /// the active layout disallows it.
+    private func screenRadius(_ rect: Rect2, frame: CameraFrame) -> Double {
+        guard frame.allowsScreenBorderRadius, style.paddingRatio > 0 else { return 0 }
+        return style.cornerRadius * pointsToCanvas(rect)
+    }
+
+    /// The recording placed into `rect` with smooth corners, the inset band behind it.
+    private func screenLayer(_ src: CIImage, rect: Rect2, frame: CameraFrame) -> CIImage {
         let screen = ciRect(rect)
-        let zoomFactor = rect.width / max(layout.restScreen.width, 1)
-        let radius = min(style.cornerRadius * zoomFactor, min(screen.width, screen.height) / 2)
+        let radius = screenRadius(rect, frame: frame)
         let scaled = src
             .transformed(by: CGAffineTransform(scaleX: screen.width / max(src.extent.width, 1), y: screen.height / max(src.extent.height, 1)))
             .transformed(by: CGAffineTransform(translationX: screen.minX, y: screen.minY))
-        var image = masked(scaled, to: screen, radius: radius)
+        var image = SmoothShapes.clip(scaled, to: screen, radius: radius)
 
-        // Inset: a colored border inside the screen edge.
-        if style.inset.isOn {
-            let width = style.inset.size * zoomFactor
-            let ring = CIFilter.blendWithMask()
-            ring.inputImage = roundedRect(screen, radius: radius, color: Self.ciColor(style.inset.color, alpha: style.inset.alpha))
-            ring.backgroundImage = CIImage.empty()
-            ring.maskImage = roundedRect(screen, radius: radius, color: .white)
-                .applyingFilter("CISourceOutCompositing", parameters: [
-                    kCIInputBackgroundImageKey: roundedRect(screen.insetBy(dx: width, dy: width), radius: max(radius - width, 0), color: .white),
-                ])
-            if let ringImage = ring.outputImage { image = ringImage.composited(over: image) }
+        // Inset: a band outside the screen, behind it, only while the background shows.
+        if style.inset.isOn, frame.isBackgroundVisible {
+            let band = SmoothShapes.insetBand(screen, radius: radius, size: style.inset.size * pointsToCanvas(rect), origin01: style.inset.origin01, color: Self.ciColor(style.inset.color, alpha: style.inset.alpha))
+            image = image.composited(over: band)
         }
         return image
     }
@@ -198,11 +201,11 @@ public final class FrameCompositor: @unchecked Sendable {
             .transformed(by: CGAffineTransform(scaleX: k, y: k))
             .transformed(by: CGAffineTransform(translationX: x, y: canvasHeight - yTop - h))
         let radius = min(frame.cameraCornerRadius, min(target.width, target.height) / 2)
-        var layer = masked(placed.cropped(to: target), to: target, radius: radius)
+        var layer = SmoothShapes.clip(placed.cropped(to: target), to: target, radius: radius)
         if style.shadow.intensity > 0 {
             // Rectangle shadow blended with the person's silhouette by cutout01 (`silhouette01`).
             let c = frame.cameraCutout01
-            var cast = shadow(for: target, radius: radius, zoomFactor: frame.cameraSizeFactor)
+            var cast = partShadow(target, radius: radius, zoomFactor: frame.cameraSizeFactor)
             if c > 0.001 {
                 let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor)
                 cast = c >= 0.999 ? silhouette : Self.scaled(silhouette, c).composited(over: Self.scaled(cast, 1 - c))
@@ -257,56 +260,46 @@ public final class FrameCompositor: @unchecked Sendable {
 
     // MARK: Pieces
 
-    private func roundedRect(_ rect: CGRect, radius: Double, color: CIColor) -> CIImage {
-        let generator = CIFilter.roundedRectangleGenerator()
-        generator.extent = rect
-        generator.radius = Float(max(radius, 0))
-        generator.color = color
-        return generator.outputImage ?? CIImage.empty()
-    }
-
-    private func masked(_ image: CIImage, to rect: CGRect, radius: Double) -> CIImage {
-        let blend = CIFilter.blendWithMask()
-        blend.inputImage = image
-        blend.backgroundImage = CIImage.empty()
-        blend.maskImage = roundedRect(rect, radius: radius, color: .white)
-        return blend.outputImage ?? image
-    }
-
-    /// Classic: centered soft shadow. Directional: offset by `distance` along `angle`
-    /// (0° = straight down, growing clockwise), blurred by `blur`.
-    private func shadow(for screen: CGRect, radius: Double, zoomFactor: Double) -> CIImage {
+    /// `resolvedShadowOptions` offset: `polar(angle, distance)` in stage units, 0° right and
+    /// 90° down, not scaled by zoom; here in Core Image pixels (y up).
+    private var shadowOffset: CGVector {
         let s = style.shadow
-        let scale = layout.canvas.height / 1080 * zoomFactor
-        var offset = CGSize.zero
-        if s.isDirectional {
-            let angle = (s.angle - 90) * .pi / 180
-            offset = CGSize(width: cos(angle) * s.distance * scale, height: sin(angle) * s.distance * scale)
-        }
-        let blur = (s.isDirectional ? s.blur : 30) * scale
-        let opacity = min(s.intensity / 0.6, 1) * 0.85
-        let shape = roundedRect(screen.offsetBy(dx: offset.width, dy: offset.height), radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(opacity)))
-        return shape.applyingGaussianBlur(sigma: max(blur, 0.1))
+        let a = s.angle * .pi / 180
+        return CGVector(dx: s.distance * cos(a) * layout.scale, dy: -s.distance * sin(a) * layout.scale)
     }
 
-    /// The shadow cast by the camera's own alpha (`getContentShadowMask`), same offset and blur.
+    /// The screen's or the camera's shadow: black at the intensity, blur `blur × 8 × k`;
+    /// Directional marches toward a light fixed on the stage.
+    private func partShadow(_ rect: CGRect, radius: Double, zoomFactor k: Double) -> CIImage {
+        let s = style.shadow
+        let unit = layout.scale
+        let blur = s.blur * 8 * k * unit
+        let offset = shadowOffset
+        var directional: (light: CGPoint, radius: Double, falloff: Double)?
+        if s.isDirectional {
+            // Stage centre − polar(angle, 1.5 × |stage / 2|), y down.
+            let canvas = layout.canvas
+            let a = s.angle * .pi / 180
+            let reach = 1.5 * hypot(canvas.width / 2, canvas.height / 2)
+            let light = CGPoint(x: canvas.width / 2 - cos(a) * reach, y: canvas.height - (canvas.height / 2 - sin(a) * reach))
+            directional = (light, max(blur * 2.5, 4 * unit), max(hypot(offset.dx, offset.dy) * 6, 40 * unit))
+        }
+        return SmoothShapes.shadow(rect, radius: radius, .init(alpha: s.intensity, blur: blur, offset: offset, directional: directional, unit: unit))
+    }
+
+    /// The shadow cast by the camera's own alpha (`getContentShadowMask`), with the same alpha
+    /// and offset; its blur kernel is not known, a Gaussian stands in.
     private func silhouetteShadow(of layer: CIImage, zoomFactor: Double) -> CIImage {
         let s = style.shadow
-        let scale = layout.canvas.height / 1080 * zoomFactor
-        var offset = CGSize.zero
-        if s.isDirectional {
-            let angle = (s.angle - 90) * .pi / 180
-            offset = CGSize(width: cos(angle) * s.distance * scale, height: sin(angle) * s.distance * scale)
-        }
-        let blur = (s.isDirectional ? s.blur : 30) * scale
-        let opacity = min(s.intensity / 0.6, 1) * 0.85
+        let offset = shadowOffset
+        let blur = s.blur * 8 * zoomFactor * layout.scale
         let shape = layer.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
             "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
             "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity)),
-        ]).transformed(by: CGAffineTransform(translationX: offset.width, y: offset.height))
-        return shape.applyingGaussianBlur(sigma: max(blur, 0.1))
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(s.intensity)),
+        ]).transformed(by: CGAffineTransform(translationX: offset.dx, y: offset.dy))
+        return shape.applyingGaussianBlur(sigma: max(blur * 0.4, 0.1))
     }
 
     private static func scaled(_ image: CIImage, _ k: Double) -> CIImage {

@@ -208,5 +208,83 @@ float4 cutoutForeground(sampler compose, sampler footage, sampler composeMean, s
     return float4(premul, a);
 }
 
+
+// MARK: Smooth corners and shadows
+
+/// smoothstep that also accepts edge0 > edge1, as the shaders use it.
+float rampStep(float e0, float e1, float x) {
+    float t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+/// `curvatureLut` lookup by the angle of `d`.
+float curvatureRatio(float2 d, float4 l0, float4 l1, float4 l2, float4 l3) {
+    if (d.x <= 0.0 || d.y <= 0.0) return 1.0;
+    float lut[16] = { l0.x, l0.y, l0.z, l0.w, l1.x, l1.y, l1.z, l1.w, l2.x, l2.y, l2.z, l2.w, l3.x, l3.y, l3.z, l3.w };
+    float t = atan(min(d.x, d.y) / max(d.x, d.y)) * 15.0 / (M_PI_F / 4.0);
+    t = clamp(t, 0.0, 15.0);
+    int i = min(int(floor(t)), 14);
+    return mix(lut[i], lut[i + 1], t - float(i));
+}
+
+/// Signed distance to the smooth-cornered rect of half size `h` and corner extent `R`.
+float smoothRectSD(float2 p, float2 h, float R, float4 l0, float4 l1, float4 l2, float4 l3) {
+    float2 d = abs(p) - (h - R);
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - R * curvatureRatio(d, l0, l1, l2, l3);
+}
+
+/// Signed distance to a circular-cornered rect.
+float circleRectSD(float2 p, float2 h, float r) {
+    float2 q = abs(p) - (h - r);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+/// Circular far from the body, blending into the smooth corner close to it.
+float casterSD(float2 p, float2 h, float R, float rs, float4 l0, float4 l1, float4 l2, float4 l3) {
+    float circ = circleRectSD(p, h, rs);
+    float Rm = max(R, 1.0);
+    if (circ >= Rm) return circ;
+    return mix(smoothRectSD(p, h, R, l0, l1, l2, l3), circ, clamp(circ / Rm, 0.0, 1.0));
+}
+
+/// Coverage of a smooth-cornered rect: shape = (centre, half size), corner = (R, aa, edge, -).
+/// 1 inside `sd < edge`, with a 2·aa ramp (`smoothstep(edge + aa, edge − aa, sd)`).
+float4 smoothRectCoverage(float4 shape, float4 corner, float4 l0, float4 l1, float4 l2, float4 l3, destination dest) {
+    float sd = smoothRectSD(dest.coord() - shape.xy, shape.zw, corner.x, l0, l1, l2, l3);
+    return float4(rampStep(corner.z + corner.y, corner.z - corner.y, sd));
+}
+
+/// Black shadow of a part: corner = (R, rs, aa, directional), shadow = (blur, offset.xy,
+/// alpha), light = (position.xy relative to the centre, lightRadius, falloff), unit = local
+/// units per pixel for the ray-march steps.
+float4 partShadow(float4 shape, float4 corner, float4 shadow, float4 light, float unit,
+                  float4 l0, float4 l1, float4 l2, float4 l3, destination dest) {
+    float2 p = dest.coord() - shape.xy;
+    float2 h = shape.zw;
+    float R = corner.x, rs = corner.y, aa = corner.z;
+    float mask;
+    if (corner.w > 0.5) {
+        float proximity = 1.0 - clamp(casterSD(p, h, R, rs, l0, l1, l2, l3) / max(light.w, 0.001), 0.0, 1.0);
+        if (proximity <= 0.001) return float4(0.0);
+        float2 toLight = light.xy - p;
+        float D = max(length(toLight), unit);
+        float2 dir = toLight / D;
+        float hardness = D / max(light.z, unit);
+        float vis = 1.0;
+        float t = 2.0 * unit;
+        for (int i = 0; i < 12; i++) {
+            if (t >= D || vis < -0.5) break;
+            float c = casterSD(p + dir * t, h, R, rs, l0, l1, l2, l3);
+            vis = min(vis, hardness * c / t);
+            t += max(c, 3.0 * unit);
+        }
+        mask = (1.0 - clamp(vis, 0.0, 1.0)) * proximity * proximity;
+    } else {
+        float blur = shadow.x;
+        mask = rampStep(blur + aa, -0.5 * blur - aa, casterSD(p - shadow.yz, h, R, rs, l0, l1, l2, l3));
+    }
+    return float4(0.0, 0.0, 0.0, shadow.w * mask);
+}
+
 }
 }
