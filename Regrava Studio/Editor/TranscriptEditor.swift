@@ -111,6 +111,10 @@ struct TranscriptTextEditor: NSViewRepresentable {
         coordinator.highlightActive()
     }
 
+    static func dismantleNSView(_ view: TranscriptNSTextView, coordinator: Coordinator) {
+        coordinator.closePopover()
+    }
+
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: TranscriptNSTextView, context: Context) -> CGSize? {
         let width = proposal.width ?? 300
         nsView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
@@ -137,6 +141,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
         private(set) var ranges: [(token: TranscriptToken, range: NSRange)] = []
         private var activeRange: NSRange?
         private var popover: NSPopover?
+        private var hosting: NSHostingController<TranscriptActionBar>?
         var cutPreview = false { didSet { highlightActive() } }
 
         // MARK: Building
@@ -324,7 +329,8 @@ struct TranscriptTextEditor: NSViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            updatePopover()
+            // Also fires while the text is rebuilt inside a SwiftUI update; place the bar after it.
+            DispatchQueue.main.async { [weak self] in self?.updatePopover() }
         }
 
         // MARK: Floating action bar
@@ -337,28 +343,42 @@ struct TranscriptTextEditor: NSViewRepresentable {
                 popover?.close()
                 return
             }
+            // A dead key (´, ~, ¸) leaves marked text until the next key; wait for it.
+            guard !textView.hasMarkedText() else { return }
             let selection = textView.selectedRange()
             guard let manager = textView.layoutManager, let container = textView.textContainer else { return }
+            manager.ensureLayout(for: container)
             var glyphs = manager.glyphRange(forCharacterRange: selection.length > 0 ? selection : NSRange(location: max(selection.location - 1, 0), length: 1), actualCharacterRange: nil)
             if glyphs.length == 0 { glyphs.length = 1 }
             var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
             rect.origin.x = 0
             rect.size.width = 1
             rect = rect.offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y)
+            guard textView.window != nil, rect.intersects(textView.visibleRect) else {
+                popover?.close()
+                return
+            }
             let bar = TranscriptActionBar(editor: editor, targets: targets, onCutPreview: { [weak self] in self?.cutPreview = $0 }, onDone: { [weak self] in
                 self?.popover?.close()
             })
-            if let popover, popover.isShown {
-                (popover.contentViewController as? NSHostingController<TranscriptActionBar>)?.rootView = bar
+            if let popover, popover.isShown, let hosting {
+                hosting.rootView = bar
+                popover.contentSize = hosting.view.fittingSize
                 popover.positioningRect = rect
                 return
             }
+            popover?.close()
+            let hosting = NSHostingController(rootView: bar)
+            hosting.sizingOptions = [.preferredContentSize]
             let popover = NSPopover()
             popover.behavior = .applicationDefined
             popover.animates = false
-            popover.contentViewController = NSHostingController(rootView: bar)
+            popover.appearance = NSAppearance(named: .darkAqua)
+            popover.contentViewController = hosting
+            popover.contentSize = hosting.view.fittingSize
             popover.show(relativeTo: rect, of: textView, preferredEdge: .minX)
             self.popover = popover
+            self.hosting = hosting
         }
 
         func closePopover() { popover?.close() }
