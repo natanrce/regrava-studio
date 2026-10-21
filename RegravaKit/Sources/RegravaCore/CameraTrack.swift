@@ -67,6 +67,13 @@ public struct CameraFrame: Hashable, Sendable {
     public var cameraCornerRadius: Double = 0
     /// Camera width over its layout's resting width: scales its shadow.
     public var cameraSizeFactor: Double = 1
+    /// Resting screen width of the active layout in canvas pixels
+    /// (`referenceWidth`): the screen's zoom factor for its shadow blur.
+    public var screenReferenceWidth: Double = 0
+    /// The active layout allows screen corners (`allowsScreenBorderRadius`).
+    public var allowsScreenBorderRadius = true
+    /// The stage is not fully covered by the resting screen, so the inset shows.
+    public var isBackgroundVisible = true
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -199,6 +206,9 @@ public final class CameraTrack: @unchecked Sendable {
             if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
 
             var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPath?.position(at: t))
+            frame.screenReferenceWidth = target.screenReferenceWidth * layout.scale
+            frame.allowsScreenBorderRadius = target.allowsScreenBorderRadius
+            frame.isBackgroundVisible = target.isBackgroundVisible
             if hasCamera, cameraRect.rect.width > 0 {
                 let rect = cameraRect.rect
                 frame.cameraRect = layout.toCanvas(rect)
@@ -276,6 +286,10 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cameraOpacity = a.cameraOpacity + (b.cameraOpacity - a.cameraOpacity) * f
         frame.cameraCornerRadius = a.cameraCornerRadius + (b.cameraCornerRadius - a.cameraCornerRadius) * f
         frame.cameraSizeFactor = a.cameraSizeFactor + (b.cameraSizeFactor - a.cameraSizeFactor) * f
+        // Not sprung: these switch with the active layout.
+        frame.screenReferenceWidth = a.screenReferenceWidth
+        frame.allowsScreenBorderRadius = a.allowsScreenBorderRadius
+        frame.isBackgroundVisible = a.isBackgroundVisible
         frame.cameraFocal01 = a.cameraFocal01.lerp(to: b.cameraFocal01, f)
         frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
@@ -426,6 +440,9 @@ struct LayoutTargets {
     var cameraHidden: Bool
     /// The camera's layout is a cutout (`isCutout`).
     var cameraCutout: Bool
+    var screenReferenceWidth: Double
+    var allowsScreenBorderRadius: Bool
+    var isBackgroundVisible: Bool
 }
 
 /// Decides, for any instant, where the screen and the camera want to be (rects, resolvers).
@@ -574,7 +591,10 @@ struct CameraPlanner {
             cameraBorderRadius: radius,
             cameraReferenceWidth: initial?.width ?? camera?.width ?? 1,
             cameraHidden: hidden,
-            cameraCutout: cameraResolver.kind == .cutout
+            cameraCutout: cameraResolver.kind == .cutout,
+            screenReferenceWidth: screenResolver.initialScreenRect.width,
+            allowsScreenBorderRadius: screenResolver.allowsScreenBorderRadius,
+            isBackgroundVisible: !(screenResolver.stageRect.width <= screenResolver.initialScreenRect.width && screenResolver.stageRect.height <= screenResolver.initialScreenRect.height)
         )
     }
 }
