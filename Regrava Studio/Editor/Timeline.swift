@@ -436,7 +436,7 @@ private struct SliceItem: View {
             }
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let origin = dragOrigin ?? slice
                         if dragOrigin == nil { dragOrigin = slice }
@@ -842,7 +842,7 @@ private struct ZoomItem: View {
     }
 
     private var moveGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
+        DragGesture(minimumDistance: 3, coordinateSpace: .global)
             .onChanged { value in
                 guard !editor.isSplitToolActive else { return }
                 let origin = dragOrigin ?? zoom
@@ -862,7 +862,7 @@ private struct ZoomItem: View {
             }
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let origin = dragOrigin ?? zoom
                         if dragOrigin == nil { dragOrigin = zoom }
@@ -1031,7 +1031,7 @@ private struct MaskItem: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .onHover { hovered = $0 }
             .gesture(
-                DragGesture(minimumDistance: 3)
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
                     .onChanged { value in
                         guard !editor.isSplitToolActive else { return }
                         let origin = dragOrigin ?? mask
@@ -1078,7 +1078,7 @@ private struct MaskItem: View {
             }
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let origin = dragOrigin ?? mask
                         if dragOrigin == nil { dragOrigin = mask }
@@ -1224,7 +1224,7 @@ private struct LayoutItem: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .onHover { hovered = $0 }
             .gesture(
-                DragGesture(minimumDistance: 3)
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
                     .onChanged { value in
                         guard !editor.isSplitToolActive else { return }
                         let origin = dragOrigin ?? layout
@@ -1276,7 +1276,7 @@ private struct LayoutItem: View {
             }
             .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let origin = dragOrigin ?? layout
                         if dragOrigin == nil { dragOrigin = layout }
