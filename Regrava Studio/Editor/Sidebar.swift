@@ -32,7 +32,7 @@ extension EditorModel {
     /// Rail entries with the enable conditions; features this app does not implement
     /// yet are disabled with an explanation.
     var railEntries: [SidebarRailEntry] {
-        return [
+        var entries = [
             SidebarRailEntry(root: .background, name: "General", icon: "inset.filled.square.dashed", key: "1"),
             SidebarRailEntry(root: .cursor, name: "Cursor", icon: "cursorarrow", key: "2", disabledTooltip: project.mouseEvents.isEmpty ? "There is no mouse cursor recorded" : nil),
             SidebarRailEntry(root: .cameraLayout, name: "Camera Layout", icon: "inset.filled.rectangle.and.person.filled", key: "3", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
@@ -43,6 +43,11 @@ extension EditorModel {
             SidebarRailEntry(root: .shortcuts, name: "Keyboard Shortcuts", icon: "command", key: "8", disabledTooltip: project.keystrokes.isEmpty ? "No keyboard shortcuts during recording" : nil),
             SidebarRailEntry(root: .animation, name: "Animations", icon: "point.topleft.down.to.point.bottomright.curvepath.fill", key: "9"),
         ]
+        // "Device frame", only for recordings that can have one.
+        if project.canHaveDeviceFrame {
+            entries.append(SidebarRailEntry(root: .deviceFrame, name: "Device frame", icon: "apps.iphone", key: "0", disabledTooltip: project.resolvedDeviceFrame == nil ? "No mockups available for that device" : nil))
+        }
+        return entries
     }
 }
 
@@ -131,6 +136,7 @@ struct SidebarPanel: View {
                     case .cameraStyle: CameraStylePanel(editor: editor)
                     case .captions: TranscriptPanel(editor: editor)
                     case .shortcuts: ShortcutsPanel(editor: editor)
+                    case .deviceFrame: DeviceFramePanel(editor: editor)
                     case .transcript:
                         RSButton(title: "Close Transcript editor", icon: "arrow.left", kind: .secondary) { editor.openSidebar(.background) }
                             .padding(.bottom, Theme.gap(3))

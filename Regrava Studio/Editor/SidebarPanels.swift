@@ -31,12 +31,17 @@ struct GeneralPanel: View {
             }
             SidebarSection {
                 SliderField(name: "Padding", value: editor.binding(\.style.paddingRatio), range: 0...0.25, preview: { percent($0, decimals: 1) }, resetValue: 0.1)
-                SliderField(name: "Screen rounded corners", value: editor.binding(\.style.cornerRadius), range: 0...128, step: 1, preview: { String(format: "%.1f", $0) }, resetValue: 16)
-                ToggleRow(title: "Inset", description: "Add inset around the screen.", isOn: Binding(
-                    get: { style.inset.isOn },
-                    set: { on in editor.change { $0.style.inset = on ? .enabledDefault : InsetConfig(size: 0) } }
-                ))
-                if style.inset.isOn {
+                // Hidden for device recordings (`changeBorderRadius` / `changeInset`).
+                if editor.project.canChangeScreenBorderRadius {
+                    SliderField(name: "Screen rounded corners", value: editor.binding(\.style.cornerRadius), range: 0...128, step: 1, preview: { String(format: "%.1f", $0) }, resetValue: 16)
+                }
+                if editor.project.canChangeScreenInset {
+                    ToggleRow(title: "Inset", description: "Add inset around the screen.", isOn: Binding(
+                        get: { style.inset.isOn },
+                        set: { on in editor.change { $0.style.inset = on ? .enabledDefault : InsetConfig(size: 0) } }
+                    ))
+                }
+                if style.inset.isOn && editor.project.canChangeScreenInset {
                     NestedPanel {
                         SliderField(name: "Inset size", value: editor.binding(\.style.inset.size), range: 0.125...24, step: 0.0001, preview: { String(format: "%.1f", $0) }, resetValue: 4)
                         NamedField(name: "Inset color") { ColorWellField(color: editor.binding(\.style.inset.color)) }

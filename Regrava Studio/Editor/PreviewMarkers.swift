@@ -21,7 +21,11 @@ struct PreviewMarkers: View {
                         rect: CGRect(x: area.x * scale, y: area.y * scale, width: area.width * scale, height: area.height * scale),
                         cornerRadius: editor.recordingAreaCornerRadius * scale
                     ) {
-                        open(.background, "Opened background settings")
+                        if editor.project.isUsingDeviceFrame {
+                            open(.deviceFrame, "Opened device frame settings")
+                        } else {
+                            open(.background, "Opened background settings")
+                        }
                     }
                     if let lens = editor.loupeAreaRect {
                         MarkerArea(rect: CGRect(x: lens.x * scale, y: lens.y * scale, width: lens.width * scale, height: lens.height * scale), cornerRadius: lens.width * scale / 2) {

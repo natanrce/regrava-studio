@@ -139,6 +139,13 @@ enum UISnapshots {
             ("command-menu", { controller.model.transcript = nil
                  controller.model.openSidebar(.background); controller.model.isCommandMenuOpen = true }),
             ("zoom", { if let first = controller.model.project.zooms.first { controller.model.openZoom(first.id) } }),
+            ("device-frame", {
+                controller.model.change {
+                    $0.recording.mode = .externalDevice
+                    $0.recording.videoSize = Size2(width: 1206, height: 2622)
+                }
+                controller.model.openSidebar(.deviceFrame)
+            }),
             ("zoom-loupe", {
                 if let first = controller.model.project.zooms.first {
                     controller.model.updateZoom(first.id) { $0.presentation = .loupe }

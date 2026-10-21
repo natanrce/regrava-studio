@@ -22,8 +22,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = NSColor(Theme.Colors.background)
         window.collectionBehavior.insert(.fullScreenNone)
-        window.setContentSize(NSSize(width: 1280, height: 740))
-        window.minSize = NSSize(width: 1280, height: 740)
+        // Taller for recordings that can have a device frame.
+        let height: CGFloat = model.project.canHaveDeviceFrame ? 780 : 740
+        window.setContentSize(NSSize(width: 1280, height: height))
+        window.minSize = NSSize(width: 1280, height: height)
         window.setFrameAutosaveName("project")
         window.center()
         super.init(window: window)
