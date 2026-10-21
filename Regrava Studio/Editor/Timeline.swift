@@ -30,6 +30,12 @@ struct EditorTimeline: View {
             let geo = TimelineGeometry(width: geometry.size.width, scrollOffsetMs: editor.scrollOffsetMs, pxPerMs: max(geometry.size.width - 40, 1) / editor.visibleDurationMs, resolver: editor.project.resolver)
             ZStack(alignment: .topLeading) {
                 GridLines(geometry: geo, duration: editor.durationMs).padding(.top, 32)
+                // Hover playhead, behind the tracks; it drops down to 18 px as it nears the playhead (`hideNear`).
+                if let hoverX, !editor.isPlaying, !editor.isSplitToolActive {
+                    Playhead(color: Playhead.secondaryColor, height: geometry.size.height, isPrimary: false)
+                        .offset(x: hoverX, y: Playhead.drop(distanceMs: abs(time(hoverX) - editor.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
+                        .allowsHitTesting(false)
+                }
                 VStack(alignment: .leading, spacing: 11.3) {
                     Ruler(geometry: geo, duration: editor.durationMs).frame(height: 20)
                     VStack(alignment: .leading, spacing: 12) {
@@ -52,12 +58,6 @@ struct EditorTimeline: View {
                 .padding(.top, 25 - 20)
                 .padding(.bottom, 15)
 
-                if let hoverX, !editor.isPlaying, !editor.isSplitToolActive {
-                    Playhead(color: Color.white.opacity(0x24 / 255 * 2), height: geometry.size.height)
-                        .offset(x: hoverX)
-                        .opacity(abs(hoverX - x(editor.currentTimeMs)) < 18 ? Double(abs(hoverX - x(editor.currentTimeMs)) / 18) : 1)
-                        .allowsHitTesting(false)
-                }
                 if editor.isSplitToolActive, let hoverX {
                     SplitBeam(height: geometry.size.height).offset(x: hoverX).allowsHitTesting(false)
                 }
@@ -206,25 +206,39 @@ private struct GridLines: View {
     }
 }
 
-/// 1 px line fading toward the bottom, with a teardrop head pointing down (12×12, radius 10/10/10/0, −45°).
+/// 1 px line fading toward the bottom, with a teardrop head pointing down (12×12, radius 10/10/10/0, −45°),
+/// both from the top of the timeline and shifted down 1 px.
 private struct Playhead: View {
     var color: Color
     var height: CGFloat
+    var isPrimary = true
+
+    /// `backgroundAccent.active`, opaque so the line doesn't show through the head (shade approximated).
+    static let secondaryColor = Color(hex: 0x4A4C53)
+
+    /// `hideNear`: `mapRange(|hover − playhead|, [0, visible/75], [18, 0], easeInOutSine)`.
+    static func drop(distanceMs: Double, visibleDurationMs: Double) -> CGFloat {
+        let range = visibleDurationMs / 75
+        guard range > 0 else { return 0 }
+        let p = min(max(distanceMs / range, 0), 1)
+        let eased = -(cos(Double.pi * p) - 1) / 2
+        return CGFloat(18 * (1 - eased))
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
             Rectangle()
                 .fill(LinearGradient(colors: [color, color.opacity(0)], startPoint: .top, endPoint: .bottom))
                 .frame(width: 1, height: height)
-            // CSS radius `10 10 10 0`: the sharp corner is the bottom-left one, so −45° points down.
-            UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 0, bottomTrailingRadius: 10, topTrailingRadius: 10)
+            // CSS radius `10 10 10 0` on 12 px scales to 6: a circle with the bottom-left corner
+            // sharp, so −45° points it down and its top sits on the line's top.
+            UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 0, bottomTrailingRadius: 6, topTrailingRadius: 6)
                 .fill(color)
                 .frame(width: 12, height: 12)
                 .rotationEffect(.degrees(-45))
-                .offset(y: 2)
         }
         .frame(width: 12)
-        .offset(x: -6)
+        .offset(x: -5.5, y: 1)
     }
 }
 
