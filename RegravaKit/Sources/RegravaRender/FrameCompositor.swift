@@ -21,6 +21,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let isCameraMatted: Bool
     /// Burned-in captions, drawn above everything.
     private let captions: CaptionRenderer?
+    /// Keyboard shortcuts, the top-most layer.
+    private let shortcuts: ShortcutRenderer?
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
 
@@ -36,6 +38,7 @@ public final class FrameCompositor: @unchecked Sendable {
         camera = project.camera
         isCameraMatted = project.isCutoutLayoutUsed
         captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas)
+        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
@@ -131,6 +134,7 @@ public final class FrameCompositor: @unchecked Sendable {
             output = cameraLayer(cameraImage, rect: rect, frame: frame, quality: quality).composited(over: output)
         }
         if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs) }
+        if let shortcuts { output = shortcuts.draw(over: output, atPlayback: frame.timeMs) }
 
         return output.cropped(to: canvasRect)
     }
