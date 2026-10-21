@@ -53,6 +53,8 @@ public struct CameraFrame: Hashable, Sendable {
     public var previousScreenRect: Rect2?
     public var previousCursor: Vec2?
     public var previousCursorScale: Double = 1
+    /// Webcam placement one project frame earlier, for its motion blur.
+    public var previousCameraRect: Rect2?
     /// Mask applied to the recording.
     public var mask: MaskFrame = .none
     /// Webcam placement in canvas pixels; nil without camera footage.
@@ -257,6 +259,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.previousScreenRect = before.screenRect
         frame.previousCursor = before.cursor
         frame.previousCursorScale = before.cursorScale
+        frame.previousCameraRect = before.cameraRect
         return frame
     }
 

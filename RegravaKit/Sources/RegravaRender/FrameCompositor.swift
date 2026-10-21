@@ -190,27 +190,47 @@ public final class FrameCompositor: @unchecked Sendable {
         if camera.mirror {
             content = content.transformed(by: CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -content.extent.width, y: 0))
         }
-        let target = ciRect(rect)
-        let size = content.extent.size
-        let k = max(target.width / max(size.width, 1), target.height / max(size.height, 1))
-        let w = size.width * k, h = size.height * k
-        // Cover fill with the focal point at the frame centre, clamped to cover it.
-        let x = FaceTracking.focalAxis(imageOrigin: rect.x + (rect.width - w) / 2, imageLength: w, frameOrigin: rect.x, frameLength: rect.width, focal01: frame.cameraFocal01.x)
-        let yTop = FaceTracking.focalAxis(imageOrigin: rect.y + (rect.height - h) / 2, imageLength: h, frameOrigin: rect.y, frameLength: rect.height, focal01: frame.cameraFocal01.y)
-        let placed = content
-            .transformed(by: CGAffineTransform(scaleX: k, y: k))
-            .transformed(by: CGAffineTransform(translationX: x, y: canvasHeight - yTop - h))
-        let radius = min(frame.cameraCornerRadius, min(target.width, target.height) / 2)
-        var layer = SmoothShapes.clip(placed.cropped(to: target), to: target, radius: radius)
-        if style.shadow.intensity > 0 {
-            // Rectangle shadow blended with the person's silhouette by cutout01 (`silhouette01`).
-            let c = frame.cameraCutout01
-            var cast = partShadow(target, radius: radius, zoomFactor: frame.cameraSizeFactor)
-            if c > 0.001 {
-                let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor)
-                cast = c >= 0.999 ? silhouette : Self.scaled(silhouette, c).composited(over: Self.scaled(cast, 1 - c))
+        // Only position and size trail; radius, focal point, cutout and shadow keep their
+        // current values.
+        let now = ciRect(rect)
+        let radius = min(frame.cameraCornerRadius, min(now.width, now.height) / 2)
+        func placedLayer(_ r: Rect2) -> CIImage {
+            let target = ciRect(r)
+            let size = content.extent.size
+            let k = max(target.width / max(size.width, 1), target.height / max(size.height, 1))
+            let w = size.width * k, h = size.height * k
+            // Cover fill with the focal point at the frame centre, clamped to cover it.
+            let x = FaceTracking.focalAxis(imageOrigin: r.x + (r.width - w) / 2, imageLength: w, frameOrigin: r.x, frameLength: r.width, focal01: frame.cameraFocal01.x)
+            let yTop = FaceTracking.focalAxis(imageOrigin: r.y + (r.height - h) / 2, imageLength: h, frameOrigin: r.y, frameLength: r.height, focal01: frame.cameraFocal01.y)
+            let placed = content
+                .transformed(by: CGAffineTransform(scaleX: k, y: k))
+                .transformed(by: CGAffineTransform(translationX: x, y: canvasHeight - yTop - h))
+            var layer = SmoothShapes.clip(placed.cropped(to: target), to: target, radius: radius)
+            if style.shadow.intensity > 0 {
+                // Rectangle shadow blended with the person's silhouette by cutout01 (`silhouette01`).
+                let c = frame.cameraCutout01
+                var cast = partShadow(target, radius: radius, zoomFactor: frame.cameraSizeFactor)
+                if c > 0.001 {
+                    let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor)
+                    cast = c >= 0.999 ? silhouette : Self.scaled(silhouette, c).composited(over: Self.scaled(cast, 1 - c))
+                }
+                layer = layer.composited(over: cast)
             }
-            layer = layer.composited(over: cast)
+            return layer
+        }
+        var layer = placedLayer(rect)
+        // The trail from lerp(now, before, strength) to now; instant zoom snaps don't turn it off.
+        let strength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false)
+        if strength > 0, let before = frame.previousCameraRect {
+            let trailStart = rect.lerp(to: before, strength)
+            if !rect.isClose(to: trailStart, tolerance: 1) {
+                let reach = style.shadow.intensity > 0 ? (style.shadow.blur * 8 * frame.cameraSizeFactor + style.shadow.distance * 6 + 16) * layout.scale + 8 : 8
+                let bounds = now.union(ciRect(trailStart)).insetBy(dx: -reach, dy: -reach).integral
+                let samples = MotionBlur.sampleCount(travel: rect.cornerTravel(to: trailStart), quality: quality)
+                if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in placedLayer(trailStart.lerp(to: rect, t)) }) {
+                    layer = blurred
+                }
+            }
         }
         let opacity = frame.cameraOpacity
         if opacity < 1 {
