@@ -85,27 +85,43 @@ struct TranscriptPanel: View {
     }
 }
 
-/// Local sub-form: searchable Language and Generate transcript.
+/// Generation form: "Transcript method", then the Local sub-form with the searchable
+/// Language dropdown and Generate transcript.
 private struct TranscriptGenerationForm: View {
     @ObservedObject var editor: EditorModel
     @State private var locales: [String] = []
     @State private var locale = "en_US"
+    @State private var method = "system"
     @State private var isPickerOpen = false
     @State private var search = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.gap(2)) {
+        VStack(alignment: .leading, spacing: Theme.gap(3)) {
+            NamedField(name: "Transcript method") {
+                SegmentedPicker(
+                    options: ["elevenlabs", "system"],
+                    label: { $0 == "system" ? "Local" : "Cloud" },
+                    icon: { $0 == "system" ? "apple.intelligence" : "cloud.fill" },
+                    description: {
+                        $0 == "system"
+                            ? "Transcript will be generated locally using Apple's native speech recognition engine (requires macOS 26.0 or later). No data will be sent to the server."
+                            : "Regrava Studio will send project audio to the cloud to generate transcript. After generation, all audio data will be deleted from the server."
+                    },
+                    // Cloud transcription is not available here.
+                    isDisabled: { $0 == "elevenlabs" },
+                    selection: $method
+                )
+            }
             NamedField(name: "Language") {
                 Button { isPickerOpen = true } label: {
-                    HStack {
+                    HStack(spacing: Theme.gap(1.5)) {
                         Text(Self.displayName(locale)).lineLimit(1)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10))
+                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                     }
                     .font(Theme.Typo.controlCopy)
                     .padding(.horizontal, 12)
                     .frame(height: Theme.Boxes.control.height)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.lighterBg))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -113,7 +129,6 @@ private struct TranscriptGenerationForm: View {
             }
             RSButton(title: "Generate transcript", kind: .primary, isWide: true) { editor.generateTranscript(locale: locale) }
                 .disabled(locales.isEmpty || !locales.contains(locale))
-            Callout(kind: .secondary, icon: nil, message: "Transcript will be generated locally using Apple's native speech recognition engine (requires macOS 26.0 or later). No data will be sent to the server.")
         }
         .task {
             locales = await SpeechTranscription.supportedLocales()
@@ -121,41 +136,62 @@ private struct TranscriptGenerationForm: View {
         }
     }
 
+    /// A Search field over the options, the chosen one checked.
     private var picker: some View {
         let filtered = locales.filter { search.isEmpty || Self.displayName($0).localizedCaseInsensitiveContains(search) || $0.localizedCaseInsensitiveContains(search) }
-        return VStack(alignment: .leading, spacing: 4) {
-            TextField("Search", text: $search).textFieldStyle(.roundedBorder)
+        return VStack(alignment: .leading, spacing: Theme.gap(1)) {
+            TextField("Search", text: $search)
+                .textFieldStyle(.plain)
+                .font(Theme.Typo.controlCopy)
+                .padding(.horizontal, 12)
+                .frame(height: Theme.Boxes.control.height)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(filtered, id: \.self) { id in
-                        Button {
+                        LanguageRow(title: Self.displayName(id), isSelected: id == locale) {
                             locale = id
                             isPickerOpen = false
-                        } label: {
-                            HStack {
-                                Text(Self.displayName(id))
-                                Spacer()
-                                if id == locale { Image(systemName: "checkmark") }
-                            }
-                            .font(Theme.Typo.controlCopy)
-                            .padding(.horizontal, 8)
-                            .frame(height: 26)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .frame(height: 260)
+            .frame(height: 380)
         }
-        .padding(8)
-        .frame(width: 280)
+        .padding(Theme.gap(1))
+        .frame(width: 216)
+        .background(Theme.Colors.backgroundAccent)
+        .environment(\.colorScheme, .dark)
     }
 
     /// `Intl.DisplayNames('en')` of the id with its first `_` as `-`: "English (United States)".
     static func displayName(_ id: String) -> String {
         let bcp = id.replacingOccurrences(of: "_", with: "-", options: [], range: id.range(of: "_"))
         return Locale(identifier: "en").localizedString(forIdentifier: bcp) ?? id
+    }
+}
+
+private struct LanguageRow: View {
+    var title: String
+    var isSelected: Bool
+    var action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(title).lineLimit(1)
+                Spacer()
+                if isSelected { Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold)) }
+            }
+            .font(Theme.Typo.controlCopy)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 6).fill(hovered ? Color.white.opacity(0.06) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
 
