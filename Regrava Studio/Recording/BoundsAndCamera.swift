@@ -14,7 +14,7 @@ final class BoundsIndicatorController {
     private var shown: (CGRect, Bool)?
 
     func show(selection: RecordSelection, cover: Bool) {
-        let bounds = selection.globalBounds
+        guard let bounds = selection.globalBounds else { return }
         if let shown, shown.0 == bounds, shown.1 == cover { return }
         hide()
         shown = (bounds, cover)

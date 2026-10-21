@@ -32,23 +32,27 @@ enum RecordSelection: Equatable {
     case window(WindowInfo)
     /// Rect in display-local points.
     case area(displayID: CGDirectDisplayID, rect: CGRect)
+    /// An iPhone or iPad connected by cable (`{type: "device", deviceId}`).
+    case device(id: String)
 
-    /// Global (Quartz, top-left origin) bounds of what is recorded.
-    var globalBounds: CGRect {
+    /// Global (Quartz, top-left origin) bounds of what is recorded; nil for a device.
+    var globalBounds: CGRect? {
         switch self {
         case .display(let display): return display.frame
         case .window(let window): return window.frame
         case let .area(id, rect):
             let origin = CGDisplayBounds(id).origin
             return rect.offsetBy(dx: origin.x, dy: origin.y)
+        case .device: return nil
         }
     }
 
-    var captureSource: CaptureSource {
+    var captureSource: CaptureSource? {
         switch self {
         case .display(let display): return .display(display.id)
         case .window(let window): return .window(window.id)
         case let .area(id, rect): return .area(displayID: id, rect: rect)
+        case .device: return nil
         }
     }
 }
@@ -90,6 +94,8 @@ final class RecordingCoordinator: ObservableObject {
     let preferences = Preferences.shared
     let microphoneLevel = MicrophoneLevelMonitor()
     private let recorder = ScreenRecorder()
+    private let deviceRecorder = ExternalDeviceRecorder()
+    let externalDevices = ExternalDeviceDiscovery.shared
     private var pickerPanel: GlassPanel<RecordingPickerView>?
     private var widgetPanel: GlassPanel<RecordingWidgetView>?
     private lazy var overlays = SourceOverlayController(coordinator: self)
@@ -105,12 +111,17 @@ final class RecordingCoordinator: ObservableObject {
     var onStateChange: (() -> Void)?
 
     init() {
-        recorder.onUnexpectedStop = { [weak self] error in
+        let unexpectedStop: (Error) -> Void = { [weak self] error in
             Task { @MainActor in
                 Dialogs.error("The recording stopped unexpectedly (\(error.localizedDescription)).")
                 await self?.finish()
             }
         }
+        recorder.onUnexpectedStop = unexpectedStop
+        deviceRecorder.onUnexpectedStop = unexpectedStop
+        externalDevices.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         // Keep auxiliary windows in sync with the state.
         objectWillChange
             .debounce(for: .milliseconds(10), scheduler: RunLoop.main)
@@ -123,6 +134,12 @@ final class RecordingCoordinator: ObservableObject {
         case .starting, .recording, .paused, .working, .finishing: return true
         default: return false
         }
+    }
+
+    /// The active recording is an iPhone/iPad.
+    private var isDeviceRecording: Bool {
+        if case .device = activeSelection { return true }
+        return false
     }
 
     var isWorking: Bool { phase == .working || phase == .starting || phase == .finishing }
@@ -221,6 +238,7 @@ final class RecordingCoordinator: ObservableObject {
         case .window, .device:
             break
         }
+        if type == .device { return }
         Task { await refreshSources() }
     }
 
@@ -263,8 +281,21 @@ final class RecordingCoordinator: ObservableObject {
         selection = .display(display)
     }
 
+    /// "Choose a device" from the device menu: shows the device overlay (`screen = {type: "device"}`).
+    func selectDevice(_ device: ExternalDevice) {
+        sourceType = .device
+        selection = .device(id: device.deviceId)
+    }
+
+    /// The selected device, while it is still connected.
+    var selectedDevice: ExternalDevice? {
+        guard case .device(let id) = selection else { return nil }
+        return externalDevices.devices.first { $0.deviceId == id }
+    }
+
     var selectionError: String? {
         guard let selection else { return "Choose what to record" }
+        if case .device = selection, selectedDevice?.availability != .available { return "Device not found - make sure it is still connected" }
         if case let .area(_, rect) = selection, rect.width < Self.minimumAreaSize || rect.height < Self.minimumAreaSize {
             return "Minimal size is 150×150px."
         }
@@ -344,7 +375,14 @@ final class RecordingCoordinator: ObservableObject {
             NSRunningApplication(processIdentifier: window.processID)?.activate()
         }
         do {
-            try await recorder.start(source: selection.captureSource, options: options, workDirectory: bundle.appendingPathComponent("segments", isDirectory: true))
+            let work = bundle.appendingPathComponent("segments", isDirectory: true)
+            if let source = selection.captureSource {
+                try await recorder.start(source: source, options: options, workDirectory: work)
+            } else if let device = selectedDevice {
+                try await deviceRecorder.start(device: device, options: options, workDirectory: work)
+            } else {
+                throw CaptureError.failed("Failed to find or connect to selected device")
+            }
         } catch {
             phase = .idle
             try? FileManager.default.removeItem(at: bundle)
@@ -366,6 +404,7 @@ final class RecordingCoordinator: ObservableObject {
         switch selection {
         case .display(let display): name = display.label
         case .window(let window): name = window.appName
+        case .device: name = "External Device"
         default: name = "Area"
         }
         return preferences.projectsFolder
@@ -376,12 +415,12 @@ final class RecordingCoordinator: ObservableObject {
 
     func pause() {
         guard phase == .recording else { return }
-        run { try await self.recorder.pause() } then: { self.phase = .paused }
+        run { try await self.isDeviceRecording ? self.deviceRecorder.pause() : self.recorder.pause() } then: { self.phase = .paused }
     }
 
     func resume() {
         guard phase == .paused else { return }
-        run { try await self.recorder.resume() } then: { self.phase = .recording }
+        run { try await self.isDeviceRecording ? self.deviceRecorder.resume() : self.recorder.resume() } then: { self.phase = .recording }
     }
 
     func togglePause() {
@@ -390,7 +429,7 @@ final class RecordingCoordinator: ObservableObject {
 
     func addMarker() {
         guard phase == .recording else { return }
-        recorder.addMarker()
+        if isDeviceRecording { deviceRecorder.addMarker() } else { recorder.addMarker() }
         flagFlash = true
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -408,7 +447,7 @@ final class RecordingCoordinator: ObservableObject {
             destructive: true
         ) else { return }
         Task {
-            await recorder.cancel()
+            if isDeviceRecording { await deviceRecorder.cancel() } else { await recorder.cancel() }
             if let bundleURL { try? FileManager.default.removeItem(at: bundleURL) }
             endRecordingUI()
         }
@@ -424,7 +463,7 @@ final class RecordingCoordinator: ObservableObject {
             destructive: true
         ) else { return }
         Task {
-            await recorder.cancel()
+            if isDeviceRecording { await deviceRecorder.cancel() } else { await recorder.cancel() }
             if let bundleURL { try? FileManager.default.removeItem(at: bundleURL) }
             stopTimer()
             self.selection = selection
@@ -438,7 +477,8 @@ final class RecordingCoordinator: ObservableObject {
         phase = .finishing
         scheduleWorkingIndicator()
         do {
-            let result = try await recorder.finish(to: bundleURL.appendingPathComponent("recording.mov"))
+            let output = bundleURL.appendingPathComponent("recording.mov")
+            let result = try await isDeviceRecording ? deviceRecorder.finish(to: output) : recorder.finish(to: output)
             try? FileManager.default.removeItem(at: bundleURL.appendingPathComponent("segments", isDirectory: true))
             var cursors: [RecordedCursor] = []
             for image in result.customCursors {
@@ -457,7 +497,9 @@ final class RecordingCoordinator: ObservableObject {
                     cursors: cursors,
                     audioSources: result.audioSources,
                     cameraFileName: result.cameraURL?.lastPathComponent,
-                    cameraSize: result.cameraSize
+                    cameraSize: result.cameraSize,
+                    mode: result.externalDevice != nil ? .externalDevice : (activeSelection.map { if case .window = $0 { return true } else { return false } } ?? false) ? .window : .display,
+                    externalDevice: result.externalDevice
                 ),
                 mouseEvents: result.mouseEvents,
                 markersMs: result.markersMs,
@@ -529,7 +571,7 @@ final class RecordingCoordinator: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.elapsed = self.recorder.elapsed
+                self.elapsed = self.isDeviceRecording ? self.deviceRecorder.elapsed : self.recorder.elapsed
             }
         }
     }
@@ -543,8 +585,8 @@ final class RecordingCoordinator: ObservableObject {
     // MARK: Auxiliary windows
 
     private func syncWindows() {
-        // Source overlays while choosing a display / window / area.
-        if isPickerOpen, let type = sourceType, type != .device, !isRecording {
+        // Source overlays while choosing a display / window / area, or the device overlay.
+        if isPickerOpen, sourceType != nil, !isRecording {
             if case .countdown = phase { overlays.hide() } else { overlays.show() }
         } else {
             overlays.hide()
@@ -563,7 +605,7 @@ final class RecordingCoordinator: ObservableObject {
         }
 
         // Dim what is not recorded.
-        if isRecording, let selection = activeSelection {
+        if isRecording, let selection = activeSelection, selection.globalBounds != nil {
             boundsIndicator.show(selection: selection, cover: preferences.recordingAreaCover)
         } else {
             boundsIndicator.hide()

@@ -121,6 +121,8 @@ struct SourceOverlayView: View {
                 if let display { WindowPickerOverlay(coordinator: coordinator, display: display) }
             case .area:
                 AreaPickerOverlay(coordinator: coordinator, state: area, displayID: displayID)
+            case .device:
+                DeviceRecordingOverlay(coordinator: coordinator)
             default:
                 Color.clear
             }
@@ -582,5 +584,120 @@ private struct NumberField: View {
             .onChange(of: text) { _, value in if !focused { draft = value } }
             .onSubmit { text = draft }
             .onChange(of: focused) { _, isFocused in if !isFocused { text = draft } }
+    }
+}
+
+// MARK: - Device (ExternalDeviceRecordingPicker)
+
+/// Shown on every display after choosing an iPhone/iPad: how to get it ready, its live status,
+/// and the Start button once it can be recorded.
+private struct DeviceRecordingOverlay: View {
+    @ObservedObject var coordinator: RecordingCoordinator
+    @ObservedObject var devices = ExternalDeviceDiscovery.shared
+
+    private var device: ExternalDevice? { coordinator.selectedDevice }
+
+    /// `{K}`: iPhone, iPad or Device.
+    private var kind: String { device?.kind ?? "Device" }
+
+    var body: some View {
+        ZStack {
+            coverColor()
+                .contentShape(Rectangle())
+                .onTapGesture { coordinator.escape() }
+            VStack(spacing: Theme.gap(3)) {
+                VStack(spacing: 22.6) {
+                    Text("This is an experimental feature.")
+                        .font(Theme.Typo.copy)
+                        .foregroundStyle(Color.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.lighterBg))
+                    HStack(spacing: 8) {
+                        if kind == "iPhone" { Image(systemName: "apps.iphone") } else if kind == "iPad" { Image(systemName: "apps.ipad") }
+                        Image(systemName: "cable.connector")
+                    }
+                    .font(Theme.Typo.hero)
+                    if let device {
+                        Text("Record \(device.menuLabel)").font(Theme.Typo.title).multilineTextAlignment(.center)
+                    }
+                }
+                instructions
+                    .font(Theme.Typo.copy)
+                    .multilineTextAlignment(.center)
+                VStack(spacing: 8) {
+                    status
+                    Button {
+                        NSWorkspace.shared.open(DeviceSourceMenu.guideURL)
+                        coordinator.escape()
+                    } label: {
+                        Text("\(kind) recording guide").font(Theme.Typo.label).underline()
+                    }
+                    .buttonStyle(GuideLinkStyle())
+                }
+            }
+            .padding(48)
+            .frame(maxWidth: 560)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.backgroundAccent))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.175), lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
+            .foregroundStyle(.white)
+        }
+    }
+
+    private var instructions: Text {
+        var start = AttributedString("Start Recording")
+        start.foregroundColor = Theme.Colors.primaryActiveText
+        start.font = Theme.Typo.copy.weight(.semibold)
+        func strong(_ s: String) -> AttributedString {
+            var a = AttributedString(s)
+            a.font = Theme.Typo.copy.weight(.semibold)
+            return a
+        }
+        var text = AttributedString("Unlock your ")
+        text += strong(kind)
+        text += AttributedString(" before you click ")
+        text += start
+        text += AttributedString(" and tap ")
+        text += strong("\u{201C}Trust\u{00A0}this\u{00A0}computer\u{201D}")
+        text += AttributedString(" if asked on your \(kind). If your \(kind) asks what accessory is connected, tap ")
+        text += strong("\u{201C}Other Device\u{201D}")
+        text += AttributedString(".")
+        return Text(text)
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        switch device?.availability {
+        case nil: StatusPill(text: "Device not found - make sure it is still connected")
+        case .tapTrustOnDevice: StatusPill(text: "Tap \u{201C}Trust\u{201D} on your device")
+        case .reconnectCable: StatusPill(text: "Reconnect your device")
+        case .available: StartRecordingButton(coordinator: coordinator)
+        }
+    }
+}
+
+private struct StatusPill: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(Theme.Typo.copy)
+            .foregroundStyle(Color.white.opacity(0.6))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.lighterBg))
+    }
+}
+
+/// Opacity 0.3, 0.6 on hover, 0.8 while pressed.
+private struct GuideLinkStyle: ButtonStyle {
+    @State private var hovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.8 : hovered ? 0.6 : 0.3)
+            .onHover { hovered = $0 }
     }
 }

@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import RegravaCapture
 import SwiftUI
 
 /// Record picker row.
@@ -413,35 +414,47 @@ private struct RecordingOptionsButton: View {
 
 // MARK: - Device
 
-/// iPhone/iPad source. Lists USB-connected iOS devices; recording them is not available yet.
+/// iPhone/iPad source: the camera permission first, then the connected devices; choosing
+/// one shows the device overlay.
 @MainActor
 enum DeviceSourceMenu {
+    static let guideURL = URL(string: "https://regrava.studio/guide/recording-iphone-ipad")!
+    private static let permissionMessage = "Regrava Studio needs camera recording permission to record external devices connected to your Mac"
+
     static func show(coordinator: RecordingCoordinator) {
-        Task { @MainActor in
-            guard await Permissions.ensureAccess(for: .video) else {
-                Dialogs.info(
-                    title: "No camera recording permission",
-                    message: "Regrava Studio needs camera permission to record iOS and iPadOS devices. Please allow it in System Settings."
-                )
-                return
+        coordinator.selection = nil
+        guard ensureCameraPermission() else { return }
+        coordinator.externalDevices.start()
+        let devices = coordinator.externalDevices.devices
+        let menu = MenuBuilder()
+        if devices.isEmpty {
+            menu.group("iOS")
+            menu.disabled("No USB connected iOS devices")
+            menu.group("iPadOS")
+            menu.disabled("No USB connected iPadOS devices")
+        } else {
+            menu.group("devices")
+            for device in devices {
+                menu.item(device.menuLabel) { coordinator.selectDevice(device) }
             }
-            ScreenCaptureDevices.enable()
-            let devices = AVCaptureDevice.DiscoverySession(deviceTypes: [.external], mediaType: .muxed, position: .unspecified).devices
-            let menu = MenuBuilder()
-            if devices.isEmpty {
-                menu.disabled("No USB connected iOS devices")
-                menu.disabled("No USB connected iPadOS devices")
-            } else {
-                for device in devices {
-                    menu.item("\(device.localizedName) (\(device.modelID))") {
-                        Dialogs.info(
-                            title: "Record \(device.localizedName) (\(device.modelID))",
-                            message: "Recording iOS and iPadOS devices is not available in this version of Regrava Studio yet."
-                        )
-                    }
-                }
-            }
-            menu.popUp(below: nil)
+        }
+        menu.group("howTo")
+        menu.item("How to record iOS or iPadOS device?") { NSWorkspace.shared.open(guideURL) }
+        menu.popUp(below: nil)
+    }
+
+    /// External devices are capture devices, so they need the Camera permission.
+    private static func ensureCameraPermission() -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            Dialogs.info(title: "Regrava Studio will ask for camera recording permission", message: permissionMessage, button: "Continue")
+            AVCaptureDevice.requestAccess(for: .video) { _ in }
+            return false
+        default:
+            Dialogs.info(title: "No camera recording permission", message: permissionMessage + ". \n\n Please enable it in System Preferences > Security & Privacy > Camera.")
+            return false
         }
     }
 }

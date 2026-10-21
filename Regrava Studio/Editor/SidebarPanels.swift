@@ -541,7 +541,7 @@ struct SliceInspector: View {
         if let slice {
             VStack(alignment: .leading, spacing: 0) {
                 let recording = editor.project.recording
-                if recording.hasMicrophone || recording.hasSystemAudio {
+                if recording.hasMicrophone || recording.hasSystemAudio || recording.hasExternalDeviceAudio {
                     SidebarSection {
                         if recording.hasMicrophone {
                             SliderField(
@@ -558,6 +558,16 @@ struct SliceInspector: View {
                                 name: "System audio volume",
                                 icon: "hifispeaker",
                                 value: Binding(get: { slice.systemAudioVolume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-system-volume") { $0.systemAudioVolume = v } }),
+                                range: 0...1,
+                                step: 0.01,
+                                preview: { "\(Int(($0 * 100).rounded()))%" }
+                            )
+                        }
+                        if recording.hasExternalDeviceAudio {
+                            SliderField(
+                                name: "External device audio volume",
+                                icon: "iphone.gen1.radiowaves.left.and.right",
+                                value: Binding(get: { slice.externalDeviceAudioVolume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-device-volume") { $0.externalDeviceAudioVolume = v } }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -710,6 +720,18 @@ struct AudioPanel: View {
                             ToggleRow(title: "Mute system audio", isOn: editor.binding(\.audio.muteSystemAudio))
                             if audio.muteSystemAudio {
                                 Callout(icon: "speaker.slash.fill", message: "System audio is muted.")
+                            }
+                        }
+                    }
+                }
+            }
+            if recording.hasExternalDeviceAudio {
+                SidebarSection {
+                    NamedField(name: "External device audio") {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            ToggleRow(title: "Mute external device audio", isOn: editor.binding(\.audio.muteExternalDeviceAudio))
+                            if audio.muteExternalDeviceAudio {
+                                Callout(icon: "speaker.slash.fill", message: "External device audio is muted.")
                             }
                         }
                     }

@@ -1,4 +1,5 @@
 import AppKit
+import RegravaCapture
 import Combine
 import RegravaCore
 
@@ -17,6 +18,8 @@ final class AppController {
     private init() {}
 
     func launch() {
+        // iPhones and iPads appear asynchronously once screen capture devices are allowed.
+        ExternalDeviceDiscovery.shared.start()
         // Projects opened before are listed in the Dock menu too (oldest first, newest on top).
         for url in recentProjects.reversed() { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
         statusItem = StatusItemController(coordinator: recording)
