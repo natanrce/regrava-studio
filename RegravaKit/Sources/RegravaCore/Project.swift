@@ -259,6 +259,8 @@ public struct Project: Codable, Hashable, Sendable {
     /// Sensitive data and highlight masks (`scene.masks`).
     public var masks: [MaskRange] = []
     public var audio = AudioConfig()
+    /// Device frame around iPhone/iPad recordings (`device`).
+    public var device = DeviceConfig()
     /// Camera image settings (`cameraConfig`).
     public var camera = CameraConfig()
     public var captions = CaptionsConfig()
@@ -312,6 +314,7 @@ public struct Project: Codable, Hashable, Sendable {
         resolvedTypingSuggestionsMs = c.value(.resolvedTypingSuggestionsMs, default: [])
         masks = c.value(.masks, default: [])
         audio = c.value(.audio, default: AudioConfig())
+        device = c.value(.device, default: DeviceConfig())
         camera = c.value(.camera, default: CameraConfig())
         captions = c.value(.captions, default: CaptionsConfig())
         defaultLayout = c.value(.defaultLayout, default: DefaultCameraLayout())
