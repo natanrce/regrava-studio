@@ -4,9 +4,10 @@ import RegravaCore
 
 /// Motion blur: a moving layer is averaged along the trail between where it is now and
 /// `lerp(now, previousFrame, strength)`, with `strength = motionBlurAmount × fps / 60`. Samples
-/// where the layer is absent weigh more (`fp(alpha, 2) = 1 + 2·smoothstep(0, 1, 1 − alpha)`), so
-/// the trail fades out smoothly. How much work a frame may take: export and paused frames use
-/// the full motion blur quality, playback a lighter one.
+/// where the layer is absent weigh more for the screen (`fp(alpha, 2) = 1 + 2·smoothstep(0, 1, 1
+/// − alpha)`), so its trail fades out smoothly; the cursor and the camera average uniformly. How
+/// much work a frame may take: export and paused frames use the full motion blur quality,
+/// playback a lighter one.
 public enum RenderQuality: Sendable {
     case export, pausedHigh, pausedLow, playing
 
@@ -17,8 +18,8 @@ public enum RenderQuality: Sendable {
 }
 
 enum MotionBlur {
-    /// `smoothFalloffRatio` used for the screen and the cursor.
-    static let smoothFalloffRatio = 2.0
+    /// `smoothFalloffRatio` of the screen. The cursor and the camera use the default 0.
+    static let screenFalloffRatio = 2.0
 
     private static let weightedKernel = RenderKernels.color("motionBlurWeighted")
     private static let weightKernel = RenderKernels.color("motionBlurWeight")
@@ -35,10 +36,10 @@ enum MotionBlur {
     }
 
     /// Averages `layer(t)` for t spread over the trail (0 = trail start, 1 = now), inside `bounds`.
-    static func accumulate(samples: Int, bounds: CGRect, layer: (Double) -> CIImage) -> CIImage? {
+    static func accumulate(samples: Int, bounds: CGRect, falloffRatio: Double = 0, layer: (Double) -> CIImage) -> CIImage? {
         guard samples > 1, let weighted = weightedKernel, let weightOnly = weightKernel, let divide = divideKernel else { return nil }
         let clear = CIImage(color: .clear).cropped(to: bounds)
-        let ratio = NSNumber(value: smoothFalloffRatio)
+        let ratio = NSNumber(value: falloffRatio)
         var colorSum: CIImage?
         var weightSum: CIImage?
         for k in 0..<samples {

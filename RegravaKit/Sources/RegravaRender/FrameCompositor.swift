@@ -81,7 +81,7 @@ public final class FrameCompositor: @unchecked Sendable {
         if !isStatic {
             let bounds = ciRect(now).union(ciRect(trailStart)).integral
             let samples = MotionBlur.sampleCount(travel: now.cornerTravel(to: trailStart), quality: quality)
-            if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in
+            if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, falloffRatio: MotionBlur.screenFalloffRatio, layer: { t in
                 self.screenLayer(src, rect: trailStart.lerp(to: now, t), frame: frame)
             }) {
                 screenImage = blurred
