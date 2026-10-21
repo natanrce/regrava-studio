@@ -15,15 +15,19 @@ final class MouseTracker {
         var location: CGPoint
         var button: Int
         var cursorID: String?
+        var modifiers: [KeyModifier]
     }
 
     struct KeySample {
         var kind: Keystroke.Kind
         var uptime: TimeInterval
+        var character: String
+        var modifiers: [KeyModifier]
+        var isARepeat: Bool
     }
 
     private var samples: [Sample] = []
-    /// Key presses and releases; which key is not recorded, only when.
+    /// Key presses and releases with their characters and modifiers.
     private(set) var keySamples: [KeySample] = []
     private var timer: Timer?
     private var monitors: [Any] = []
@@ -98,7 +102,7 @@ final class MouseTracker {
         lastLocation = location
         // Movement while a button is held is a drag ("mouseDragged").
         let kind: MouseEventKind = NSEvent.pressedMouseButtons != 0 ? .drag : .move
-        samples.append(Sample(kind: kind, uptime: ProcessInfo.processInfo.systemUptime, location: location, button: 0, cursorID: lastCursorID))
+        samples.append(Sample(kind: kind, uptime: ProcessInfo.processInfo.systemUptime, location: location, button: 0, cursorID: lastCursorID, modifiers: Self.modifiers(NSEvent.modifierFlags)))
     }
 
     private func record(_ event: NSEvent) {
@@ -110,10 +114,29 @@ final class MouseTracker {
         }
         let location = event.cgEvent?.location ?? CGEvent(source: nil)?.location ?? .zero
         lastCursorID = cursors.currentID() ?? lastCursorID
-        samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber, cursorID: lastCursorID))
+        samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber, cursorID: lastCursorID, modifiers: Self.modifiers(event.modifierFlags)))
     }
 
+    /// `character` is the key ignoring modifiers except Shift, so ⌘⇧4 is "$" with command and
+    /// shift, as the tables expect.
     private func recordKey(_ event: NSEvent) {
-        keySamples.append(KeySample(kind: event.type == .keyDown ? .down : .up, uptime: event.timestamp))
+        keySamples.append(KeySample(
+            kind: event.type == .keyDown ? .down : .up,
+            uptime: event.timestamp,
+            character: event.charactersIgnoringModifiers ?? "",
+            modifiers: Self.modifiers(event.modifierFlags),
+            isARepeat: event.isARepeat
+        ))
+    }
+
+    static func modifiers(_ flags: NSEvent.ModifierFlags) -> [KeyModifier] {
+        var out: [KeyModifier] = []
+        if flags.contains(.command) { out.append(.command) }
+        if flags.contains(.option) { out.append(.option) }
+        if flags.contains(.control) { out.append(.control) }
+        if flags.contains(.shift) { out.append(.shift) }
+        if flags.contains(.capsLock) { out.append(.capsLock) }
+        if flags.contains(.function) { out.append(.function) }
+        return out
     }
 }

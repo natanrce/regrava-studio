@@ -221,7 +221,8 @@ public final class ScreenRecorder: NSObject {
                     (sample.location.y - originInPoints.y) * pointPixelScale
                 ),
                 button: sample.button,
-                cursorID: sample.cursorID
+                cursorID: sample.cursorID,
+                activeModifiers: sample.modifiers
             )
         }
         // Camera movie cut to the same segments, so it lines up with the joined screen movie.
@@ -239,7 +240,9 @@ public final class ScreenRecorder: NSObject {
             mouseEvents: events.sorted { $0.timeMs < $1.timeMs },
             customCursors: mouse.customCursors,
             keystrokes: mouse.keySamples.compactMap { sample in
-                timelineMs(sample.uptime).map { Keystroke(kind: sample.kind, timeMs: $0) }
+                timelineMs(sample.uptime).map {
+                    Keystroke(kind: sample.kind, timeMs: $0, character: sample.character, activeModifiers: sample.modifiers, isARepeat: sample.isARepeat)
+                }
             }.sorted { $0.timeMs < $1.timeMs },
             audioSources: audioSources,
             cameraURL: cameraURL,

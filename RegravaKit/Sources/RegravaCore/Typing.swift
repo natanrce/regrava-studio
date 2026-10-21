@@ -1,15 +1,38 @@
 import Foundation
 
+/// A modifier held during an input event (`activeModifiers`).
+public enum KeyModifier: String, Codable, CaseIterable, Sendable {
+    case command, option, control, shift, capsLock, function
+}
+
 /// A key press or release during the recording (`recording.keystrokes`: "keyDown" / "keyUp").
 public struct Keystroke: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case down, up }
 
     public var kind: Kind
     public var timeMs: Double
+    /// The key's characters ignoring modifiers except Shift (`character`): control characters
+    /// for Tab/Return/Escape/Delete and Apple's private-use codes (U+F700…) for arrows and F-keys.
+    /// Empty in recordings made before keys were recorded.
+    public var character: String
+    public var activeModifiers: [KeyModifier]
+    public var isARepeat: Bool
 
-    public init(kind: Kind, timeMs: Double) {
+    public init(kind: Kind, timeMs: Double, character: String = "", activeModifiers: [KeyModifier] = [], isARepeat: Bool = false) {
         self.kind = kind
         self.timeMs = timeMs
+        self.character = character
+        self.activeModifiers = activeModifiers
+        self.isARepeat = isARepeat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        timeMs = try c.decode(Double.self, forKey: .timeMs)
+        character = c.value(.character, default: "")
+        activeModifiers = c.value(.activeModifiers, default: [])
+        isARepeat = c.value(.isARepeat, default: false)
     }
 }
 

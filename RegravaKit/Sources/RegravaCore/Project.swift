@@ -164,7 +164,7 @@ public struct Project: Codable, Hashable, Sendable {
     public var autoZoom: AutoZoomConfig
     /// Recording flags ("Add recording marker"), in milliseconds.
     public var markersMs: [Double]
-    /// Key presses and releases (`recording.keystrokes`); only their timing is kept.
+    /// Key presses and releases (`recording.keystrokes`).
     public var keystrokes: [Keystroke]
     /// Clips in source order (`scene.slices`).
     public var slices: [Slice]
