@@ -120,6 +120,56 @@ public struct RecordedCursor: Codable, Hashable, Sendable {
     }
 }
 
+/// What was recorded (`recording.mode`): a display or area, a window, or an iPhone/iPad over USB.
+public enum RecordingMode: String, Codable, Sendable {
+    case display, window, externalDevice
+}
+
+/// A rotation of the iPhone/iPad during the recording (`-changes.json` records): frames are
+/// rotated back to the first frame's size from `timeMs` on.
+public struct DeviceOrientationChange: Codable, Hashable, Sendable {
+    public enum Animation: String, Codable, Sendable { case instant, clockwise, counterClockwise }
+    public var timeMs: Double
+    public var contentRect: Rect2
+    public var videoRotationAngleForHorizontalLevel: Double
+    public var animation: Animation
+
+    public init(timeMs: Double, contentRect: Rect2, videoRotationAngleForHorizontalLevel: Double, animation: Animation) {
+        self.timeMs = timeMs
+        self.contentRect = contentRect
+        self.videoRotationAngleForHorizontalLevel = videoRotationAngleForHorizontalLevel
+        self.animation = animation
+    }
+}
+
+/// The iPhone/iPad of an external-device recording (`ExternalDevice`).
+public struct ExternalDeviceInfo: Codable, Hashable, Sendable {
+    public var deviceId: String
+    /// "Tom's iPhone".
+    public var name: String
+    /// "iPhone17,1".
+    public var modelId: String?
+    public var modelMarketingName: String?
+    public var orientationChanges: [DeviceOrientationChange]
+
+    public init(deviceId: String, name: String, modelId: String? = nil, modelMarketingName: String? = nil, orientationChanges: [DeviceOrientationChange] = []) {
+        self.deviceId = deviceId
+        self.name = name
+        self.modelId = modelId
+        self.modelMarketingName = modelMarketingName
+        self.orientationChanges = orientationChanges
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        deviceId = c.value(.deviceId, default: "")
+        name = c.value(.name, default: "External Device")
+        modelId = c.value(.modelId, default: nil)
+        modelMarketingName = c.value(.modelMarketingName, default: nil)
+        orientationChanges = c.value(.orientationChanges, default: [])
+    }
+}
+
 public struct RecordingInfo: Codable, Hashable, Sendable {
     public var videoFileName: String
     /// Size of the recorded video in pixels.
@@ -135,6 +185,9 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
     /// Webcam movie in the project folder, on the same timeline as the screen.
     public var cameraFileName: String?
     public var cameraSize: Size2?
+    public var mode: RecordingMode
+    /// Set for `.externalDevice` recordings.
+    public var externalDevice: ExternalDeviceInfo?
 
     public init(
         videoFileName: String = "recording.mov",
@@ -146,7 +199,9 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         cursors: [RecordedCursor] = [],
         audioSources: [AudioSource] = [],
         cameraFileName: String? = nil,
-        cameraSize: Size2? = nil
+        cameraSize: Size2? = nil,
+        mode: RecordingMode = .display,
+        externalDevice: ExternalDeviceInfo? = nil
     ) {
         self.videoFileName = videoFileName
         self.videoSize = videoSize
@@ -158,9 +213,13 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         self.audioSources = audioSources
         self.cameraFileName = cameraFileName
         self.cameraSize = cameraSize
+        self.mode = mode
+        self.externalDevice = externalDevice
     }
 
     public var hasCamera: Bool { cameraFileName != nil }
+    public var isExternalDeviceMode: Bool { mode == .externalDevice }
+    public var hasExternalDeviceAudio: Bool { audioSources.contains(.externalDevice) }
 
     public var hasMicrophone: Bool { audioSources.contains(.microphone) }
     public var hasSystemAudio: Bool { audioSources.contains(.systemAudio) }
@@ -177,6 +236,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         audioSources = c.value(.audioSources, default: [])
         cameraFileName = c.value(.cameraFileName, default: nil)
         cameraSize = c.value(.cameraSize, default: nil)
+        mode = c.value(.mode, default: .display)
+        externalDevice = c.value(.externalDevice, default: nil)
     }
 }
 
@@ -262,7 +323,8 @@ public struct Project: Codable, Hashable, Sendable {
 
     /// Replaces generated zooms with a fresh set derived from the clicks, keeping user-made ones.
     public mutating func regenerateAutomaticZooms() {
-        let generated = AutoZoomGenerator.generate(
+        // iPhone/iPad recordings have no automatic zooms (`useAutomaticZooms`).
+        let generated = recording.isExternalDeviceMode ? [] : AutoZoomGenerator.generate(
             events: mouseEvents,
             durationMs: recording.durationMs,
             config: autoZoom

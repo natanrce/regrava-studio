@@ -4,6 +4,8 @@ import Foundation
 public enum AudioSource: String, Codable, Sendable {
     case microphone
     case systemAudio = "system-audio"
+    /// The iPhone/iPad's own audio (`external-device`).
+    case externalDevice = "external-device"
 }
 
 /// Microphone processing modes; stored, not processed yet.
@@ -46,6 +48,7 @@ public struct AudioConfig: Codable, Hashable, Sendable {
         switch source {
         case .microphone: return muteMicrophone
         case .systemAudio: return muteSystemAudio
+        case .externalDevice: return muteExternalDeviceAudio
         }
     }
 }
@@ -56,6 +59,7 @@ public extension Slice {
         switch source {
         case .microphone: return volume
         case .systemAudio: return systemAudioVolume
+        case .externalDevice: return externalDeviceAudioVolume
         }
     }
 }
