@@ -530,6 +530,8 @@ final class EditorModel: ObservableObject {
     func openSidebar(_ root: SidebarRoot) {
         sidebarItem = nil
         sidebarRoot = root
+        // Opening the shortcuts panel focuses its track.
+        if root == .shortcuts { focusedTrack = "shortcuts" }
         if layoutType == .hideSidebar { layoutType = .edit }
         if layoutType == .preview { layoutType = .hideTimeline }
     }
@@ -610,7 +612,21 @@ final class EditorModel: ObservableObject {
         return min(project.style.cornerRadius * zoom, min(area.width, area.height) / 2)
     }
 
-    /// Where the recording is drawn on the canvas right now (canvas pixels), for overlays.
+    /// Where the recording is drawn on the canvas right now (canvas pixels), for overlays. The
+    /// current press's keys in canvas units, for the paused preview's click target.
+    var shortcutsAreaRect: Rect2? {
+        guard project.captions.enableShortcuts else { return nil }
+        let canvas = renderState.current.track.layout.canvas
+        let captionsShown = project.captions.enableTranscript
+            && !CaptionWords.visible(clientTranscript, resolver: project.resolver, showSoundLabels: project.captions.showSoundLabels).isEmpty
+        return ShortcutTrack(project: project, canvas: canvas, captionsShown: captionsShown)?.currentRect(atPlayback: currentTimeMs)
+    }
+
+    /// The keys' corner radius in canvas units (`ratio × 128` stage units).
+    var shortcutsCornerRadius: Double {
+        project.captions.shortcutsSizeRatio * 128 * renderState.current.track.layout.canvas.height / 1080
+    }
+
     var recordingAreaRect: Rect2 {
         renderState.current.track.frame(at: currentTimeMs).screenRect
     }

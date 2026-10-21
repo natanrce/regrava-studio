@@ -235,7 +235,11 @@ private struct CaptionsSettings: View {
             }
             NamedField(name: "Caption position") {
                 VStack(alignment: .leading, spacing: Theme.gap(1)) {
-                    CaptionPositionPad(position: editor.binding(\.captions.position01, coalesce: "caption-position"))
+                    // With shortcuts on, captions stay at least 10% from the top.
+                    CaptionPositionPad(position: Binding(
+                        get: { config.position01 },
+                        set: { v in editor.change(coalesce: "caption-position") { $0.captions.position01 = $0.captions.enableShortcuts ? Vec2(v.x, max(v.y, 0.1)) : v } }
+                    ))
                     SegmentedPicker(
                         options: ["bottom", "center"],
                         label: { $0 == "bottom" ? "Bottom" : "Center" },

@@ -43,6 +43,10 @@ struct EditorTimeline: View {
                         if !editor.project.masks.isEmpty {
                             MaskTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
                         }
+                        // Shortcuts track, last, while the Keyboard Shortcuts panel is open.
+                        if editor.showsShortcutsTrack {
+                            ShortcutsTrack(editor: editor, geometry: geo)
+                        }
                     }
                 }
                 .padding(.top, 25 - 20)
@@ -89,7 +93,8 @@ struct EditorTimeline: View {
         }
         .frame(height: 25 + 20 + 11.3 + 48 + 12 + trackHeight("zooms") + 15
             + (editor.project.cameraLayouts.isEmpty ? 0 : 12 + trackHeight("camera-mode"))
-            + (editor.project.masks.isEmpty ? 0 : 12 + trackHeight("masks")))
+            + (editor.project.masks.isEmpty ? 0 : 12 + trackHeight("masks"))
+            + (editor.showsShortcutsTrack ? 12 + trackHeight("shortcuts") : 0))
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: editor.focusedTrack)
     }
 

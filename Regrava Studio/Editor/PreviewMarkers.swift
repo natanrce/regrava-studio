@@ -23,6 +23,12 @@ struct PreviewMarkers: View {
                     ) {
                         open(.background, "Opened background settings")
                     }
+                    // The shortcut keys.
+                    if let keys = editor.shortcutsAreaRect {
+                        MarkerArea(rect: CGRect(x: keys.x * scale, y: keys.y * scale, width: keys.width * scale, height: keys.height * scale), cornerRadius: editor.shortcutsCornerRadius * scale) {
+                            open(.shortcuts, "Opened keyboard shortcuts settings")
+                        }
+                    }
                     if let cursor = editor.cursorAreaRect {
                         MarkerArea(rect: CGRect(x: cursor.x * scale, y: cursor.y * scale, width: cursor.width * scale, height: cursor.height * scale), cornerRadius: 4) {
                             open(.cursor, "Opened cursor settings")

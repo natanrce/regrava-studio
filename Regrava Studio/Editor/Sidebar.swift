@@ -40,7 +40,7 @@ extension EditorModel {
             SidebarRailEntry(root: .captions, name: "Captions", icon: "captions.bubble", key: "5", disabledTooltip: project.recording.hasMicrophone ? nil : "No microphone recorded"),
             SidebarRailEntry(root: .transcript, name: "Edit by transcript", icon: "text.quote", key: "6", disabledTooltip: project.recording.hasMicrophone ? nil : "No microphone recorded"),
             SidebarRailEntry(root: .audio, name: "Audio", icon: "speaker.wave.1", key: "7"),
-            SidebarRailEntry(root: .shortcuts, name: "Keyboard Shortcuts", icon: "command", key: "8", disabledTooltip: "No keyboard shortcuts during recording"),
+            SidebarRailEntry(root: .shortcuts, name: "Keyboard Shortcuts", icon: "command", key: "8", disabledTooltip: project.keystrokes.isEmpty ? "No keyboard shortcuts during recording" : nil),
             SidebarRailEntry(root: .animation, name: "Animations", icon: "point.topleft.down.to.point.bottomright.curvepath.fill", key: "9"),
         ]
     }
@@ -130,6 +130,7 @@ struct SidebarPanel: View {
                     case .cameraLayout: CameraLayoutPanel(editor: editor)
                     case .cameraStyle: CameraStylePanel(editor: editor)
                     case .captions: TranscriptPanel(editor: editor)
+                    case .shortcuts: ShortcutsPanel(editor: editor)
                     case .transcript:
                         RSButton(title: "Close Transcript editor", icon: "arrow.left", kind: .secondary) { editor.openSidebar(.background) }
                             .padding(.bottom, Theme.gap(3))

@@ -82,8 +82,12 @@ enum UISnapshots {
         try? FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
         let clicks = [3000.0, 5200, 14000, 26000, 31000].map { MouseEvent(kind: .down, timeMs: $0, position: Vec2(800, 500)) }
         // A typing run (fast keys 16–19 s) shows a "Speed up typing" chip.
-        let keys = stride(from: 16_000.0, through: 19_000, by: 150).flatMap {
-            [Keystroke(kind: .down, timeMs: $0), Keystroke(kind: .up, timeMs: $0 + 40)]
+        var keys = stride(from: 16_000.0, through: 19_000, by: 150).flatMap {
+            [Keystroke(kind: .down, timeMs: $0, character: "a"), Keystroke(kind: .up, timeMs: $0 + 40, character: "a")]
+        }
+        // Shortcuts: ⌘C, ⌘V, ⌘⇧4 and ⌥⌫ for the Shortcuts track.
+        for (t, c, m) in [(2000.0, "c", [KeyModifier.command]), (2600, "v", [.command]), (8000, "$", [.command, .shift]), (12_000, "\u{7F}", [.option])] {
+            keys += [Keystroke(kind: .down, timeMs: t, character: c, activeModifiers: m), Keystroke(kind: .up, timeMs: t + 90, character: c, activeModifiers: m)]
         }
         var project = Project(
             recording: RecordingInfo(videoSize: Size2(width: 3024, height: 1964), pointPixelScale: 2, durationMs: 42_000, fps: 60, audioSources: [.systemAudio, .microphone]),
@@ -120,6 +124,7 @@ enum UISnapshots {
             ("camera-layout-cutout", { controller.model.change { $0.defaultLayout.type = .cutoutCamera } }),
             ("camera-style", { controller.model.change { $0.defaultLayout.type = .cameraOverlay }; controller.model.openSidebar(.cameraStyle) }),
             ("captions", { controller.model.openSidebar(.captions) }),
+            ("shortcuts", { controller.model.change { $0.captions.enableShortcuts = true; $0.captions.hiddenShortcuts = ["8000": true] }; controller.model.openSidebar(.shortcuts) }),
             ("captions-ready", {
                 controller.model.transcript = SessionTranscript(generator: .system(locale: "en_US"), transcript: [TranscriptWord(index: 0, startMs: 1000, endMs: 1400, text: "Hello")])
             }),
