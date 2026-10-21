@@ -120,14 +120,6 @@ final class ShortcutRenderer: @unchecked Sendable {
 
     // MARK: Drawing
 
-    private func roundedRect(_ rect: CGRect, radius: Double, color: CIColor) -> CIImage {
-        CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
-            "inputExtent": CIVector(cgRect: rect),
-            "inputRadius": min(radius, min(rect.width, rect.height) / 2),
-            "inputColor": color,
-        ])?.outputImage ?? CIImage.empty()
-    }
-
     private func faded(_ image: CIImage, opacity: Double) -> CIImage {
         guard opacity < 1 else { return image }
         var out = image
@@ -154,14 +146,13 @@ final class ShortcutRenderer: @unchecked Sendable {
         var result = output
         for node in nodes {
             let rect = ciRect(node.rect)
-            // Black at 0.33, blur ratio·200, offset (0, ratio·25) below the key.
-            let caster = roundedRect(rect.offsetBy(dx: 0, dy: -shadowOffset), radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.33))
-            let shadow = caster.applyingGaussianBlur(sigma: shadowBlur * 0.4).cropped(to: caster.extent.insetBy(dx: -2 * shadowBlur, dy: -2 * shadowBlur))
-            // Artwork at its resting scale, placed at the sprung rect and clipped to it.
+            // Black at 0.33, blur ratio·200, offset (0, ratio·25) below the key, Classic.
+            let shadow = SmoothShapes.shadow(rect, radius: radius, .init(alpha: 0.33, blur: shadowBlur, offset: CGVector(dx: 0, dy: -shadowOffset), directional: nil, unit: unit))
+            // Artwork at its resting scale, placed at the sprung rect and clipped to it with
+            // smooth corners (`borderRoundness` 1).
             let art = artwork(node.cap, height: node.restingHeight)
             let placed = art.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.maxY - art.extent.height))
-            let mask = roundedRect(rect, radius: radius, color: .white)
-            let key = placed.applyingFilter("CISourceInCompositing", parameters: [kCIInputBackgroundImageKey: mask])
+            let key = SmoothShapes.clip(placed, to: rect, radius: radius)
             result = faded(key.composited(over: shadow), opacity: node.opacity).composited(over: result)
         }
         return result
