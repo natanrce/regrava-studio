@@ -13,6 +13,29 @@ public enum ZoomPresentation: String, Codable, Sendable, CaseIterable {
     case loupe
 }
 
+/// Glass loupe settings of a zoom (`loupeOptions`).
+public struct LoupeOptions: Codable, Hashable, Sendable {
+    /// Lens radius over the larger side of the recording ("Glass Loupe size", 0.25–0.75).
+    public var radius01 = 0.35
+    /// Bevel width over the radius.
+    public var bevelRatio = 0.2
+    /// Rim dispersion, 0…1.
+    public var chromaticAberration = 0.5
+    /// Off turns the bevel and the dispersion off.
+    public var hasGlassOptics = true
+
+    public init() {}
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = LoupeOptions()
+        radius01 = c.value(.radius01, default: d.radius01)
+        bevelRatio = c.value(.bevelRatio, default: d.bevelRatio)
+        chromaticAberration = c.value(.chromaticAberration, default: d.chromaticAberration)
+        hasGlassOptics = c.value(.hasGlassOptics, default: d.hasGlassOptics)
+    }
+}
+
 public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
     public var id: UUID
     public var startMs: Double
@@ -27,6 +50,7 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
     /// Created by the auto-zoom generator (as opposed to by the user).
     public var isGenerated: Bool
     public var presentation: ZoomPresentation
+    public var loupeOptions: LoupeOptions
 
     public init(
         id: UUID = UUID(),
@@ -38,7 +62,8 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
         isDisabled: Bool = false,
         isInstant: Bool = false,
         isGenerated: Bool = false,
-        presentation: ZoomPresentation = .screen
+        presentation: ZoomPresentation = .screen,
+        loupeOptions: LoupeOptions = LoupeOptions()
     ) {
         self.id = id
         self.startMs = startMs
@@ -50,6 +75,7 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
         self.isInstant = isInstant
         self.isGenerated = isGenerated
         self.presentation = presentation
+        self.loupeOptions = loupeOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -64,6 +90,7 @@ public struct ZoomRange: Codable, Hashable, Sendable, Identifiable {
         isInstant = c.value(.isInstant, default: false)
         isGenerated = c.value(.isGenerated, default: false)
         presentation = c.value(.presentation, default: .screen)
+        loupeOptions = c.value(.loupeOptions, default: LoupeOptions())
     }
 
     /// Zoom level 1 with the classic style changes nothing on screen.

@@ -76,6 +76,8 @@ public struct CameraFrame: Hashable, Sendable {
     public var allowsScreenBorderRadius = true
     /// The stage is not fully covered by the resting screen, so the inset shows.
     public var isBackgroundVisible = true
+    /// The glass loupe, sprung; nil when it shows nothing.
+    public var loupe: LoupeFrame?
     /// Click effect: 0...1 progress and position in video pixels.
     public var clickProgress: Double?
     public var clickPosition: Vec2?
@@ -159,6 +161,7 @@ public final class CameraTrack: @unchecked Sendable {
         let confidentFaces = project.camera.enableFaceTracking ? FaceTracking.confident(faces) : nil
         var focalX = SpringValue(0.5), focalY = SpringValue(0.5)
         var cutout = SpringValue(0)
+        var loupe = LoupeSpring(.none)
         let buttonEvents = pathEvents.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
@@ -208,6 +211,11 @@ public final class CameraTrack: @unchecked Sendable {
             if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
 
             var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPath?.position(at: t))
+            // The lens springs on its own (`styles.loupe`).
+            let loupeTarget = planner.loupeTarget(at: source).frame
+            if i == 0 { loupe = LoupeSpring(loupeTarget) } else { loupe.advance(toward: loupeTarget, config: planner.loupeSpring(at: source), milliseconds: sampleIntervalMs) }
+            let lens = loupe.frame
+            frame.loupe = lens.isVisible(recordingWidth: project.recording.videoSize.width, k: 0.1) ? lens : nil
             frame.screenReferenceWidth = target.screenReferenceWidth * layout.scale
             frame.allowsScreenBorderRadius = target.allowsScreenBorderRadius
             frame.isBackgroundVisible = target.isBackgroundVisible
@@ -293,6 +301,10 @@ public final class CameraTrack: @unchecked Sendable {
         frame.screenReferenceWidth = a.screenReferenceWidth
         frame.allowsScreenBorderRadius = a.allowsScreenBorderRadius
         frame.isBackgroundVisible = a.isBackgroundVisible
+        switch (a.loupe, b.loupe) {
+        case let (la?, lb?): frame.loupe = la.lerp(to: lb, f)
+        default: frame.loupe = f < 0.5 ? a.loupe : b.loupe
+        }
         frame.cameraFocal01 = a.cameraFocal01.lerp(to: b.cameraFocal01, f)
         frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
@@ -454,6 +466,8 @@ struct CameraPlanner {
     let timeline: LayoutTimeline
     let cleaned: [MouseEvent]
     let zooms: [ZoomRange]
+    /// Enabled glass loupe zooms.
+    let loupes: [ZoomRange]
     let groups: [UUID: [FocusGroup]]
     /// Cursor "moves groups" for the resting focus.
     let restingGroups: [FocusGroup]
@@ -468,10 +482,13 @@ struct CameraPlanner {
         zooms = project.zooms
             .filter { !$0.isDisabled && $0.presentation == .screen && $0.scale > 1 && $0.endMs > $0.startMs }
             .sorted { $0.startMs < $1.startMs }
+        loupes = project.zooms
+            .filter { !$0.isDisabled && $0.presentation == .loupe && $0.endMs > $0.startMs }
+            .sorted { $0.startMs < $1.startMs }
 
         let video = project.recording.videoSize
         var groups: [UUID: [FocusGroup]] = [:]
-        for zoom in zooms where zoom.mode == .auto {
+        for zoom in zooms + loupes where zoom.mode == .auto {
             var events = sparse.filter { $0.timeMs >= zoom.startMs && $0.timeMs <= zoom.endMs }
             // Include where the cursor already was when the zoom starts.
             if let i = MouseProcessing.lastIndex(atOrBefore: zoom.startMs, in: sparse), sparse[i].timeMs < zoom.startMs {
@@ -590,7 +607,7 @@ struct CameraPlanner {
             screen: screen,
             instant: isInInstantWindow(t),
             camera: camera,
-            cameraOpacity: hidden || camera == nil ? 0 : 1,
+            cameraOpacity: hidden || camera == nil || (camera.map { isCameraCoveredByLoupe(camera: $0, screen: screen, at: t) } ?? false) ? 0 : 1,
             cameraBorderRadius: radius,
             cameraReferenceWidth: initial?.width ?? camera?.width ?? 1,
             cameraHidden: hidden,
