@@ -19,6 +19,13 @@ public struct CaptionsConfig: Codable, Hashable, Sendable {
     public var wordsReveal = WordsReveal.lineByLine
     public var lineGrowth = LineGrowth.leftAnchored
     public var wordEntrance = WordEntrance.appear
+    /// Keyboard shortcuts overlay ("Show shortcuts").
+    public var enableShortcuts = false
+    /// Presses the user hid, keyed by `String(firstKeyDownMs)`; showing one deletes its key.
+    public var hiddenShortcuts: [String: Bool] = [:]
+    public var showShortcutsWithSingleLetters = false
+    /// Key row height over the stage height (slider 0.075…0.25).
+    public var shortcutsSizeRatio = 0.1
 
     public init() {}
 
@@ -36,6 +43,10 @@ public struct CaptionsConfig: Codable, Hashable, Sendable {
         wordsReveal = c.value(.wordsReveal, default: d.wordsReveal)
         lineGrowth = c.value(.lineGrowth, default: d.lineGrowth)
         wordEntrance = c.value(.wordEntrance, default: d.wordEntrance)
+        enableShortcuts = c.value(.enableShortcuts, default: d.enableShortcuts)
+        hiddenShortcuts = c.value(.hiddenShortcuts, default: d.hiddenShortcuts)
+        showShortcutsWithSingleLetters = c.value(.showShortcutsWithSingleLetters, default: d.showShortcutsWithSingleLetters)
+        shortcutsSizeRatio = c.value(.shortcutsSizeRatio, default: d.shortcutsSizeRatio)
     }
 
     /// `isDark()` of the background (YIQ < 128): the panel's "Dark" / "Light" colour.
