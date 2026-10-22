@@ -218,9 +218,8 @@ public final class FrameCompositor: @unchecked Sendable {
         let perspective = Perspective(center: ciPoint(center), scale: zoom)
         let clear = CIImage(color: .clear).cropped(to: canvasRect)
         let content = session(over: clear, source: source, camera: camera, frame: inner, quality: quality, perspective: perspective).cropped(to: canvasRect)
-        // Blurrier reads on the compressed rim (lod 2 and 4: 0.58·(2^lod − 1) texels).
-        let content2 = content.applyingGaussianBlur(sigma: 0.58 * 3 * 0.5).cropped(to: canvasRect)
-        let content4 = content.applyingGaussianBlur(sigma: 0.58 * 15 * 0.5).cropped(to: canvasRect)
+        // Blurrier reads on the compressed rim: lod 1…4, 0.58·(2^lod − 1) texels.
+        let levels = (1...4).map { lod in content.applyingGaussianBlur(sigma: 0.58 * (pow(2, Double(lod)) - 1) * 0.5).cropped(to: canvasRect) }
         // Frosted backdrop: the background blurred by 0.5% of the stage width.
         let frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005).cropped(to: canvasRect)
 
@@ -241,7 +240,7 @@ public final class FrameCompositor: @unchecked Sendable {
             extent: canvasRect,
             roiCallback: { _, _ in canvasRect },
             arguments: [
-                content, content2, content4, scene.cropped(to: canvasRect), frost,
+                content, levels[0], levels[1], levels[2], levels[3], scene.cropped(to: canvasRect), frost,
                 CIVector(x: c.x, y: c.y, z: radius, w: radius * clamp(lens.bevelRatio, 0, 1)),
                 CIVector(x: zoom, y: clamp(lens.chromaticAberration, 0, 1), z: clamp(lens.presence, 0, 1), w: clamp(lens.shadowAlpha, 0, 1)),
                 CIVector(x: direction.x, y: -direction.y, z: shineExponent, w: lightTilt),

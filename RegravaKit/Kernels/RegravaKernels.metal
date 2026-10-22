@@ -413,12 +413,31 @@ float4 loupeShade(float4 color, float2 rel, float coverage, float bayer, LoupePa
     return out;
 }
 
-float4 loupeView(sampler c0, sampler c2, sampler c4, float2 pos, float lod) {
+/// `sampleLoupeView`: lod 0…4 between pre-blurred levels (radius 0.58·(2^lod − 1)).
+float4 loupeView(sampler c0, sampler c1, sampler c2, sampler c3, sampler c4, float2 pos, float lod) {
     float4 a = c0.sample(c0.transform(pos));
     if (lod < 0.05) return a;
-    float4 b = c2.sample(c2.transform(pos));
-    if (lod <= 2.0) return mix(a, b, lod / 2.0);
-    return mix(b, c4.sample(c4.transform(pos)), (lod - 2.0) / 2.0);
+    float l = clamp(lod, 0.0, 4.0);
+    float f = fract(l);
+    int i = int(floor(l));
+    float4 lo = i == 0 ? a : i == 1 ? c1.sample(c1.transform(pos)) : i == 2 ? c2.sample(c2.transform(pos)) : i == 3 ? c3.sample(c3.transform(pos)) : c4.sample(c4.transform(pos));
+    if (f < 0.001 || i >= 4) return lo;
+    float4 hi = i == 0 ? c1.sample(c1.transform(pos)) : i == 1 ? c2.sample(c2.transform(pos)) : i == 2 ? c3.sample(c3.transform(pos)) : c4.sample(c4.transform(pos));
+    return mix(lo, hi, f);
+}
+
+/// `$getBayer8Threshold01` at the output pixel.
+float bayer8(float2 px) {
+    int x = int(fmod(floor(px.x), 8.0)), y = int(fmod(floor(px.y), 8.0));
+    int x0 = x & 1, y0 = y & 1, x1 = (x >> 1) & 1, y1 = (y >> 1) & 1, x2 = (x >> 2) & 1, y2 = (y >> 2) & 1;
+    int v = ((((x0 ^ y0)) * 2 + y0) * 16) + ((((x1 ^ y1)) * 2 + y1) * 4) + (((x2 ^ y2)) * 2 + y2);
+    return (float(v) + 0.5) / 64.0;
+}
+
+/// `$ditherColor`: ±half a step of 1/255 of screen-Bayer noise, scaled by alpha (anti-banding).
+float4 ditherColor(float4 c, float2 px) {
+    float noise = (bayer8(px) - 0.5) * (1.0 / 255.0) * c.a;
+    return float4(c.rgb + noise, c.a);
 }
 
 float spectrumW(float x) { float c = clamp(x, -1.0, 1.0); return c * (1.0 - 2.0 / 3.0 * c * c + c * c * c * c / 5.0); }
@@ -430,10 +449,20 @@ float bayer4(float2 px) {
     return (m[y * 4 + x] + 0.5) / 16.0;
 }
 
-float4 loupeGlass(sampler content0, sampler content2, sampler content4, sampler plain, sampler frost,
+float4 loupeGlassShaded(sampler content0, sampler content1, sampler content2, sampler content3, sampler content4, sampler plain, sampler frost,
+                  float4 g0, float4 g1, float4 g2, float4 g3, float2 pos);
+
+float4 loupeGlass(sampler content0, sampler content1, sampler content2, sampler content3, sampler content4, sampler plain, sampler frost,
                   float4 g0, float4 g1, float4 g2, float4 g3, destination dest) {
-    LoupeParams L = loupeParams(g0, g1, g2, g3);
     float2 pos = dest.coord();
+    // Every drawn part is dithered against banding (`$ditherColor`).
+    return ditherColor(loupeGlassShaded(content0, content1, content2, content3, content4, plain, frost, g0, g1, g2, g3, pos), pos);
+}
+
+float4 loupeGlassShaded(sampler content0, sampler content1, sampler content2, sampler content3, sampler content4, sampler plain, sampler frost,
+                  float4 g0, float4 g1, float4 g2, float4 g3, float2 pos) {
+    LoupeParams L = loupeParams(g0, g1, g2, g3);
+    
     float4 scene = plain.sample(plain.transform(pos));
     float aa = 1.5;
     float2 rel = pos - L.center;
@@ -461,7 +490,7 @@ float4 loupeGlass(sampler content0, sampler content2, sampler content4, sampler 
     float2 fr = off.zw;
     float frLen = length(fr);
     if (frLen < 0.75) {
-        color = loupeView(content0, content2, content4, bendPos, lod);
+        color = loupeView(content0, content1, content2, content3, content4, bendPos, lod);
     } else {
         int N = int(clamp(ceil(frLen), 3.0, L.maxReads));
         float3 rgb = float3(0.0), wsum = float3(0.0);
@@ -471,7 +500,7 @@ float4 loupeGlass(sampler content0, sampler content2, sampler content4, sampler 
             float a = 1.0 - 2.0 * float(i) / float(N);
             float b = a - 2.0 / float(N);
             float s = a - fract(bayer + float(i) * 0.61803398875) * 2.0 / float(N);
-            float4 c = loupeView(content0, content2, content4, bendPos + fr * s, lod);
+            float4 c = loupeView(content0, content1, content2, content3, content4, bendPos + fr * s, lod);
             float3 w = float3(spectrumBand(b, a, 0.85, 0.7) + 0.3 * spectrumBand(b, a, -0.95, 0.35),
                               spectrumBand(b, a, 0.05, 0.65),
                               spectrumBand(b, a, -0.75, 0.65));
