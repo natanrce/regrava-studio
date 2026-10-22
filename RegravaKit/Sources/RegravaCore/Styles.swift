@@ -395,7 +395,9 @@ public struct AnimationConfig: Codable, Hashable, Sendable {
 
     public init(
         screenSpring: SpringConfig = .screen,
-        mouseSpring: SpringConfig? = SpringPreset.cursor[0].config,
+        // New projects use the same default spring for both, so the cursor style starts with no
+        // preset selected and no Reset.
+        mouseSpring: SpringConfig? = .screen,
         startsZoomEarly: Bool = false,
         motionBlurAmount: Double = 1
     ) {

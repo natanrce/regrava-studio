@@ -354,7 +354,7 @@ struct AnimationsPanel: View {
                 name: "Cursor animation style",
                 presets: SpringPreset.cursor,
                 config: Binding(get: { editor.project.animation.mouseSpring }, set: { v in editor.change { $0.animation.mouseSpring = v } }),
-                resetConfig: nil
+                resetConfig: resetSpring
             )
         }
         // Section 2: 0–1, percent preview, no reset.
@@ -378,8 +378,7 @@ private struct SpringEditor: View {
     var name: String
     var presets: [SpringPreset]
     @Binding var config: SpringConfig?
-    /// nil: no Reset button (the cursor style has none).
-    var resetConfig: SpringConfig?
+    var resetConfig: SpringConfig
     @State private var hovered: SpringPreset?
 
     private var selected: SpringPreset? { presets.first { $0.config == config } }
@@ -412,8 +411,9 @@ private struct SpringEditor: View {
                 if let demo = hovered?.config {
                     SpringDemo(config: demo).frame(height: 14)
                 }
-                if let resetConfig, config != resetConfig {
-                    RSButton(title: "Reset", kind: .secondary, size: .small) { config = resetConfig }
+                // Shown once the value differs from the default; a full-width secondary button.
+                if config != resetConfig {
+                    RSButton(title: "Reset", kind: .secondary, isWide: true) { config = resetConfig }
                 }
             }
         }
