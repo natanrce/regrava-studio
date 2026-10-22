@@ -374,6 +374,10 @@ final class RecordingCoordinator: ObservableObject {
         if case .window(let window) = selection {
             NSRunningApplication(processIdentifier: window.processID)?.activate()
         }
+        // Device recordings always carry the device's audio.
+        let recordsSound = options.capturesSystemAudio || options.microphoneID != nil || selection.captureSource == nil
+        lastRecordsSound = recordsSound
+        await RecordingSounds.playBegin(recordsSound: recordsSound)
         do {
             let work = bundle.appendingPathComponent("segments", isDirectory: true)
             if let source = selection.captureSource {
@@ -413,14 +417,23 @@ final class RecordingCoordinator: ObservableObject {
 
     // MARK: Recording actions
 
+    /// Whether the current recording captures sound (the start sound then waits before capture).
+    private var lastRecordsSound = false
+
     func pause() {
         guard phase == .recording else { return }
-        run { try await self.isDeviceRecording ? self.deviceRecorder.pause() : self.recorder.pause() } then: { self.phase = .paused }
+        run { try await self.isDeviceRecording ? self.deviceRecorder.pause() : self.recorder.pause() } then: {
+            self.phase = .paused
+            RecordingSounds.playEnd()
+        }
     }
 
     func resume() {
         guard phase == .paused else { return }
-        run { try await self.isDeviceRecording ? self.deviceRecorder.resume() : self.recorder.resume() } then: { self.phase = .recording }
+        run {
+            await RecordingSounds.playBegin(recordsSound: self.lastRecordsSound)
+            try await self.isDeviceRecording ? self.deviceRecorder.resume() : self.recorder.resume()
+        } then: { self.phase = .recording }
     }
 
     func togglePause() {
@@ -479,6 +492,7 @@ final class RecordingCoordinator: ObservableObject {
         do {
             let output = bundleURL.appendingPathComponent("recording.mov")
             let result = try await isDeviceRecording ? deviceRecorder.finish(to: output) : recorder.finish(to: output)
+            RecordingSounds.playEnd()
             try? FileManager.default.removeItem(at: bundleURL.appendingPathComponent("segments", isDirectory: true))
             var cursors: [RecordedCursor] = []
             for image in result.customCursors {
