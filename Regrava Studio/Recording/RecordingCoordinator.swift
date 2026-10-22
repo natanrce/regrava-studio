@@ -97,6 +97,7 @@ final class RecordingCoordinator: ObservableObject {
     private let deviceRecorder = ExternalDeviceRecorder()
     let externalDevices = ExternalDeviceDiscovery.shared
     private var pickerPanel: GlassPanel<RecordingPickerView>?
+    private var recentProjectsPanel: RecentProjectsPanel?
     private var widgetPanel: GlassPanel<RecordingWidgetView>?
     private lazy var overlays = SourceOverlayController(coordinator: self)
     private lazy var boundsIndicator = BoundsIndicatorController()
@@ -120,6 +121,10 @@ final class RecordingCoordinator: ObservableObject {
         recorder.onUnexpectedStop = unexpectedStop
         deviceRecorder.onUnexpectedStop = unexpectedStop
         externalDevices.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        preferences.$openRecentProjectsWithRecordingPicker
+            .dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
         // Keep auxiliary windows in sync with the state.
@@ -604,6 +609,21 @@ final class RecordingCoordinator: ObservableObject {
             if case .countdown = phase { overlays.hide() } else { overlays.show() }
         } else {
             overlays.hide()
+        }
+
+        // Recent projects, beside the picker while no source is chosen.
+        if isPickerOpen, sourceType == nil, !isRecording, preferences.openRecentProjectsWithRecordingPicker,
+           !AppController.shared.recentProjects.isEmpty {
+            if recentProjectsPanel == nil {
+                recentProjectsPanel = RecentProjectsPanel { [weak self] in
+                    // The close button turns the setting off.
+                    self?.preferences.openRecentProjectsWithRecordingPicker = false
+                    self?.objectWillChange.send()
+                }
+            }
+            recentProjectsPanel?.present()
+        } else {
+            recentProjectsPanel?.orderOut(nil)
         }
 
         // Recording widget.

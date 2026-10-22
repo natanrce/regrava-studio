@@ -73,6 +73,11 @@ enum UISnapshots {
             window.orderOut(nil)
         }
 
+        // Recent projects strip, with this Mac's recent list.
+        let recents = RecentProjectsModel()
+        recents.reload()
+        write(RecentProjectsView(model: recents, close: {}).background(Color(hex: 0x1C1D22)).environment(\.colorScheme, .dark), width: 1440, height: 280, to: directory.appendingPathComponent("recent-projects.png"))
+
         // Tooltip bubbles in each placement.
         let bubbles = VStack(spacing: 16) {
             TooltipBubble(config: TooltipConfig(label: "General", placement: .left))

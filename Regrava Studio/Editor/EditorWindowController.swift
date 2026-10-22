@@ -99,7 +99,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if model.isDirty && Preferences.shared.autoSaveProject { model.saveNow() }
+        if model.isDirty && Preferences.shared.autoSaveProject { model.saveNow() } else { model.writePreviewImage() }
         model.tearDown()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil

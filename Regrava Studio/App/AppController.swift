@@ -130,6 +130,19 @@ final class AppController {
         paths.removeAll { $0 == url.path }
         paths.insert(url.path, at: 0)
         UserDefaults.standard.set(Array(paths.prefix(30)), forKey: "recentProjects")
+        var opened = UserDefaults.standard.dictionary(forKey: "recentProjectsOpenedAt") as? [String: Double] ?? [:]
+        opened[url.path] = Date().timeIntervalSince1970
+        UserDefaults.standard.set(opened, forKey: "recentProjectsOpenedAt")
+    }
+
+    /// "Remove from Recents".
+    func removeRecent(_ url: URL) {
+        var paths = UserDefaults.standard.stringArray(forKey: "recentProjects") ?? []
+        paths.removeAll { $0 == url.path }
+        UserDefaults.standard.set(paths, forKey: "recentProjects")
+        var opened = UserDefaults.standard.dictionary(forKey: "recentProjectsOpenedAt") as? [String: Double] ?? [:]
+        opened[url.path] = nil
+        UserDefaults.standard.set(opened, forKey: "recentProjectsOpenedAt")
     }
 
     func openLastProject() {

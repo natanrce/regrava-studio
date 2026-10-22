@@ -1033,9 +1033,17 @@ final class EditorModel: ObservableObject {
         do {
             try ProjectStore.save(project, to: bundleURL)
             isDirty = false
+            writePreviewImage()
         } catch {
             errorMessage = "Could not save: \(error.localizedDescription)"
         }
+    }
+
+    /// The styled frame at the playhead, for the Recent Projects cards (`previewImagePath`).
+    func writePreviewImage() {
+        guard let item = player.currentItem else { return }
+        let asset = item.asset, composition = item.videoComposition, time = player.currentTime(), bundle = bundleURL
+        Task.detached { await ProjectPreview.write(asset: asset, videoComposition: composition, time: time, to: bundle) }
     }
 
     /// Renames the project folder. Forbidden characters are stripped.
