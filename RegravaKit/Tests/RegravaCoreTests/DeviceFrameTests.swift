@@ -25,6 +25,18 @@ import Testing
         #expect(p.deviceFrameChoices(perfect: false).filter { !$0.colors.isEmpty }.count == 22)
     }
 
+    @Test func iPhoneMirroringWindowsCanHaveAFrame() {
+        // The window minus its 38/8/8/8 chrome, recorded at 2x: an iPhone screen.
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 1206, height: 2622), pointPixelScale: 2, durationMs: 1000, fps: 60, mode: .window, flags: ["ScreenContinuity"]), mouseEvents: [])
+        #expect(project.canHaveDeviceFrame)
+        #expect(project.resolvedDeviceFrame != nil)
+        #expect(!project.canChangeScreenBorderRadius && !project.canChangeScreenInset)
+        project.device.enableMockup = false
+        #expect(!project.isUsingDeviceFrame && !project.canChangeScreenBorderRadius)
+        project.recording.flags = []
+        #expect(!project.canHaveDeviceFrame && project.canChangeScreenBorderRadius)
+    }
+
     @Test func savedKeyWinsAndScreenRecordingsHaveNone() {
         var p = project(1206, 2622)
         p.device.frameKey = "iPhone 16 Pro Desert"

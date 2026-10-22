@@ -51,6 +51,8 @@ public struct CaptureResult: Sendable {
     public var fps: Int
     /// The iPhone/iPad of a device recording.
     public var externalDevice: ExternalDeviceInfo?
+    /// `recordingFlags`: "ScreenContinuity" for iPhone Mirroring windows.
+    public var flags: [String] = []
 }
 
 public enum CaptureError: LocalizedError {
@@ -105,6 +107,8 @@ public final class ScreenRecorder: NSObject {
     private var originInPoints: CGPoint = .zero
     private var pointPixelScale: Double = 1
     private var videoSize = Size2(width: 0, height: 0)
+    private var flags: [String] = []
+    static let screenContinuityBundleID = "com.apple.ScreenContinuity"
     private var fps = 60
 
     private var startWaiters: [ObjectIdentifier: CheckedContinuation<TimeInterval, Error>] = [:]
@@ -253,7 +257,8 @@ public final class ScreenRecorder: NSObject {
             videoSize: videoSize,
             pointPixelScale: pointPixelScale,
             durationMs: total * 1000,
-            fps: fps
+            fps: fps,
+            flags: flags
         )
     }
 
@@ -340,6 +345,7 @@ public final class ScreenRecorder: NSObject {
 
         let filter: SCContentFilter
         var sourceRect: CGRect?
+        flags = []
         let sizeInPoints: CGSize
         switch source {
         case .display(let id):
@@ -350,8 +356,18 @@ public final class ScreenRecorder: NSObject {
         case .window(let id):
             guard let window = content.windows.first(where: { $0.windowID == id }) else { throw CaptureError.sourceNotFound }
             filter = SCContentFilter(desktopIndependentWindow: window)
-            originInPoints = window.frame.origin
-            sizeInPoints = window.frame.size
+            if window.owningApplication?.bundleIdentifier == Self.screenContinuityBundleID {
+                // iPhone Mirroring is always cropped to its phone screen: the window without its
+                // 38 pt title bar and 8 pt borders.
+                let inner = CGRect(x: 8, y: 38, width: max(window.frame.width - 16, 1), height: max(window.frame.height - 46, 1))
+                sourceRect = inner
+                originInPoints = CGPoint(x: window.frame.minX + inner.minX, y: window.frame.minY + inner.minY)
+                sizeInPoints = inner.size
+                flags = ["ScreenContinuity"]
+            } else {
+                originInPoints = window.frame.origin
+                sizeInPoints = window.frame.size
+            }
         case let .area(id, rect):
             guard let display = content.displays.first(where: { $0.displayID == id }) else { throw CaptureError.sourceNotFound }
             filter = SCContentFilter(display: display, excludingWindows: excluded)

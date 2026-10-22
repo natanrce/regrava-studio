@@ -518,7 +518,8 @@ final class RecordingCoordinator: ObservableObject {
                     cameraFileName: result.cameraURL?.lastPathComponent,
                     cameraSize: result.cameraSize,
                     mode: result.externalDevice != nil ? .externalDevice : (activeSelection.map { if case .window = $0 { return true } else { return false } } ?? false) ? .window : .display,
-                    externalDevice: result.externalDevice
+                    externalDevice: result.externalDevice,
+                    flags: result.flags
                 ),
                 mouseEvents: result.mouseEvents,
                 markersMs: result.markersMs,

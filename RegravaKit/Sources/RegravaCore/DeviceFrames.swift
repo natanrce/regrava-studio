@@ -146,8 +146,8 @@ public enum DeviceFrames {
 }
 
 public extension Project {
-    /// `canHaveDeviceFrame`: iPhone/iPad recordings.
-    var canHaveDeviceFrame: Bool { recording.isExternalDeviceMode }
+    /// `canHaveDeviceFrame`: iPhone/iPad and iPhone Mirroring recordings.
+    var canHaveDeviceFrame: Bool { recording.isExternalDeviceMode || recording.isScreenContinuity }
 
     /// `isUsingDeviceFrame`.
     var isUsingDeviceFrame: Bool { canHaveDeviceFrame && device.enableMockup }
@@ -180,6 +180,6 @@ public extension Project {
     }
 
     /// `changeBorderRadius` / `changeInset`.
-    var canChangeScreenBorderRadius: Bool { !(isUsingDeviceFrame || recording.isExternalDeviceMode && device.enableMockup) }
-    var canChangeScreenInset: Bool { !isUsingDeviceFrame && !recording.isExternalDeviceMode }
+    var canChangeScreenBorderRadius: Bool { !(isUsingDeviceFrame || recording.isScreenContinuity || recording.isExternalDeviceMode && device.enableMockup) }
+    var canChangeScreenInset: Bool { !isUsingDeviceFrame && !recording.isScreenContinuity && !recording.isExternalDeviceMode }
 }

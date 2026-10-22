@@ -188,6 +188,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
     public var mode: RecordingMode
     /// Set for `.externalDevice` recordings.
     public var externalDevice: ExternalDeviceInfo?
+    /// `recordingFlags` ("ScreenContinuity" for iPhone Mirroring windows).
+    public var flags: [String]
 
     public init(
         videoFileName: String = "recording.mov",
@@ -201,7 +203,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         cameraFileName: String? = nil,
         cameraSize: Size2? = nil,
         mode: RecordingMode = .display,
-        externalDevice: ExternalDeviceInfo? = nil
+        externalDevice: ExternalDeviceInfo? = nil,
+        flags: [String] = []
     ) {
         self.videoFileName = videoFileName
         self.videoSize = videoSize
@@ -215,7 +218,11 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         self.cameraSize = cameraSize
         self.mode = mode
         self.externalDevice = externalDevice
+        self.flags = flags
     }
+
+    /// `isScreenContinuityRecording`: an iPhone Mirroring window.
+    public var isScreenContinuity: Bool { flags.contains("ScreenContinuity") }
 
     public var hasCamera: Bool { cameraFileName != nil }
     public var isExternalDeviceMode: Bool { mode == .externalDevice }
@@ -238,6 +245,7 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         cameraSize = c.value(.cameraSize, default: nil)
         mode = c.value(.mode, default: .display)
         externalDevice = c.value(.externalDevice, default: nil)
+        flags = c.value(.flags, default: [])
     }
 }
 
