@@ -655,7 +655,7 @@ struct MaskInspector: View {
                             if mask.type == .sensitiveData {
                                 Callout(icon: "timeline.selection", message: "Make sure the mask covers the entire part of the timeline where sensitive data is present.")
                                 RSButton(title: "Focus the timeline on the mask start", kind: .secondary) { focus(mask, at: mask.startMs) }
-                                    .help("Start is source of the mask")
+                                    .tooltip("Start is source of the mask")
                             } else {
                                 SliderField(
                                     name: "Highlight mask opacity",

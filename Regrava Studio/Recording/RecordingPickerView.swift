@@ -82,7 +82,7 @@ struct PanelIconButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help(tooltip ?? "")
+        .tooltip(tooltip ?? "")
     }
 }
 
@@ -186,7 +186,7 @@ private struct DeviceButton<Accessory: View>: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help(tooltip ?? "")
+        .tooltip(tooltip ?? "")
     }
 }
 
@@ -341,7 +341,7 @@ private struct RecentProjectsToggle: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help(preferences.openRecentProjectsWithRecordingPicker ? "Hide recent projects" : "Show recent projects")
+        .tooltip(preferences.openRecentProjectsWithRecordingPicker ? "Hide recent projects" : "Show recent projects")
     }
 }
 
@@ -366,7 +366,7 @@ private struct RecordingOptionsButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("Recording options")
+        .tooltip("Recording options")
     }
 
     /// Shows the button as active, then opens the (modal) menu on the next run-loop turn.

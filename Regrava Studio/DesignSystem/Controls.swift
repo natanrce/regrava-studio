@@ -117,8 +117,15 @@ struct RSIconButton: View {
     var kind: RSButtonKind = .transparent
     var size: Size = .regular
     var tooltip: String?
+    var tooltipPlacement: TooltipPlacement = .top
     var action: () -> Void
     @State private var hovered = false
+
+    /// "Go to first frame  ⌘←": the shortcut after two spaces goes into the tooltip's chip.
+    private var tooltipParts: (label: String?, shortcut: String?) {
+        guard let tooltip, let range = tooltip.range(of: "  ") else { return (tooltip, nil) }
+        return (String(tooltip[..<range.lowerBound]), String(tooltip[range.upperBound...]).trimmingCharacters(in: .whitespaces))
+    }
 
     private var metrics: (side: CGFloat, width: CGFloat, radius: CGFloat, icon: CGFloat) {
         switch size {
@@ -142,7 +149,7 @@ struct RSIconButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(kind.foreground)
         .onHover { hovered = $0 }
-        .help(tooltip ?? "")
+        .tooltip(tooltipParts.label, shortcut: tooltipParts.shortcut, placement: tooltipPlacement)
     }
 }
 
@@ -349,7 +356,7 @@ struct NamedField<Content: View>: View {
                         .padding(.horizontal, Theme.Boxes.badge.paddingX)
                         .frame(minHeight: Theme.Boxes.badge.height)
                         .background(Capsule().fill(Theme.Colors.primaryActiveText.opacity(0.1)))
-                        .help(badge.tooltip)
+                        .tooltip(badge.tooltip)
                 }
                 if let icon { Image(systemName: icon).font(.system(size: 14)) }
                 Text(name).font(Theme.Typo.copy)

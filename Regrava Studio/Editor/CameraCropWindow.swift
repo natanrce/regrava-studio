@@ -306,7 +306,7 @@ private struct CropToolbar: View {
         let crop = model.state.crop
         HStack(spacing: Theme.gap(2.5)) {
             HStack(spacing: Theme.gap(1)) {
-                Text("Size").font(Theme.Typo.label).foregroundStyle(Theme.Colors.tertiary).fixedSize().help("Minimum value 200x200")
+                Text("Size").font(Theme.Typo.label).foregroundStyle(Theme.Colors.tertiary).fixedSize().tooltip("Minimum value 200x200")
                 CropNumberField(value: crop.width) { v in var c = model.state.crop; c.width = v; model.state.setCrop(c, applyConstraints: false) }
                 Text("×").foregroundStyle(Theme.Colors.tertiary).fixedSize()
                 CropNumberField(value: crop.height) { v in var c = model.state.crop; c.height = v; model.state.setCrop(c, applyConstraints: false) }
@@ -331,7 +331,7 @@ private struct CropToolbar: View {
     private var aspectButton: some View {
         RSButton(title: aspectLabel, icon: "aspectratio", kind: model.state.forcedAspectRatio == nil ? .secondaryInline : .subtle, size: .small) { isAspectOpen = true }
             .fixedSize()
-            .help("Set crop aspect ratio")
+            .tooltip("Set crop aspect ratio")
             .popover(isPresented: $isAspectOpen) {
                 VStack(alignment: .leading, spacing: 2) {
                     aspectRow("Any", nil)

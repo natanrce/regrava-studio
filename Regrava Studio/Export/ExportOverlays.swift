@@ -155,7 +155,7 @@ struct ExportStatusOverlay: View {
                             Image(systemName: "info.circle")
                                 .font(.system(size: 16))
                                 .opacity(0.5)
-                                .help("\(job.projectName).\(ProjectStore.fileExtension) → \(path)")
+                                .tooltip("\(job.projectName).\(ProjectStore.fileExtension) → \(path)")
                         }
                     }
                     .padding(.bottom, 4)

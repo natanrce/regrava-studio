@@ -259,7 +259,7 @@ private struct GradeTile: View {
                         .background(Circle().fill(Theme.Colors.text))
                 }
                 .buttonStyle(.plain)
-                .help("Move to Trash")
+                .tooltip("Move to Trash")
                 .offset(x: -3, y: -3)
                 .opacity(hovered ? 1 : 0)
             }
@@ -270,7 +270,7 @@ private struct GradeTile: View {
             }
         }
         .onHover { hovered = $0 }
-        .help(tooltip)
+        .tooltip(tooltip)
     }
 }
 
@@ -301,7 +301,7 @@ private struct PlusTile: View {
         .padding(2)
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.Colors.text.opacity(hovered ? 0.4 : 0), lineWidth: 1))
         .onHover { hovered = $0 }
-        .help("Create a color preset or load a LUT file...")
+        .tooltip("Create a color preset or load a LUT file...")
     }
 }
 

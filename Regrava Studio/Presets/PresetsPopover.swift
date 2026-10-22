@@ -94,7 +94,7 @@ private struct PresetRow: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Preset options...")
+                .tooltip("Preset options...")
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
@@ -105,7 +105,7 @@ private struct PresetRow: View {
             editor.previewPreset(inside ? entry : nil)
         }
         .onTapGesture { if !isRenaming { editor.applyPreset(entry) } }
-        .help("Click to apply")
+        .tooltip("Click to apply")
         .contextMenu { menu }
     }
 

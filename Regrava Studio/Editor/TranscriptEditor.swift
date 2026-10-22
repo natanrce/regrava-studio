@@ -57,14 +57,14 @@ struct TranscriptEditPanel: View {
                         editor.cutFromVideo(fillers)
                     }
                     .fixedSize()
-                    .help("Cut every detected filled pause (\"um\", \"uh\"...) out of the video")
+                    .tooltip("Cut every detected filled pause (\"um\", \"uh\"...) out of the video")
                 }
                 if !pauses.isEmpty {
                     RSButton(title: "Tighten \(pauses.count) pause\(pauses.count == 1 ? "" : "s")", icon: "timeline.selection", kind: .secondary) {
                         editor.cutFromVideo(pauses)
                     }
                     .fixedSize()
-                    .help("Shorten every long pause, keeping a natural breath on each side")
+                    .tooltip("Shorten every long pause, keeping a natural breath on each side")
                 }
             }
         }
@@ -491,14 +491,14 @@ struct TranscriptActionBar: View {
                     editor.cutFromVideo(targets)
                     onDone()
                 }
-                .help("Shorten this pause, keeping a natural breath on each side")
+                .tooltip("Shorten this pause, keeping a natural breath on each side")
             } else if canCutVideo {
                 RSButton(title: "Cut video", icon: "scissors", kind: .secondary, size: .small) {
                     onCutPreview(false)
                     editor.cutFromVideo(targets)
                     onDone()
                 }
-                .help("Cut this part out of the video")
+                .tooltip("Cut this part out of the video")
                 .onHover { onCutPreview($0) }
             }
             if canCutTranscript {
@@ -506,17 +506,17 @@ struct TranscriptActionBar: View {
                     editor.cutFromTranscript(targets)
                     onDone()
                 }
-                .help("Cut this part from the transcript and captions only — the video is unchanged, and Restore brings it back")
+                .tooltip("Cut this part from the transcript and captions only — the video is unchanged, and Restore brings it back")
             }
             if canRestore {
                 RSButton(title: "Restore", icon: "arrow.uturn.backward", kind: .secondary, size: .small) {
                     editor.restore(targets)
                     onDone()
                 }
-                .help("Bring this part back into the video and captions")
+                .tooltip("Bring this part back into the video and captions")
             }
             RSButton(title: "Play", icon: "play.fill", kind: .secondary, size: .small) { editor.audition(targets) }
-                .help("Play this part once")
+                .tooltip("Play this part once")
         }
         .padding(Theme.gap(1))
         .fixedSize()

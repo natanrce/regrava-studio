@@ -97,7 +97,7 @@ struct ShortcutsTrack: View {
         }
         .frame(height: height)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isFocused)
-        .help(isFocused ? "" : "Shortcuts track")
+        .tooltip(isFocused ? "" : "Shortcuts track")
         .onHover { inside in
             hoveringTrack = inside
             focusTask?.cancel()
@@ -172,7 +172,7 @@ private struct ShortcutChip: View {
         .frame(width: width, height: height)
         .onHover { hovered = $0 }
         // The label is appended when it doesn't fit the chip.
-        .help(tooltip + (labelWidth + 8 > width ? " " + item.label : ""))
+        .tooltip(tooltip + (labelWidth + 8 > width ? " " + item.label : ""))
         .contextMenu { menu }
         .offset(x: geometry.sx(item.startMs))
     }

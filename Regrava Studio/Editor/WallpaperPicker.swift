@@ -65,7 +65,7 @@ struct WallpaperPicker: View {
                                     Label(isFavourite ? "Remove from favourites" : "Add to favourites", systemImage: isFavourite ? "star.slash" : "star")
                                 }
                             }
-                            .help(wallpaper.name)
+                            .tooltip(wallpaper.name)
                     }
                 }
             }

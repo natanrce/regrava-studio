@@ -411,7 +411,7 @@ struct ShortcutRecorder: View {
                     .offset(x: shake ? 4 : 0)
             }
             .buttonStyle(.plain)
-            .help("Click to change")
+            .tooltip("Click to change")
         }
         .onDisappear(perform: stopRecording)
     }

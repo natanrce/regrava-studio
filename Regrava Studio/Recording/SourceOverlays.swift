@@ -513,7 +513,7 @@ private struct AreaToolbar: View {
             .background(MenuAnchor(holder: anchor))
         }
         .buttonStyle(.plain)
-        .help(tooltip)
+        .tooltip(tooltip)
     }
 
     private func aspectMenu() {

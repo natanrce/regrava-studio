@@ -98,7 +98,7 @@ private struct RailButton: View {
         .disabled(entry.disabledTooltip != nil)
         .opacity(entry.disabledTooltip != nil ? 0.3 : 1)
         .onHover { hovered = $0 }
-        .help(entry.disabledTooltip ?? entry.name)
+        .tooltip(entry.disabledTooltip ?? entry.name, placement: .left)
     }
 }
 

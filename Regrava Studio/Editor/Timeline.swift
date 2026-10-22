@@ -350,7 +350,7 @@ private struct ClipTrack: View {
                     .font(.system(size: 10))
                     .foregroundStyle(TrackColors.clip.mix(with: .white, by: 0.4))
                     .offset(x: geometry.sx(marker) - 3, y: -14)
-                    .help("Recording flag")
+                    .tooltip("Recording flag")
             }
         }
         .frame(height: 48)
@@ -554,7 +554,7 @@ private struct CutPins: View {
             .frame(width: 24, height: 24)
         }
         .buttonStyle(.plain)
-        .help(gap > 1 ? "Undo trim" : "Join clips")
+        .tooltip(gap > 1 ? "Undo trim" : "Join clips")
         .offset(x: geometry.sx(sourceMs) - 12, y: -30)
     }
 
@@ -588,7 +588,7 @@ private struct TypingSuggestionChip: View {
                 .frame(width: width, height: Self.height)
         }
         .buttonStyle(.plain)
-        .help("Speed up typing")
+        .tooltip("Speed up typing")
         // Sits on top of the clip track with 1 px between (bottom 100%, padding-bottom 1).
         .alignmentGuide(.leading) { _ in -start }
         .alignmentGuide(.top) { _ in Self.height + 1 }
@@ -688,7 +688,7 @@ private struct ZoomTrack: View {
         }
         .frame(height: height)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isFocused)
-        .help(isFocused ? "" : "Click to edit")
+        .tooltip(isFocused ? "" : "Click to edit")
         .onHover { inside in
             hoveringTrack = inside
             focusTask?.cancel()
@@ -955,7 +955,7 @@ private struct MaskTrack: View {
                     .opacity(0.5)
                     .overlay { if width > 20 { Image(systemName: "plus").foregroundStyle(.white) } }
                     .frame(width: width, height: 48)
-                    .help("Click or drag to create a new mask")
+                    .tooltip("Click or drag to create a new mask")
                     .offset(x: geometry.sx(range.start) + 1)
                     .allowsHitTesting(false)
             }
@@ -1155,7 +1155,7 @@ private struct LayoutTrack: View {
         }
         .frame(height: height)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isFocused)
-        .help(isFocused ? "" : "Click to edit")
+        .tooltip(isFocused ? "" : "Click to edit")
         .onHover { inside in
             hoveringTrack = inside
             focusTask?.cancel()

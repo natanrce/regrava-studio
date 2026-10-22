@@ -73,6 +73,16 @@ enum UISnapshots {
             window.orderOut(nil)
         }
 
+        // Tooltip bubbles in each placement.
+        let bubbles = VStack(spacing: 16) {
+            TooltipBubble(config: TooltipConfig(label: "General", placement: .left))
+            TooltipBubble(config: TooltipConfig(label: "Classic zoom", placement: .right))
+            TooltipBubble(config: TooltipConfig(label: "Go to first frame", shortcut: "⌘←", placement: .top))
+        }
+        .padding(20)
+        .background(Color.black)
+        write(bubbles, width: 320, height: 200, to: directory.appendingPathComponent("tooltips.png"))
+
         renderEditor(to: directory)
     }
 
