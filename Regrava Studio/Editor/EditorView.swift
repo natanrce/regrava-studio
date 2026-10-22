@@ -332,7 +332,7 @@ private struct LayoutControls: View {
                         let title = option.ratioLabel.map { "\(option.label)  \($0)" } ?? option.label
                         if editor.project.style.aspectRatio == option.ratio { Label(title, systemImage: "checkmark") } else { Text(title) }
                     }
-                    .tooltip(option.tip ?? "")
+                    .help(option.tip ?? "") // menu items keep the system tooltip
                 }
             } label: {
                 Label(currentAspect.label, systemImage: "aspectratio")

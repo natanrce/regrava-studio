@@ -42,10 +42,18 @@ enum BackgroundAudioLibrary {
     }
 
     /// Name without extension, truncated to `maxLength` characters when given.
+    /// `displayFromTrackName`: title case, truncated to `prefix(max − 3) + "..."`.
     static func displayName(_ fileName: String, maxLength: Int? = nil) -> String {
-        let name = (fileName as NSString).deletingPathExtension
+        let name = titleCase((fileName as NSString).deletingPathExtension)
         guard let maxLength, name.count > maxLength else { return name }
-        return String(name.prefix(maxLength)) + "…"
+        return String(name.prefix(maxLength - 3)) + "..."
+    }
+
+    /// Upper-cases the first letter of each space- and hyphen-separated piece.
+    static func titleCase(_ s: String) -> String {
+        s.split(separator: " ", omittingEmptySubsequences: false).map { word in
+            word.split(separator: "-", omittingEmptySubsequences: false).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: "-")
+        }.joined(separator: " ")
     }
 
     /// Copies into the project's assets folder; returns the stored file name.

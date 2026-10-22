@@ -700,7 +700,8 @@ struct MaskInspector: View {
 struct AudioPanel: View {
     @ObservedObject var editor: EditorModel
     @StateObject private var preview = BackgroundAudioPreview()
-    @State private var category: BackgroundAudioCategory = .userLibrary
+    /// Always starts on Lo-Fi; not persisted.
+    @State private var category: BackgroundAudioCategory = .loFi
     @State private var libraryTracks: [URL] = []
 
     private var audio: AudioConfig { editor.project.audio }
@@ -751,24 +752,28 @@ struct AudioPanel: View {
                         SegmentedPicker(
                             options: BackgroundAudioCategory.allCases,
                             label: { $0.title },
-                            // Built-in tracks are not available here.
-                            isDisabled: { $0 != .userLibrary },
                             size: .small,
                             selection: $category
                         )
-                        if !libraryTracks.isEmpty {
+                        let tracks = category == .userLibrary ? libraryTracks : BundledSounds.backgroundTracks(category: category.rawValue)
+                        if !tracks.isEmpty {
+                            // Selected = the track whose display name matches the stored file's. A
+                            // scrollable segmented row; selected = the track whose display name matches
+                            // the stored file's.
                             SegmentedPicker(
-                                options: libraryTracks,
-                                label: { BackgroundAudioLibrary.displayName($0.lastPathComponent) },
+                                options: tracks,
+                                label: { BackgroundAudioLibrary.displayName($0.lastPathComponent, maxLength: 20) },
                                 size: .small,
                                 selection: Binding(
-                                    get: { libraryTracks.first { BackgroundAudioLibrary.displayName($0.lastPathComponent) == BackgroundAudioLibrary.displayName(audio.backgroundAudioFileName ?? "") } ?? URL(fileURLWithPath: "/") },
+                                    get: { tracks.first { BackgroundAudioLibrary.displayName($0.lastPathComponent) == BackgroundAudioLibrary.displayName(audio.backgroundAudioFileName ?? "") } ?? URL(fileURLWithPath: "/") },
                                     set: { pick($0) }
                                 )
                             )
-                            RSButton(title: "Open audio library folder", icon: "folder", kind: .secondary) { BackgroundAudioLibrary.reveal() }
-                        } else {
-                            Callout(kind: .secondary, icon: nil, message: "Add background audio tracks to your library folder to access them here")
+                        }
+                        if category == .userLibrary {
+                            if libraryTracks.isEmpty {
+                                Callout(kind: .secondary, icon: nil, message: "Add background audio tracks to your library folder to access them here")
+                            }
                             RSButton(title: "Open audio library folder", icon: "folder", kind: .secondary) { BackgroundAudioLibrary.reveal() }
                         }
                         Rectangle().fill(Theme.Colors.lighterBg).frame(height: 1).padding(.vertical, 4)
@@ -816,7 +821,7 @@ struct AudioPanel: View {
     private func use(_ source: URL) {
         guard let name = BackgroundAudioLibrary.copy(source, intoProject: editor.bundleURL) else { return }
         editor.change { $0.audio.backgroundAudioFileName = name }
-        preview.play(url: assetURL(name), volume: audio.backgroundAudioVolume)
+        if !editor.isPlaying { preview.play(url: assetURL(name), volume: audio.backgroundAudioVolume) }
     }
 
     private func pick(_ track: URL) {
