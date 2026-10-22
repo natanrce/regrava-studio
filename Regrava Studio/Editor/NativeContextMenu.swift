@@ -33,6 +33,8 @@ enum MenuRow {
     /// "Microphone volume" … "100%"; the value snaps to steps of 0.1.
     case slider(title: String, value: Double, range: ClosedRange<Double>, valueLabel: (Double) -> String, onChange: (Double) -> Void)
     case palette([PaletteOption])
+    /// "A label and a switch, like the Wi-Fi menu's first row"; flipping it leaves the menu open.
+    case toggle(title: String, isOn: Bool, onChange: (Bool) -> Void)
 }
 
 struct MenuShortcut {
@@ -95,6 +97,10 @@ enum NativeContextMenu {
         case .slider(let title, let value, let range, let label, let onChange):
             let item = NSMenuItem()
             item.view = SliderRowView(title: title, value: value, range: range, valueLabel: label, onChange: onChange)
+            menu.addItem(item)
+        case .toggle(let title, let isOn, let onChange):
+            let item = NSMenuItem()
+            item.view = SwitchRowView(title: title, isOn: isOn, onChange: onChange)
             menu.addItem(item)
         case .palette(let options):
             guard options.count > 1 else { return }
@@ -198,6 +204,39 @@ private final class SliderRowView: NSView {
         valueField.stringValue = valueLabel(value)
         onChange(value)
     }
+}
+
+private final class SwitchRowView: NSView {
+    private let toggle = NSSwitch()
+    private let onChange: (Bool) -> Void
+
+    init(title: String, isOn: Bool, onChange: @escaping (Bool) -> Void) {
+        self.onChange = onChange
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 30))
+        let label = NSTextField(labelWithString: title)
+        label.font = .menuFont(ofSize: 0)
+        label.lineBreakMode = .byTruncatingTail
+        toggle.controlSize = .mini
+        toggle.state = isOn ? .on : .off
+        toggle.target = self
+        toggle.action = #selector(flipped)
+        for view in [label, toggle] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -12),
+            toggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            toggle.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func flipped() { onChange(toggle.state == .on) }
 }
 
 /// "Choices side by side, each a symbol over its name, the chosen one marked. Choosing one

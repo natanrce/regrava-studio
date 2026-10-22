@@ -80,7 +80,7 @@ struct ShortcutsTrack: View {
             Rectangle()
                 .fill(Color.white.opacity(0.001))
                 .frame(height: height)
-                .contextMenu { allMenu(items) }
+                .nativeContextMenu { [editor] in [[ShortcutChip.allRow(editor, items)]] }
             ForEach(items) { item in
                 ShortcutChip(editor: editor, item: item, items: items, geometry: geometry, height: height, isFocused: isFocused)
             }
@@ -108,12 +108,6 @@ struct ShortcutsTrack: View {
                 }
             }
         }
-    }
-
-    @ViewBuilder
-    private func allMenu(_ items: [ShortcutTrackItem]) -> some View {
-        let allHidden = editor.project.captions.hiddenShortcuts.count == items.count
-        Button(allHidden ? "Show all shortcuts" : "Hide all shortcuts") { editor.setAllShortcuts(visible: allHidden, items: items) }
     }
 }
 
@@ -173,21 +167,27 @@ private struct ShortcutChip: View {
         .onHover { hovered = $0 }
         // The label is appended when it doesn't fit the chip.
         .tooltip(tooltip + (labelWidth + 8 > width ? " " + item.label : ""))
-        .contextMenu { menu }
+        .nativeContextMenu { menu }
         .offset(x: geometry.sx(item.startMs))
     }
 
-    @ViewBuilder
-    private var menu: some View {
-        Toggle("Show this shortcut", isOn: Binding(get: { !isHidden }, set: { editor.setShortcuts([item.id], visible: $0) }))
+    /// Switches for this shortcut and every one like it, then show/hide all.
+    private var menu: [[MenuRow]] {
+        var single: [MenuRow] = [
+            .toggle(title: "Show this shortcut", isOn: !isHidden) { [editor, item] on in editor.setShortcuts([item.id], visible: on) },
+        ]
         let same = items.filter { $0.press.shortcut == item.press.shortcut }
         if same.count >= 2 {
             let allVisible = same.allSatisfy { editor.project.captions.hiddenShortcuts[$0.id] != true }
-            Toggle("Show every \(item.label)", isOn: Binding(get: { allVisible }, set: { editor.setShortcuts(same.map(\.id), visible: $0) }))
+            single.append(.toggle(title: "Show every \(item.label)", isOn: allVisible) { [editor] on in editor.setShortcuts(same.map(\.id), visible: on) })
         }
-        Divider()
+        return [single, [Self.allRow(editor, items)]]
+    }
+
+    /// "Hide all shortcuts" / "Show all shortcuts" (also the track's own menu).
+    static func allRow(_ editor: EditorModel, _ items: [ShortcutTrackItem]) -> MenuRow {
         let allHidden = editor.project.captions.hiddenShortcuts.count == items.count
-        Button(allHidden ? "Show all shortcuts" : "Hide all shortcuts") { editor.setAllShortcuts(visible: allHidden, items: items) }
+        return .command(.init(title: allHidden ? "Show all shortcuts" : "Hide all shortcuts") { editor.setAllShortcuts(visible: allHidden, items: items) })
     }
 }
 

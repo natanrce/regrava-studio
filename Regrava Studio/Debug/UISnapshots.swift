@@ -85,6 +85,7 @@ enum UISnapshots {
                 .init(title: "Loupe", icon: "sparkle.magnifyingglass", isSelected: false) {},
             ])],
             [.slider(title: "Zoom level", value: 2.4, range: 1...4, valueLabel: { "\(Int(($0 * 100).rounded()))%" }) { _ in }],
+            [.toggle(title: "Show this shortcut", isOn: true) { _ in }],
         ])
         for (index, item) in menu.items.enumerated() {
             guard let view = item.view else { continue }
