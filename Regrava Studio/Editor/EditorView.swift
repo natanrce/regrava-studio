@@ -116,7 +116,7 @@ private struct Topbar: View {
                 Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
                 RSButton(title: "Export", icon: "square.and.arrow.up.fill", kind: .primary) { editor.openExportPicker() }
                     .disabled(exports.isExporting || exports.isPickerOpen)
-                    .help(exports.isExporting ? "Only one export can be active at a time" : "")
+                    .tooltip(exports.isExporting ? "Only one export can be active at a time" : "")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -183,7 +183,8 @@ struct AddToolsRail: View {
                     RSIconButton(
                         icon: presentation == .screen ? "arrow.up.left.and.down.right.magnifyingglass" : "sparkle.magnifyingglass",
                         kind: armed ? .subtleBg : .transparent,
-                        tooltip: presentation == .screen ? "Classic zoom" : "Loupe zoom"
+                        tooltip: presentation == .screen ? "Classic zoom" : "Loupe zoom",
+                        tooltipPlacement: .right
                     ) {
                         editor.addZoomPresentation = presentation
                         editor.isAddZoomToolArmed = !armed
@@ -203,7 +204,8 @@ struct AddToolsRail: View {
                         RSIconButton(
                             icon: Self.layoutIcon(type),
                             kind: editor.isAddLayoutToolArmed && type == .cameraOverlay ? .subtleBg : .transparent,
-                            tooltip: Self.layoutLabel(type) + " layout"
+                            tooltip: Self.layoutLabel(type) + " layout",
+                        tooltipPlacement: .right
                         ) { editor.armOrAddLayout(type) }
                     }
                 }
@@ -214,7 +216,8 @@ struct AddToolsRail: View {
                     RSIconButton(
                         icon: type == .sensitiveData ? "circle.filled.pattern.diagonalline.rectangle" : "circle.rectangle.filled.pattern.diagonalline",
                         kind: editor.isAddMaskToolArmed && editor.addMaskType == type ? .subtleBg : .transparent,
-                        tooltip: type == .sensitiveData ? "Sensitive data mask" : "Highlight mask"
+                        tooltip: type == .sensitiveData ? "Sensitive data mask" : "Highlight mask",
+                        tooltipPlacement: .right
                     ) { editor.armMaskTool(type) }
                 }
             }
@@ -329,14 +332,14 @@ private struct LayoutControls: View {
                         let title = option.ratioLabel.map { "\(option.label)  \($0)" } ?? option.label
                         if editor.project.style.aspectRatio == option.ratio { Label(title, systemImage: "checkmark") } else { Text(title) }
                     }
-                    .help(option.tip ?? "")
+                    .tooltip(option.tip ?? "")
                 }
             } label: {
                 Label(currentAspect.label, systemImage: "aspectratio")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Output aspect ratio")
+            .tooltip("Output aspect ratio")
 
             Spacer()
 
@@ -402,7 +405,7 @@ private struct PlaybackBar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: Theme.gap(2)) {
-                    if showsTimes { TimeLabel(ms: editor.currentTimeMs, duration: editor.durationMs, omitFrames: editor.isPlaying) }
+                    if showsTimes { TimeLabel(editor: editor, ms: editor.currentTimeMs, duration: editor.durationMs, omitFrames: editor.isPlaying) }
                     RSIconButton(icon: "backward.end", size: .toolbar, tooltip: "Go to first frame  ⌘←") { editor.seek(to: 0) }
                     Button(action: editor.togglePlay) {
                         Image(systemName: editor.isPlaying ? "pause.circle" : "play.circle")
@@ -411,9 +414,9 @@ private struct PlaybackBar: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(editor.isPlaying ? "Pause" : "Play")
+                    .tooltip(editor.isPlaying ? "Pause" : "Play")
                     RSIconButton(icon: "forward.end", size: .toolbar, tooltip: "Go to last frame  ⌘→") { editor.seek(to: editor.durationMs) }
-                    if showsTimes { TimeLabel(ms: editor.durationMs, duration: editor.durationMs, omitFrames: false) }
+                    if showsTimes { TimeLabel(editor: editor, ms: editor.durationMs, duration: editor.durationMs, omitFrames: editor.isPlaying) }
                 }
 
                 HStack(spacing: Theme.gap(1)) {
@@ -429,7 +432,7 @@ private struct PlaybackBar: View {
                             isSecondary: true
                         )
                         .frame(minWidth: 72, maxWidth: 140)
-                        .help(Self.zoomTooltip(editor.visibleDurationMs))
+                        .tooltip(Self.zoomTooltip(editor.visibleDurationMs))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -447,13 +450,14 @@ private struct PlaybackBar: View {
 
 /// M:SS.FF / MM:SS.FF / HH:MM:SS.FF; click copies.
 private struct TimeLabel: View {
+    let editor: EditorModel
     var ms: Double
     var duration: Double
     var omitFrames: Bool
     @State private var hovered = false
 
     var body: some View {
-        Text(Self.format(ms, duration: duration, omitFrames: omitFrames))
+        Text(Self.format(ms, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: omitFrames))
             .font(Theme.Typo.copy.monospacedDigit())
             .foregroundStyle(Theme.Colors.tertiary)
             .lineLimit(1)
@@ -463,23 +467,22 @@ private struct TimeLabel: View {
             .onHover { hovered = $0 }
             .onTapGesture {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(Self.format(ms, duration: duration, omitFrames: false), forType: .string)
+                NSPasteboard.general.setString(Self.format(ms, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: false), forType: .string)
+                editor.showToast("Copied to clipboard")
             }
-            .help("Copy to clipboard")
     }
 
-    static func format(_ ms: Double, duration: Double, omitFrames: Bool) -> String {
+    /// The frame number within the second at the project fps; over an hour it always shows
+    /// HH:MM:SS.FF.
+    static func format(_ ms: Double, duration: Double, fps: Double, omitFrames: Bool) -> String {
         let total = max(ms, 0) / 1000
-        let frames = Int((total - floor(total)) * 60)
+        let rate = max(fps, 1)
+        let frames = Int(floor((total * rate).truncatingRemainder(dividingBy: rate)))
         let s = Int(total)
-        let base: String
         if duration > 3_600_000 {
-            base = String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
-        } else if duration >= 600_000 {
-            base = String(format: "%02d:%02d", s / 60, s % 60)
-        } else {
-            base = String(format: "%d:%02d", s / 60, s % 60)
+            return String(format: "%02d:%02d:%02d.%02d", s / 3600, (s % 3600) / 60, s % 60, frames)
         }
+        let base = duration >= 600_000 ? String(format: "%02d:%02d", (s % 3600) / 60, s % 60) : String(format: "%d:%02d", (s % 3600) / 60, s % 60)
         return omitFrames ? base : base + String(format: ".%02d", frames)
     }
 }
@@ -496,7 +499,7 @@ private struct SpeedButton: View {
                 .frame(height: 38)
         }
         .buttonStyle(.plain)
-        .help("Playback speed")
+        .tooltip("Playback speed")
         .contextMenu {
             Section("Slower") {
                 speedItem(0.25)
