@@ -250,6 +250,26 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    /// A paused recording can join its sessions with a few ms without video frames.
+    @Test func exportsAcrossAGapInTheVideoTrack() async throws {
+        try await withTestVideo { source, dir in
+            let asset = AVURLAsset(url: source)
+            let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+            let composition = AVMutableComposition()
+            let target = try #require(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
+            let half = CMTime(value: 1, timescale: 1)
+            try target.insertTimeRange(CMTimeRange(start: .zero, duration: half), of: track, at: .zero)
+            // 50 ms with no frames, then the rest.
+            try target.insertTimeRange(CMTimeRange(start: half, duration: half), of: track, at: CMTime(value: 1050, timescale: 1000))
+            let gapped = dir.appendingPathComponent("gapped.mov")
+            let session = try #require(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough))
+            try await session.export(to: gapped, as: .mov)
+            let output = dir.appendingPathComponent("gapped-export.mp4")
+            try await ProjectExporter.export(project: sampleProject(duration: 2050), videoURL: gapped, settings: .defaults(for: .mp4), to: output, cursors: nil)
+            #expect(try await AVURLAsset(url: output).load(.duration).seconds > 1.9)
+        }
+    }
+
     @Test func clickSoundsAddAnAudioTrack() async throws {
         try await withTestVideo { source, dir in
             var project = sampleProject(duration: 2000)

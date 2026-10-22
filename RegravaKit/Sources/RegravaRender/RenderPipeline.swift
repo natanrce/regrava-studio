@@ -228,10 +228,23 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
 
+    /// The last screen frame, held over gaps in the video track: a recording paused and
+    /// resumed can leave a few milliseconds without frames where its sessions join, and
+    /// failing those requests would stop playback.
+    private var lastSource: CVPixelBuffer?
+    private let lock = NSLock()
+
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         guard let instruction = request.videoCompositionInstruction as? CanvasInstruction,
-              let source = request.sourceFrame(byTrackID: instruction.trackID),
               let output = request.renderContext.newPixelBuffer() else {
+            request.finish(with: NSError(domain: "RegravaRender", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing frame"]))
+            return
+        }
+        lock.lock()
+        if let frame = request.sourceFrame(byTrackID: instruction.trackID) { lastSource = frame }
+        let held = lastSource
+        lock.unlock()
+        guard let source = held else {
             request.finish(with: NSError(domain: "RegravaRender", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing frame"]))
             return
         }
