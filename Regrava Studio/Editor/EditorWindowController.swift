@@ -181,6 +181,19 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 let types: [String: CameraLayoutType] = ["1": .cameraOverlay, "2": .fullscreenCamera, "3": .screenOnly, "4": .cutoutCamera]
                 guard let layout = editor.openLayoutID, let type = types[key] else { return false }
                 editor.updateLayout(layout) { $0.type = type }
+            // Copy / cut the open zoom, layout or mask, else copy the frame.
+            case ("c", [.command]):
+                if let zoom = openZoom { editor.copyZoom(zoom) }
+                else if let layout = editor.openLayoutID { editor.copyLayout(layout) }
+                else if let mask = editor.openMaskID { editor.copyMask(mask) }
+                else { editor.copyCurrentFrame() }
+            case ("x", [.command]):
+                if let zoom = openZoom { editor.cutZoom(zoom) }
+                else if let layout = editor.openLayoutID { editor.cutLayout(layout) }
+                else if let mask = editor.openMaskID { editor.cutMask(mask) }
+                else { return false }
+            case ("v", [.command]):
+                return editor.pasteItem()
             case ("z", [.command]): editor.undo()
             case ("z", [.command, .shift]): editor.redo()
             case ("=", [.command]), ("+", [.command]): editor.zoomTimeline(in: true)

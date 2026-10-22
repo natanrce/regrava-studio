@@ -78,6 +78,29 @@ enum UISnapshots {
         recents.reload()
         write(RecentProjectsView(model: recents, close: {}).background(Color(hex: 0x1C1D22)).environment(\.colorScheme, .dark), width: 1440, height: 280, to: directory.appendingPathComponent("recent-projects.png"))
 
+        // Context menu rows with custom views (palette, slider).
+        let menu = NativeContextMenu.build([
+            [.palette([
+                .init(title: "Classic", icon: "arrow.up.left.and.down.right.magnifyingglass", isSelected: true) {},
+                .init(title: "Loupe", icon: "sparkle.magnifyingglass", isSelected: false) {},
+            ])],
+            [.slider(title: "Zoom level", value: 2.4, range: 1...4, valueLabel: { "\(Int(($0 * 100).rounded()))%" }) { _ in }],
+        ])
+        for (index, item) in menu.items.enumerated() {
+            guard let view = item.view else { continue }
+            view.appearance = NSAppearance(named: .darkAqua)
+            let host = NSView(frame: view.frame)
+            host.wantsLayer = true
+            host.layer?.backgroundColor = NSColor(white: 0.17, alpha: 1).cgColor
+            host.appearance = NSAppearance(named: .darkAqua)
+            host.addSubview(view)
+            host.layoutSubtreeIfNeeded()
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("menu-row-\(index).png"))
+            }
+        }
+
         // Tooltip bubbles in each placement.
         let bubbles = VStack(spacing: 16) {
             TooltipBubble(config: TooltipConfig(label: "General", placement: .left))

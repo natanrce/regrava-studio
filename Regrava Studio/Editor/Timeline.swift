@@ -437,7 +437,7 @@ private struct SliceItem: View {
                 editor.openSlice(slice.id)
             }
         }
-        .contextMenu { SliceMenu(editor: editor, slice: slice, index: index) }
+        .nativeContextMenu { editor.sliceMenu(slice) }
         .offset(x: start + 1)
     }
 
@@ -483,50 +483,8 @@ private struct SliceItem: View {
     }
 }
 
-/// Clip context menu.
-private struct SliceMenu: View {
-    @ObservedObject var editor: EditorModel
-    var slice: Slice
-    var index: Int
-
-    var body: some View {
-        let slices = editor.project.slices
-        Button("Split at current time") { editor.splitSlice(atPlayback: editor.currentTimeMs) }
-            .keyboardShortcut("c", modifiers: [])
-        if index > 0 { Button("Merge slice with previous") { editor.mergeSlice(slice.id, with: .previous) } }
-        if index + 1 < slices.count { Button("Merge slice with next") { editor.mergeSlice(slice.id, with: .next) } }
-        if editor.project.sliceHasStartTrim(index) || editor.project.sliceHasEndTrim(index) {
-            Button("Reset slice trim") { editor.removeSliceTrim(slice.id) }
-        }
-        Divider()
-        Menu("Set slice speed") {
-            ForEach(Slice.speedOptions, id: \.self) { speed in
-                Button(ClipTrack.speed(speed)) { editor.setSliceSpeed(slice.id, speed) }
-            }
-        }
-        Button("Apply speed to all slices") { editor.applySpeedToAllSlices(from: slice.id) }
-            .disabled(!editor.canApplySpeedToAll(from: slice.id))
-        Divider()
-        Toggle("Hide mouse cursor", isOn: Binding(
-            get: { slice.hideCursor },
-            set: { v in editor.updateSlice(slice.id) { $0.hideCursor = v } }
-        ))
-        Toggle("Disable smooth mouse movement", isOn: Binding(
-            get: { slice.disableSmoothMouseMovement },
-            set: { v in editor.updateSlice(slice.id) { $0.disableSmoothMouseMovement = v } }
-        ))
-        if slices.count > 1 {
-            Divider()
-            Button("Remove slice", role: .destructive) { editor.removeSlice(slice.id) }
-                .keyboardShortcut(.delete, modifiers: [])
-        }
-        Divider()
-        Button("Reset trims and cuts for all slices", role: .destructive) { editor.resetAllSlices() }
-    }
-}
-
-/// Cut and trim pins: a 24 px teardrop with scissors and the cut length; "Undo trim"
-/// restores the trimmed time, "Join clips" merges two clips split without a gap.
+/// Clip context menu. Cut and trim pins: a 24 px teardrop with scissors and the cut length;
+/// "Undo trim" restores the trimmed time, "Join clips" merges two clips split without a gap.
 private struct CutPins: View {
     @ObservedObject var editor: EditorModel
     var slices: [Slice]
@@ -675,7 +633,7 @@ private struct ZoomTrack: View {
                     if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.sourceTime(location.x) } else { ghostTimeMs = nil }
                 }
                 .gesture(createGesture)
-                .contextMenu { trackMenu }
+                .nativeContextMenu { editor.zoomTrackMenu() }
 
             if isFocused {
                 leadInBands
@@ -788,14 +746,6 @@ private struct ZoomTrack: View {
         }
     }
 
-    @ViewBuilder
-    private var trackMenu: some View {
-        Button("Enable all zoom ranges") { editor.setAllZooms(disabled: false) }
-        Button("Disable all zoom ranges") { editor.setAllZooms(disabled: true) }
-        Button("Restore default zoom ranges") { editor.restoreDefaultZooms() }
-        Divider()
-        Button("Remove all zoom ranges", role: .destructive) { editor.removeZooms(Set(editor.project.zooms.map(\.id))) }
-    }
 }
 
 /// Floating hint that bobs (2 s): blurred background at 0.8, padding 6×12, radius 5, weight 500.
@@ -859,7 +809,7 @@ private struct ZoomItem: View {
         }
         .gesture(moveGesture)
         .simultaneousGesture(TapGesture().onEnded { tap() })
-        .contextMenu { itemMenu }
+        .nativeContextMenu { editor.zoomMenu(zoom) }
         .offset(x: geometry.sx(zoom.startMs) + 1)
     }
 
@@ -907,33 +857,6 @@ private struct ZoomItem: View {
             )
     }
 
-    @ViewBuilder
-    private var itemMenu: some View {
-        Button { editor.updateZoom(zoom.id) { $0.presentation = .screen } } label: {
-            Label("Classic zoom", systemImage: "arrow.up.left.and.down.right.magnifyingglass")
-        }
-        Button { editor.updateZoom(zoom.id) { $0.presentation = .loupe } } label: {
-            Label("Loupe zoom", systemImage: "sparkle.magnifyingglass")
-        }
-        Divider()
-        Menu("Change zoom level") {
-            ForEach(Array(EditorShortcuts.zoomLevels.enumerated()), id: \.offset) { index, level in
-                Button(String(format: "%g×", level)) { editor.updateZoom(zoom.id) { $0.scale = level } }
-                    .keyboardShortcut(KeyEquivalent(Character(String((index + 1) % 10))), modifiers: [])
-            }
-        }
-        Button("Apply zoom level to all other zooms") { editor.applyZoomLevelToAll(from: zoom.id) }
-        Divider()
-        Button("Split zoom at current time") { editor.splitZoom(zoom.id, at: editor.currentSourceTimeMs) }
-            .keyboardShortcut("c", modifiers: [])
-        Button("Duplicate zoom") { editor.duplicateZoom(zoom.id) }
-            .keyboardShortcut("d", modifiers: .command)
-        Button(zoom.isDisabled ? "Enable zoom" : "Disable zoom") { editor.updateZoom(zoom.id) { $0.isDisabled.toggle() } }
-            .keyboardShortcut("d", modifiers: [])
-        Divider()
-        Button("Remove zoom", role: .destructive) { editor.removeZooms([zoom.id]) }
-            .keyboardShortcut(.delete, modifiers: [])
-    }
 }
 
 /// Zoom levels for keys 1…9 (and 0 = default level).
@@ -964,11 +887,7 @@ private struct MaskTrack: View {
                     if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.sourceTime(location.x) } else { ghostTimeMs = nil }
                 }
                 .gesture(createGesture)
-                .contextMenu {
-                    Button("Disable all masks") { editor.setAllMasks(disabled: true) }
-                        .disabled(!editor.project.masks.contains { !$0.isDisabled })
-                    Button("Remove all masks", role: .destructive) { editor.removeMasks(Set(editor.project.masks.map(\.id))) }
-                }
+.nativeContextMenu { editor.maskTrackMenu() }
             if isFocused, let range = creation ?? ghostRange {
                 let width = max(geometry.sx(range.end) - geometry.sx(range.start) - 1, 1)
                 TrackItemBody(color: TrackColors.mask, isPlayed: false, isActive: false, isSelected: false)
@@ -1081,27 +1000,10 @@ private struct MaskItem: View {
                     editor.openMask(mask.id)
                 }
             })
-            .contextMenu { menu }
+            .nativeContextMenu { editor.maskMenu(mask) }
             .offset(x: geometry.sx(mask.startMs) + 1)
     }
 
-    @ViewBuilder
-    private var menu: some View {
-        Button { editor.updateMask(mask.id) { $0.type = .highlight } } label: {
-            Label("Highlight", systemImage: "circle.rectangle.filled.pattern.diagonalline")
-        }
-        Button { editor.updateMask(mask.id) { $0.type = .sensitiveData } } label: {
-            Label("Sensitive data", systemImage: "circle.filled.pattern.diagonalline.rectangle")
-        }
-        Divider()
-        Button("Split mask at current time") { editor.splitMask(mask.id, at: editor.currentSourceTimeMs) }
-            .keyboardShortcut("c", modifiers: [])
-        Button(mask.isDisabled ? "Enable mask" : "Disable mask") { editor.updateMask(mask.id) { $0.isDisabled.toggle() } }
-            .keyboardShortcut("d", modifiers: [])
-        Divider()
-        Button("Remove mask", role: .destructive) { editor.removeMasks([mask.id]) }
-            .keyboardShortcut(.delete, modifiers: [])
-    }
 
     private func resizeHandle(leading: Bool, width: CGFloat) -> some View {
         Rectangle()
@@ -1147,9 +1049,7 @@ private struct LayoutTrack: View {
                     if case .active(let location) = phase, isFocused { ghostTimeMs = geometry.sourceTime(location.x) } else { ghostTimeMs = nil }
                 }
                 .gesture(createGesture)
-                .contextMenu {
-                    Button("Remove all layouts", role: .destructive) { editor.removeLayouts(Set(editor.project.cameraLayouts.map(\.id))) }
-                }
+.nativeContextMenu { editor.layoutTrackMenu() }
             if isFocused, let range = creation ?? ghostRange {
                 let width = max(geometry.sx(range.end) - geometry.sx(range.start) - 1, 1)
                 TrackItemBody(color: TrackColors.layout, isPlayed: false, isActive: false, isSelected: false)
@@ -1274,28 +1174,11 @@ private struct LayoutItem: View {
                     editor.openLayout(layout.id)
                 }
             })
-            .contextMenu { menu }
+            .nativeContextMenu { editor.layoutMenu(layout) }
             .offset(x: geometry.sx(layout.startMs) + 1)
     }
 
     /// Palette [Overlay, Cutout, Fullscreen, Hide camera], split, remove.
-    @ViewBuilder
-    private var menu: some View {
-        Button { setType(.cameraOverlay) } label: { Label("Overlay", systemImage: "square.grid.3x3") }
-            .keyboardShortcut("1", modifiers: [])
-        Button { setType(.cutoutCamera) } label: { Label("Cutout", systemImage: "person.and.background.dotted") }
-            .keyboardShortcut("4", modifiers: [])
-        Button { setType(.fullscreenCamera) } label: { Label("Fullscreen", systemImage: "person.crop.rectangle") }
-            .keyboardShortcut("2", modifiers: [])
-        Button { setType(.screenOnly) } label: { Label("Hide camera", systemImage: "macwindow") }
-            .keyboardShortcut("3", modifiers: [])
-        Divider()
-        Button("Split layout at current time") { editor.splitLayout(layout.id, at: editor.currentSourceTimeMs) }
-            .keyboardShortcut("c", modifiers: [])
-        Divider()
-        Button("Remove layout", role: .destructive) { editor.removeLayouts([layout.id]) }
-            .keyboardShortcut(.delete, modifiers: [])
-    }
 
     private func setType(_ type: CameraLayoutType) {
         editor.updateLayout(layout.id) { $0.type = type }

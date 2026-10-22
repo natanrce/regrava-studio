@@ -52,6 +52,9 @@ final class EditorModel: ObservableObject {
     @Published var sidebarRoot: SidebarRoot = .background
     @Published var sidebarItem: SidebarItem?
     @Published var selectedZoomIDs: Set<UUID> = []
+    /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
+    var itemClipboard: ItemClipboard?
+    var defaultZoomLevelTask: Task<Void, Never>?
     /// Zoom add tool armed from the add-tools rail.
     @Published var isAddZoomToolArmed = false
     /// Which zoom the add tool places (`view.addZoomPresentation`).
