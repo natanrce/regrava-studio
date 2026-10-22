@@ -328,23 +328,6 @@ private struct ClipTrack: View {
             ForEach(editor.project.pendingTypingSuggestions, id: \.startMs) { range in
                 TypingSuggestionChip(editor: editor, range: range, geometry: geometry)
             }
-            // Transcript words near the hover position, while paused.
-            if !editor.isPlaying, let hoverPlaybackMs, editor.transcript != nil {
-                let labels = TimelineWords.labels(editor.clientTranscript, resolver: geometry.resolver, previewMs: hoverPlaybackMs, pxPerMs: geometry.pxPerMs)
-                ForEach(labels, id: \.id) { label in
-                    Text(label.text)
-                        .font(Theme.Typo.label)
-                        .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
-                        .shadow(color: .black.opacity(0.8), radius: 2)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .opacity(label.opacity)
-                        .position(x: geometry.x(hoverPlaybackMs) + label.offset, y: -12)
-                        .zIndex(label.opacity * 100)
-                        .animation(.interpolatingSpring(mass: 1.6, stiffness: 500, damping: 32), value: label.offset)
-                        .allowsHitTesting(false)
-                }
-            }
             ForEach(editor.project.markersMs.filter { geometry.resolver.isSourceTimePresent($0) }, id: \.self) { marker in
                 Image(systemName: "flag.fill")
                     .font(.system(size: 10))
@@ -354,6 +337,21 @@ private struct ClipTrack: View {
             }
         }
         .frame(height: 48)
+        // Transcript words near the hover position, while paused: 4 px above the clip track,
+        // over the marks there, each x sprung on its own.
+        .overlay(alignment: .topLeading) {
+            if !editor.isPlaying, let hoverPlaybackMs, editor.transcript != nil {
+                let labels = TimelineWords.labels(editor.clientTranscript, resolver: geometry.resolver, previewMs: hoverPlaybackMs, pxPerMs: geometry.pxPerMs)
+                ZStack {
+                    ForEach(labels, id: \.id) { label in
+                        TimelineWordLabel(text: label.text, x: geometry.x(hoverPlaybackMs) + label.offset, opacity: label.opacity)
+                            .zIndex(label.opacity * 100)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+        }
+        .zIndex(1)
     }
 
     /// "12s", "1m 5s", "2min".
@@ -368,6 +366,28 @@ private struct ClipTrack: View {
     static func speed(_ speed: Double) -> String {
         let text = speed >= 1 ? String(format: "%g", (speed * 10).rounded() / 10) : String(format: "%g", (speed * 100).rounded() / 100)
         return text + "×"
+    }
+}
+
+/// A transcript word over the timeline: centred on `x`, bottom 4 px above the clip track,
+/// its x sprung with `{stiffness 500, damping 32, mass 1.6}`.
+private struct TimelineWordLabel: View {
+    var text: String
+    var x: CGFloat
+    var opacity: Double
+
+    var body: some View {
+        Text(text)
+            .font(Theme.Typo.label)
+            .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+            .shadow(color: .black.opacity(0.8), radius: 2)
+            .lineLimit(1)
+            .fixedSize()
+            // Bottom-centre on (x, −4) of the clip track.
+            .frame(width: 0, height: 0, alignment: .bottom)
+            .position(x: x, y: -4)
+            .opacity(opacity)
+            .animation(.interpolatingSpring(mass: 1.6, stiffness: 500, damping: 32), value: x)
     }
 }
 

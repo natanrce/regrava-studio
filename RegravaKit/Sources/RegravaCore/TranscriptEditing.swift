@@ -428,8 +428,8 @@ public enum TimelineWords {
         let widths = picked.map { width($0.text.trimmingCharacters(in: .whitespaces)) }
         declutter(&offsets, widths)
         return zip(picked, offsets).map { w, offset in
-            let px = distance(playback(w)) * pxPerMs
-            return Label(id: w.index, text: w.text.trimmingCharacters(in: .whitespaces), offset: offset, opacity: clamp(1 - px / 450, 0, 1))
+            // Fades over 450 ms of distance from the word's playback range.
+            return Label(id: w.index, text: w.text.trimmingCharacters(in: .whitespaces), offset: offset, opacity: clamp(1 - distance(playback(w)) / 450, 0, 1))
         }
     }
 
