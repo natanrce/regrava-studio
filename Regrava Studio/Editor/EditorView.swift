@@ -272,7 +272,9 @@ private struct PreviewSpace: View {
                     }
                     if editor.isAddZoomToolArmed {
                         ZoomPlacementPreview(editor: editor, size: size)
-                        Text(editor.addZoomPresentation == .loupe ? "Click where to place the loupe" : "Click the canvas to place a zoom")
+                        // Automatic zooms aren't offered for device recordings.
+                        let automatic = !editor.project.recording.isExternalDeviceMode
+                        Text((editor.addZoomPresentation == .loupe ? "Click where to place the loupe" : "Click where to zoom in") + (automatic ? " — or use Automatic zoom" : ""))
                             .font(Theme.Typo.label.weight(.medium))
                             .padding(.vertical, 6)
                             .padding(.horizontal, 12)
@@ -280,6 +282,15 @@ private struct PreviewSpace: View {
                             .frame(maxHeight: .infinity, alignment: .top)
                             .padding(.top, 12)
                             .allowsHitTesting(false)
+                        if automatic {
+                            RSButton(title: "Automatic zoom", icon: "computermouse.fill", kind: .translucent, size: .small) {
+                                editor.addZoomAtPlayhead(presentation: editor.addZoomPresentation)
+                                editor.isAddZoomToolArmed = false
+                            }
+                            .tooltip("Adds a zoom that automatically follows the mouse activity")
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                            .padding(.bottom, 16)
+                        }
                     }
                 }
                 .overlay { PreviewMarkers(editor: editor, scale: scale) }
@@ -818,14 +829,16 @@ private struct ZoomPlacementPreview: View {
                 }
                 .onTapGesture { location in
                     let target = Vec2(clamp(location.x / size.width, 0, 1), clamp(location.y / size.height, 0, 1))
-                    editor.addZoom(startMs: editor.currentSourceTimeMs, manualTarget: target, presentation: editor.addZoomPresentation)
+                    editor.addZoomAtPlayhead(presentation: editor.addZoomPresentation, manualTarget: target)
                     editor.isAddZoomToolArmed = false
                 }
             if let pointer {
                 let isLoupe = editor.addZoomPresentation == .loupe
-                let zoom = Preferences.shared.defaultZoomLevel ?? 2
+                // Sized from the last edited style.
+                let style = LastEditedZoomStyle.stored
+                let zoom = style?.zoom ?? 2
                 // Loupe: diameter radius01 × 2 × overlay width. Classic: width/zoom × height/zoom.
-                let w = isLoupe ? LoupeOptions().radius01 * 2 * size.width : size.width / zoom
+                let w = isLoupe ? (style?.loupeOptions.radius01 ?? LoupeOptions().radius01) * 2 * size.width : size.width / zoom
                 let h = isLoupe ? w : size.height / zoom
                 let shape = RoundedRectangle(cornerRadius: isLoupe ? w / 2 : 8)
                 shape

@@ -938,6 +938,46 @@ final class EditorModel: ObservableObject {
             body(&project.zooms[index])
             project.zooms[index].isGenerated = false
         }
+        if let zoom = project.zooms.first(where: { $0.id == id }) { LastEditedZoomStyle.capture(zoom) }
+    }
+
+    /// `addZoomAtPlayhead`: the add tool and its "Automatic zoom" button. The last edited zoom
+    /// style applies first, then the explicit inputs. Inside a zoom, that zoom is split at the
+    /// playhead and the inputs go to the right part.
+    func addZoomAtPlayhead(presentation: ZoomPresentation, manualTarget: Vec2? = nil) {
+        let t = currentSourceTimeMs
+        let style = LastEditedZoomStyle.stored
+        func applyInputs(_ zoom: inout ZoomRange) {
+            if let style {
+                zoom.scale = style.zoom
+                zoom.loupeOptions = style.loupeOptions
+                zoom.isInstant = style.hasInstantAnimation
+            }
+            zoom.presentation = presentation
+            if let manualTarget {
+                zoom.mode = .manual
+                zoom.manualTarget = manualTarget
+            }
+        }
+        if let inside = project.zooms.first(where: { t > $0.startMs && t < $0.endMs }) {
+            splitZoom(inside.id, at: t)
+            if let right = project.zooms.first(where: { $0.id != inside.id && abs($0.startMs - t) < 0.5 }) {
+                change { project in
+                    guard let i = project.zooms.firstIndex(where: { $0.id == right.id }) else { return }
+                    applyInputs(&project.zooms[i])
+                }
+                openZoom(right.id)
+                return
+            }
+        }
+        guard let id = addZoom(startMs: t, manualTarget: manualTarget, presentation: presentation) else {
+            showToast("Could not insert zoom at currently selected time")
+            return
+        }
+        change { project in
+            guard let i = project.zooms.firstIndex(where: { $0.id == id }) else { return }
+            applyInputs(&project.zooms[i])
+        }
     }
 
     /// Drag-move, clamped to the neighbours and the timeline bounds.

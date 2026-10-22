@@ -98,6 +98,7 @@ extension EditorModel {
             change { project in
                 for i in project.zooms.indices where ids.contains(project.zooms[i].id) { project.zooms[i].presentation = presentation }
             }
+            if let edited = project.zooms.first(where: { $0.id == first.id }) { LastEditedZoomStyle.capture(edited) }
         }
         func preview(_ presentation: ZoomPresentation) -> (Bool) -> Void {
             { [weak self] inside in
@@ -117,6 +118,7 @@ extension EditorModel {
                     for i in project.zooms.indices where ids.contains(project.zooms[i].id) { project.zooms[i].scale = v }
                 }
                 self?.rememberDefaultZoomLevel(v)
+                if let edited = self?.project.zooms.first(where: { $0.id == first.id }) { LastEditedZoomStyle.capture(edited) }
             },
         ]
         if single {

@@ -43,7 +43,11 @@ extension EditorModel {
             EditorAction(name: "Show project in Finder", group: "Project", icon: "folder", shortcut: "⌘ ⇧ O", perform: finder),
             EditorAction(name: "Split at current time", group: "Slice", icon: "scissors", shortcut: "C") { [weak self] in self.map { $0.splitSlice(atPlayback: $0.currentTimeMs) } },
             EditorAction(name: "Reset trims and cuts for all slices", group: "Slice", icon: "arrowshape.turn.up.left") { [weak self] in self?.resetAllSlices() },
-            EditorAction(name: "Add classic zoom", group: "Zooms", icon: "arrow.up.left.and.down.right.magnifyingglass") { [weak self] in
+            // "Add " + the add tool's presentation label.
+            EditorAction(
+                name: addZoomPresentation == .loupe ? "Add loupe zoom" : "Add classic zoom", group: "Zooms",
+                icon: addZoomPresentation == .loupe ? "sparkle.magnifyingglass" : "arrow.up.left.and.down.right.magnifyingglass"
+            ) { [weak self] in
                 self?.isAddZoomToolArmed = true
                 self?.pause()
             },
