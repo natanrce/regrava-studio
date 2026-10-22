@@ -2,21 +2,41 @@ import AppKit
 import CoreImage
 import RegravaCore
 
-/// A cursor bitmap with its size and hotspot in points (top-left origin).
+/// A cursor image with its hotspot and the box of its visible (non-shadow) part, both in 0…1 of
+/// the full image, top-left origin (`imageInfo`).
 public struct CursorAsset: @unchecked Sendable {
     public let image: CIImage
-    public let sizePoints: Size2
-    public let hotspotPoints: Vec2
+    public let hotspot01: Vec2
+    public let visibleRect01: Rect2
 
-    public init(image: CIImage, sizePoints: Size2, hotspotPoints: Vec2) {
+    public init(image: CIImage, hotspot01: Vec2, visibleRect01: Rect2) {
         self.image = image
-        self.sizePoints = sizePoints
-        self.hotspotPoints = hotspotPoints
+        self.hotspot01 = hotspot01
+        self.visibleRect01 = visibleRect01
     }
 
-    /// System arrow when available (needs a running NSApplication), otherwise a vector arrow.
+    /// Measures the visible box.
+    public init(cgImage: CGImage, hotspot01: Vec2) {
+        self.init(image: CIImage(cgImage: cgImage), hotspot01: hotspot01,
+                  visibleRect01: CursorRaster.visibleRect01(cgImage) ?? Rect2(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    public var aspectRatio: Double { image.extent.width / max(image.extent.height, 1) }
+
+    /// Where the full image goes (top-left origin) so that its visible part is `visibleHeight`
+    /// tall and its hotspot sits on `tip`.
+    public func rect(tip: Vec2, visibleHeight: Double) -> Rect2 {
+        let height = visibleHeight / max(visibleRect01.height, 0.0001)
+        let width = height * aspectRatio
+        return Rect2(x: tip.x - hotspot01.x * width, y: tip.y - hotspot01.y * height, width: width, height: height)
+    }
+
+    /// The default set's pointer, or a drawn arrow when the bundle has none.
     public static func defaultArrow() -> CursorAsset {
-        systemArrow() ?? vectorArrow()
+        CursorSets.set(id: CursorSetChoice.defaultID)
+            .flatMap { $0.entry(forType: "pointer", variants: [:]) }
+            .flatMap { entry in CursorRaster.image(entry.url).map { CursorAsset(cgImage: $0, hotspot01: entry.hotspot01) } }
+            ?? vectorArrow()
     }
 
     /// A classic arrow drawn from a path (black fill, white outline), 6× resolution.
@@ -50,102 +70,9 @@ public struct CursorAsset: @unchecked Sendable {
         context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
         context.addPath(path)
         context.fillPath()
-        return CursorAsset(
-            image: CIImage(cgImage: context.makeImage()!),
-            sizePoints: sizePoints,
-            hotspotPoints: Vec2(outline, outline)
-        )
+        return CursorAsset(cgImage: context.makeImage()!, hotspot01: Vec2(outline / sizePoints.width, outline / sizePoints.height))
     }
 
-    /// The system arrow, rasterized at high resolution so it stays sharp when zoomed.
-    /// Returns nil when AppKit cannot provide it (e.g. outside a running application).
-    public static func systemArrow(rasterScale: Double = 6) -> CursorAsset? {
-        rasterized(NSCursor.arrow, rasterScale: rasterScale)
-    }
-
-    /// A system cursor drawn at `rasterScale` pixels per point.
-    public static func rasterized(_ cursor: NSCursor, rasterScale: Double = 6) -> CursorAsset? {
-        rasterized(cursor.image, hotSpot: Vec2(cursor.hotSpot.x, cursor.hotSpot.y), rasterScale: rasterScale)
-    }
-
-    static func rasterized(_ source: NSImage, hotSpot: Vec2, size: NSSize? = nil, rasterScale: Double = 6) -> CursorAsset? {
-        let size = size ?? source.size
-        guard size.width > 0, size.height > 0 else { return nil }
-        let pixelsWide = Int(size.width * rasterScale)
-        let pixelsHigh = Int(size.height * rasterScale)
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: pixelsWide,
-            pixelsHigh: pixelsHigh,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else { return nil }
-        rep.size = size
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
-        NSGraphicsContext.current = context
-        context.imageInterpolation = .high
-        source.draw(in: NSRect(origin: .zero, size: size))
-        context.flushGraphics()
-        guard let cgImage = rep.cgImage else { return nil }
-        return CursorAsset(
-            image: CIImage(cgImage: cgImage),
-            sizePoints: Size2(width: size.width, height: size.height),
-            hotspotPoints: hotSpot
-        )
-    }
-
-    /// System cursor for an image name of the cursor sets. nil for names without a
-    /// public AppKit cursor (they fall back to the pointer).
-    public static func systemCursor(named name: String) -> NSCursor? {
-        switch name {
-        case "pointer": return .arrow
-        case "ibeam", "ibeamstroke": return .iBeam
-        case "ibeamvertical", "ibeamverticalstroke": return .iBeamCursorForVerticalLayout
-        case "cross", "crosshair": return .crosshair
-        case "closedhand": return .closedHand
-        case "openhand": return .openHand
-        case "pointinghand": return .pointingHand
-        case "resizeleft": return .resizeLeft
-        case "resizeright": return .resizeRight
-        case "resizeleftright": return .resizeLeftRight
-        case "resizeup": return .resizeUp
-        case "resizedown": return .resizeDown
-        case "resizeupdown": return .resizeUpDown
-        case "poof": return .disappearingItem
-        case "notallowed": return .operationNotAllowed
-        case "makealias": return .dragLink
-        case "copy": return .dragCopy
-        case "contextualmenu": return .contextualMenu
-        default: break
-        }
-        if #available(macOS 15.0, *) {
-            switch name {
-            case "zoomin": return .zoomIn
-            case "zoomout": return .zoomOut
-            case "resizenorth": return .frameResize(position: .top, directions: .outward)
-            case "resizesouth": return .frameResize(position: .bottom, directions: .outward)
-            case "resizewest": return .frameResize(position: .left, directions: .outward)
-            case "resizeeast": return .frameResize(position: .right, directions: .outward)
-            case "resizenorthwest": return .frameResize(position: .topLeft, directions: .outward)
-            case "resizenortheast": return .frameResize(position: .topRight, directions: .outward)
-            case "resizesouthwest": return .frameResize(position: .bottomLeft, directions: .outward)
-            case "resizesoutheast": return .frameResize(position: .bottomRight, directions: .outward)
-            case "resizenorthsouth": return .frameResize(position: .top, directions: .all)
-            case "resizeeastwest": return .frameResize(position: .left, directions: .all)
-            case "resizenorthwestsoutheast": return .frameResize(position: .topLeft, directions: .all)
-            case "resizenortheastsouthwest": return .frameResize(position: .topRight, directions: .all)
-            default: break
-            }
-        }
-        return nil
-    }
 }
 
 /// Every cursor image a project can show, by image name ("pointer", "pointinghand",
@@ -164,26 +91,36 @@ public struct CursorLibrary: @unchecked Sendable {
         CursorLibrary(assets: [:], pointer: CursorAsset.defaultArrow())
     }
 
-    /// The images a project's recording uses: system cursors for standard types and the saved
-    /// images of custom ones (`bundle/cursors/<id>.png`).
+    /// The images a project's recording uses: every standard cursor from the chosen style (its
+    /// chosen variants, falling back to the pointer), and the saved images of app cursors
+    /// (`bundle/cursors/<id>.png`) only with the classic "macos" style.
     public static func make(project: Project, bundle: URL?) -> CursorLibrary {
-        let pointer = CursorAsset.defaultArrow()
+        let choice = project.cursor.set
+        guard let set = CursorSets.set(id: choice.id) else { return arrowOnly() }
+        func bundled(_ type: String) -> CursorAsset? {
+            guard let entry = set.entry(forType: type, variants: choice.variants), let image = CursorRaster.image(entry.url) else { return nil }
+            return CursorAsset(cgImage: image, hotspot01: entry.hotspot01)
+        }
+        let pointer = bundled(CursorTypes.defaultName) ?? CursorAsset.vectorArrow()
         var assets: [String: CursorAsset] = [CursorTypes.defaultName: pointer]
-        let names = Set(project.mouseEvents.map { CursorTypes.assetName(for: $0.cursorID) })
+        var names = Set(project.mouseEvents.map { CursorTypes.assetName(for: $0.cursorID) })
+        names.insert("pointinghand")
         for name in names where assets[name] == nil {
             if CursorTypes.isCustom(name) {
-                guard let bundle, let info = project.recording.cursors.first(where: { $0.id == name }),
-                      let image = NSImage(contentsOf: ProjectStore.cursorImageURL(bundle: bundle, id: name)) else { continue }
-                let size = NSSize(width: info.standardSize.width, height: info.standardSize.height)
-                assets[name] = CursorAsset.rasterized(image, hotSpot: info.hotSpot, size: size)
-            } else if let cursor = CursorAsset.systemCursor(named: name) {
-                assets[name] = CursorAsset.rasterized(cursor)
+                guard choice.id == "macos", let bundle, let info = project.recording.cursors.first(where: { $0.id == name }),
+                      let image = NSImage(contentsOf: ProjectStore.cursorImageURL(bundle: bundle, id: name)),
+                      let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+                      info.standardSize.width > 0, info.standardSize.height > 0 else { continue }
+                assets[name] = CursorAsset(cgImage: cg, hotspot01: Vec2(info.hotSpot.x / info.standardSize.width, info.hotSpot.y / info.standardSize.height))
+            } else if let asset = bundled(name) {
+                assets[name] = asset
             }
         }
         return CursorLibrary(assets: assets, pointer: pointer)
     }
 
+    /// The type, else the pointer, else the pointing hand.
     public func asset(named name: String) -> CursorAsset {
-        assets[name] ?? pointer
+        assets[name] ?? assets[CursorTypes.defaultName] ?? assets["pointinghand"] ?? pointer
     }
 }

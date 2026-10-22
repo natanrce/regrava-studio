@@ -131,17 +131,19 @@ public final class FrameCompositor: @unchecked Sendable {
             let scaleNow = frame.cursorScale
             let trailScale = scaleNow + (frame.previousCursorScale - scaleNow) * cursorStrength
             let travel = tip.distance(to: trailTip)
-            var cursorImage = placedCursor(cursor, tip: tip, frame: frame, pixelsPerPoint: pixelsPerPoint * scaleNow)
+            // The visible cursor is `size` source pixels tall, times the press scale.
+            let visibleHeight = cursorConfig.size * videoToCanvas
+            var cursorImage = placedCursor(cursor, tip: tip, frame: frame, visibleHeight: visibleHeight * scaleNow)
             if cursorStrength > 0 && travel >= 1 {
                 let bounds = cursorImage.extent
-                    .union(placedCursor(cursor, tip: trailTip, frame: frame, pixelsPerPoint: pixelsPerPoint * trailScale).extent)
+                    .union(placedCursor(cursor, tip: trailTip, frame: frame, visibleHeight: visibleHeight * trailScale).extent)
                     .integral
                 if let blurred = MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel, quality: quality), bounds: bounds, layer: { t in
                     self.placedCursor(
                         cursor,
                         tip: trailTip.lerp(to: tip, t),
                         frame: frame,
-                        pixelsPerPoint: pixelsPerPoint * (trailScale + (scaleNow - trailScale) * t)
+                        visibleHeight: visibleHeight * (trailScale + (scaleNow - trailScale) * t)
                     )
                 }) {
                     cursorImage = blurred
@@ -463,11 +465,8 @@ public final class FrameCompositor: @unchecked Sendable {
     }
 
     /// The cursor drawn with its hotspot at `tip` (canvas pixels).
-    private func placedCursor(_ cursor: CursorAsset, tip: Vec2, frame: CameraFrame, pixelsPerPoint: Double) -> CIImage {
-        let width = cursor.sizePoints.width * pixelsPerPoint
-        let height = cursor.sizePoints.height * pixelsPerPoint
-        let topLeft = Vec2(tip.x - cursor.hotspotPoints.x * pixelsPerPoint, tip.y - cursor.hotspotPoints.y * pixelsPerPoint)
-        let target = ciRect(Rect2(x: topLeft.x, y: topLeft.y, width: width, height: height))
+    private func placedCursor(_ cursor: CursorAsset, tip: Vec2, frame: CameraFrame, visibleHeight: Double) -> CIImage {
+        let target = ciRect(cursor.rect(tip: tip, visibleHeight: visibleHeight))
         let image = cursor.image
         var placed = image
             .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))

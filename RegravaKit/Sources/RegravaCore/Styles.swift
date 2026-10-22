@@ -294,9 +294,31 @@ public enum ClickEffect: String, Codable, CaseIterable, Sendable {
     case circle, ripple
 }
 
+/// `cursor.set`: the cursor style and the variant chosen per type.
+public struct CursorSetChoice: Codable, Hashable, Sendable {
+    public var id: String
+    /// Cursor type → entry id ("pointer" → "pointer-3").
+    public var variants: [String: String]
+
+    public static let defaultID = "macos-tahoe"
+
+    public init(id: String = CursorSetChoice.defaultID, variants: [String: String] = [:]) {
+        self.id = id
+        self.variants = variants
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.value(.id, default: CursorSetChoice.defaultID)
+        variants = c.value(.variants, default: [:])
+    }
+}
+
 public struct CursorConfig: Codable, Hashable, Sendable {
-    /// "Cursor size", 16–128 (48 ≈ 1.5× the system cursor).
+    /// "Cursor size": how many source pixels tall the visible cursor is.
     public var size: Double
+    /// "Cursor style".
+    public var set: CursorSetChoice
     public var hide: Bool
     /// "Hide cursor if not moving" (500–5000 ms), nil = off.
     public var hideNotMovingAfterMs: Double?
@@ -327,9 +349,11 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         baseRotation: Double = 0,
         alwaysUseDefault: Bool = false,
         optimizeOriginalTypes: Bool = true,
-        followRecordedPositionOnHover: Bool = true
+        followRecordedPositionOnHover: Bool = true,
+        set: CursorSetChoice = CursorSetChoice()
     ) {
         self.size = size
+        self.set = set
         self.hide = hide
         self.hideNotMovingAfterMs = hideNotMovingAfterMs
         self.loopPositionBeforeEndMs = loopPositionBeforeEndMs
@@ -356,6 +380,7 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         alwaysUseDefault = c.value(.alwaysUseDefault, default: d.alwaysUseDefault)
         optimizeOriginalTypes = c.value(.optimizeOriginalTypes, default: d.optimizeOriginalTypes)
         followRecordedPositionOnHover = c.value(.followRecordedPositionOnHover, default: d.followRecordedPositionOnHover)
+        set = c.value(.set, default: d.set)
     }
 
     /// Multiplier over the system cursor size (32 px reference).

@@ -230,6 +230,7 @@ struct CursorPanel: View {
             } else {
                 SidebarSection {
                     SliderField(name: "Cursor size", value: editor.binding(\.cursor.size), range: 16...128, preview: { String(format: "%.1f", $0) }, resetValue: 48)
+                    CursorStylePicker(editor: editor)
                     ToggleRow(
                         title: "Always use pointer cursor",
                         description: "Don't change cursor, even if selecting text, etc.",
@@ -912,6 +913,166 @@ struct ClickSoundField: View {
                     .disabled(isPreviewBusy)
                 }
             }
+        }
+    }
+}
+
+// MARK: - Cursor style
+
+/// Last variant picked per set and type, on this Mac (`cursorSetVariantPreference_v2`).
+enum CursorVariantPreference {
+    private static let key = "cursorSetVariantPreference_v2"
+
+    static func variants(for setID: String) -> [String: String] {
+        (UserDefaults.standard.dictionary(forKey: key)?[setID] as? [String: String]) ?? [:]
+    }
+
+    static func remember(setID: String, type: String, entryID: String) {
+        var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        var forSet = all[setID] as? [String: String] ?? [:]
+        forSet[type] = entryID
+        all[setID] = forSet
+        UserDefaults.standard.set(all, forKey: key)
+    }
+}
+
+struct CursorStylePicker: View {
+    @ObservedObject var editor: EditorModel
+
+    private var choice: CursorSetChoice { editor.project.cursor.set }
+
+    var body: some View {
+        let sets = CursorSets.pickable()
+        let selectedSet = CursorSets.all.first { $0.id == choice.id }
+        NamedField(name: "Cursor style") {
+            VStack(alignment: .leading, spacing: Theme.gap(2)) {
+                CursorTileStrip(
+                    options: sets.compactMap { set in representative(of: set).map { (set, $0) } },
+                    size: 32,
+                    selectedID: { $0.0.id == choice.id },
+                    entry: { $0.1 },
+                    variants: { option in option.0.variantTypes.flatMap { option.0.cursors[$0] ?? [] } },
+                    onPick: { option in
+                        editor.change { $0.cursor.set = CursorSetChoice(id: option.0.id, variants: CursorVariantPreference.variants(for: option.0.id)) }
+                    }
+                )
+                if let selectedSet, !selectedSet.variantTypes.isEmpty {
+                    NamedField(name: "Variant") {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            ForEach(selectedSet.variantTypes, id: \.self) { type in
+                                let entries = selectedSet.cursors[type] ?? []
+                                let current = entries.first { $0.id == choice.variants[type] } ?? entries.first
+                                CursorTileStrip(
+                                    options: entries,
+                                    size: 24,
+                                    selectedID: { $0 == current },
+                                    entry: { $0 },
+                                    variants: { _ in [] },
+                                    onPick: { entry in
+                                        var updated = choice
+                                        updated.variants[type] = entry.id
+                                        CursorVariantPreference.remember(setID: selectedSet.id, type: type, entryID: entry.id)
+                                        editor.change { $0.cursor.set = updated }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The preferred variant of the pointer (or pointing hand…), else its first.
+    private func representative(of set: CursorSet) -> CursorSetEntry? {
+        let entries = set.representativeEntries
+        guard let type = entries.first?.type else { return nil }
+        let preferred = CursorVariantPreference.variants(for: set.id)[type]
+        return entries.first { $0.id == preferred } ?? entries.first
+    }
+}
+
+/// A horizontally scrolling row of square tiles that keeps the selected one centred.
+struct CursorTileStrip<Option>: View {
+    var options: [Option]
+    var size: CGFloat
+    var selectedID: (Option) -> Bool
+    var entry: (Option) -> CursorSetEntry
+    var variants: (Option) -> [CursorSetEntry]
+    var onPick: (Option) -> Void
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.gap(1)) {
+                    ForEach(options.indices, id: \.self) { i in
+                        let option = options[i]
+                        CursorTile(entry: entry(option), variants: variants(option), size: size, isSelected: selectedID(option)) { onPick(option) }
+                            .id(i)
+                    }
+                }
+                .padding(.horizontal, 24)
+            }
+            .padding(.horizontal, -24)
+            .onAppear { if let i = options.firstIndex(where: selectedID) { proxy.scrollTo(i, anchor: .center) } }
+            .onChange(of: options.firstIndex(where: selectedID)) { _, i in
+                if let i { withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo(i, anchor: .center) } }
+            }
+        }
+    }
+}
+
+/// The image contained in a square (macos art scaled 1.75×); hovering an unselected tile
+/// cycles its variants after 100 ms, then every second.
+struct CursorTile: View {
+    var entry: CursorSetEntry
+    var variants: [CursorSetEntry]
+    var size: CGFloat
+    var isSelected: Bool
+    var action: () -> Void
+    @State private var hovered = false
+    @State private var shown: CursorSetEntry?
+    @State private var cycle: Task<Void, Never>?
+
+    var body: some View {
+        let current = shown ?? entry
+        Button(action: action) {
+            Group {
+                if let image = current.image {
+                    Image(decorative: image, scale: 1).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: size, height: size)
+            .scaleEffect(entry.setID == "macos" ? 1.75 : 1)
+            .id(current.url)
+            .transition(.opacity.combined(with: .scale(scale: 0.2)))
+            .padding(8 * size / 32)
+            .background(RoundedRectangle(cornerRadius: 6).fill(hovered ? Theme.Colors.hover : Theme.Colors.lighterBg))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(isSelected ? Theme.Colors.primaryActiveText : Theme.Colors.systemBorder.opacity(0.5), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.25), value: current.url)
+        .onHover { inside in
+            hovered = inside
+            cycle?.cancel()
+            shown = nil
+            guard inside, !isSelected, !variants.isEmpty else { return }
+            cycle = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                var index = variants.firstIndex(of: entry) ?? -1
+                while !Task.isCancelled {
+                    index = (index + 1) % variants.count
+                    shown = variants[index]
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            }
+        }
+        .onChange(of: isSelected) { _, selected in
+            if selected { cycle?.cancel(); shown = nil }
         }
     }
 }

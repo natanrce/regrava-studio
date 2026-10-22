@@ -87,7 +87,7 @@ final class EditorModel: ObservableObject {
         toast = message
     }
 
-    private let cursors: CursorLibrary
+    private var cursors: CursorLibrary
     private let renderState: RenderState
     private var baseConfiguration: AVVideoComposition.Configuration?
     private var compositionCanvas: Size2?
@@ -228,7 +228,10 @@ final class EditorModel: ObservableObject {
         let cameraDelayChanged = updated.camera.delayAdjustmentMs != project.camera.delayAdjustmentMs
         let faceTrackingChanged = updated.camera.enableFaceTracking != project.camera.enableFaceTracking
         let silenceChanged = updated.camera.hideDuringSilenceMs != project.camera.hideDuringSilenceMs
+        let cursorStyleChanged = updated.cursor.set != project.cursor.set
         project = updated
+        // A new cursor style means new images (picked before the next snapshot is made).
+        if cursorStyleChanged { cursors = CursorLibrary.make(project: project, bundle: bundleURL) }
         canUndo = !undoStack.isEmpty
         canRedo = !redoStack.isEmpty
         if case .zoom(let id) = sidebarItem, !project.zooms.contains(where: { $0.id == id }) { sidebarItem = nil }
@@ -599,17 +602,10 @@ final class EditorModel: ObservableObject {
         let layout = snapshot.track.layout
         let asset = cursors.asset(named: frame.cursorName)
         let videoToCanvas = frame.screenRect.width / max(layout.videoSize.width, 1)
-        let perPoint = project.recording.pointPixelScale * project.cursor.sizeMultiplier * videoToCanvas * frame.cursorScale
         let tip = layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect)
-        return Rect2(
-            x: tip.x - asset.hotspotPoints.x * perPoint,
-            y: tip.y - asset.hotspotPoints.y * perPoint,
-            width: asset.sizePoints.width * perPoint,
-            height: asset.sizePoints.height * perPoint
-        )
+        return asset.rect(tip: tip, visibleHeight: project.cursor.size * videoToCanvas * frame.cursorScale)
     }
 
-    /// Corner radius of the recording right now (canvas pixels), as the compositor draws it.
     var recordingAreaCornerRadius: Double {
         let snapshot = renderState.current
         let area = snapshot.track.frame(at: currentTimeMs).screenRect
