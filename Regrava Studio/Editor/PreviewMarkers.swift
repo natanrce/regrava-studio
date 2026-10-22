@@ -27,6 +27,16 @@ struct PreviewMarkers: View {
                             open(.background, "Opened background settings")
                         }
                     }
+                    // The webcam: opens Camera Layout, or Camera Style when Camera Layout is already open.
+                    if let camera = editor.cameraAreaRect {
+                        MarkerArea(rect: CGRect(x: camera.rect.x * scale, y: camera.rect.y * scale, width: camera.rect.width * scale, height: camera.rect.height * scale), cornerRadius: camera.cornerRadius * scale) {
+                            if editor.sidebarRoot == .cameraLayout {
+                                open(.cameraStyle, "Opened camera style settings")
+                            } else {
+                                open(.cameraLayout, "Opened camera layout settings")
+                            }
+                        }
+                    }
                     if let lens = editor.loupeAreaRect {
                         MarkerArea(rect: CGRect(x: lens.x * scale, y: lens.y * scale, width: lens.width * scale, height: lens.height * scale), cornerRadius: lens.width * scale / 2) {
                             editor.openLoupeAtPlayhead()

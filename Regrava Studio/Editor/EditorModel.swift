@@ -650,6 +650,13 @@ final class EditorModel: ObservableObject {
         showToast("Opened zoom settings", durationMs: 1000)
     }
 
+    /// The webcam on the canvas while it is shown (canvas pixels).
+    var cameraAreaRect: (rect: Rect2, cornerRadius: Double)? {
+        let frame = renderState.current.track.frame(at: currentTimeMs)
+        guard !project.camera.hide, let rect = frame.cameraRect, frame.cameraOpacity > 0.5, rect.width > 1, rect.height > 1 else { return nil }
+        return (rect, min(frame.cameraCornerRadius, min(rect.width, rect.height) / 2))
+    }
+
     var recordingAreaRect: Rect2 {
         renderState.current.track.frame(at: currentTimeMs).screenRect
     }
