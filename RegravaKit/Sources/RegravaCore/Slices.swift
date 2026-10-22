@@ -140,6 +140,12 @@ public struct TimeResolver: Sendable, Hashable {
         return 1 / scale
     }
 
+    /// `getSpeedAtSourceTime`: the clip's speed at source time `t`.
+    public func speed(atSource t: Double) -> Double {
+        let scale = linkIndex(atSource: t).map { links[$0].timeScale } ?? 1
+        return 1 / scale
+    }
+
     public var playbackDurationMs: Double { links.last?.playbackEndMs ?? 0 }
     public var sourceStartMs: Double { links.first?.sourceStartMs ?? 0 }
     public var sourceEndMs: Double { links.last?.sourceEndMs ?? 0 }

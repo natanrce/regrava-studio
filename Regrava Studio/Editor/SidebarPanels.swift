@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import AppKit
 import RegravaCore
+import RegravaRender
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -278,6 +279,7 @@ struct CursorPanel: View {
                             selection: editor.binding(\.cursor.clickEffect)
                         )
                     }
+                    ClickSoundField(editor: editor)
                 }
                 SidebarSection {
                     NamedField(name: "Rotation", togglable: true) {
@@ -834,5 +836,77 @@ struct AudioPanel: View {
         preview.stop()
         try? FileManager.default.removeItem(at: assetURL(name))
         editor.change { $0.audio.backgroundAudioFileName = nil }
+    }
+}
+
+// MARK: - Click sound
+
+/// Plays the chosen set's click.wav at the current volume (`audio.playSoundAsset`).
+@MainActor
+enum ClickSoundPreview {
+    private static var player: AVAudioPlayer?
+
+    static func play(_ set: ClickSoundSet, volume: Double) {
+        guard let url = BundledSounds.click(set, .click), let player = try? AVAudioPlayer(contentsOf: url) else { return }
+        player.volume = Float(volume)
+        player.play()
+        self.player = player
+    }
+}
+
+struct ClickSoundField: View {
+    @ObservedObject var editor: EditorModel
+    @State private var isPreviewBusy = false
+
+    private var audio: AudioConfig { editor.project.audio }
+
+    /// Shown while paused over a part faster than 2× (`sourceRate > 2`).
+    private var showsSpeedWarning: Bool {
+        guard !editor.isPlaying else { return false }
+        let resolver = editor.project.resolver
+        return resolver.speed(atSource: resolver.playbackToSource(editor.currentTimeMs)) * editor.playbackRate > 2
+    }
+
+    var body: some View {
+        NamedField(name: "Click sound") {
+            VStack(alignment: .leading, spacing: Theme.gap(2)) {
+                SegmentedPicker(
+                    options: [nil] + ClickSoundSet.allCases.map { Optional($0) },
+                    label: { $0?.label ?? "None" },
+                    selection: Binding(
+                        get: { audio.clickSoundEffect },
+                        set: { value in
+                            editor.change { $0.audio.clickSoundEffect = value }
+                            // Auto-preview when a set is chosen.
+                            if let value { ClickSoundPreview.play(value, volume: audio.clickSoundEffectVolume) }
+                        }
+                    )
+                )
+                if showsSpeedWarning {
+                    Callout(message: "Sound will not be played for parts with a playback speed greater than 2x.")
+                }
+                if let set = audio.clickSoundEffect {
+                    SliderField(
+                        name: "Click sound volume",
+                        icon: "computermouse",
+                        value: Binding(
+                            get: { audio.clickSoundEffectVolume },
+                            set: { v in editor.change(coalesce: "click-sound-volume") { $0.audio.clickSoundEffectVolume = (v * 10).rounded() / 10 } }
+                        ),
+                        range: 0...1,
+                        step: 0.1,
+                        preview: { "\(Int(($0 * 100).rounded()))%" },
+                        resetValue: 0.25
+                    )
+                    RSButton(title: "Play click sound preview", icon: "speaker.wave.2", kind: .secondary) {
+                        guard !isPreviewBusy else { return }
+                        ClickSoundPreview.play(set, volume: audio.clickSoundEffectVolume)
+                        isPreviewBusy = true
+                        Task { try? await Task.sleep(nanoseconds: 300_000_000); isPreviewBusy = false }
+                    }
+                    .disabled(isPreviewBusy)
+                }
+            }
+        }
     }
 }

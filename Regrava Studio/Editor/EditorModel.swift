@@ -221,6 +221,9 @@ final class EditorModel: ObservableObject {
         let backgroundChanged = updated.audio.backgroundAudioFileName != project.audio.backgroundAudioFileName
             || updated.audio.muteBackgroundAudio != project.audio.muteBackgroundAudio
             || (updated.audio.backgroundAudioVolume > 0) != (project.audio.backgroundAudioVolume > 0)
+        // Click sounds are tracks of the composition: a new set or turning the volume on or off.
+        let clicksChanged = updated.audio.clickSoundEffect != project.audio.clickSoundEffect
+            || (updated.audio.clickSoundEffectVolume > 0) != (project.audio.clickSoundEffectVolume > 0)
         let audioChanged = updated.audio != project.audio
         let cameraDelayChanged = updated.camera.delayAdjustmentMs != project.camera.delayAdjustmentMs
         let faceTrackingChanged = updated.camera.enableFaceTracking != project.camera.enableFaceTracking
@@ -238,8 +241,8 @@ final class EditorModel: ObservableObject {
         rememberLastProjectConfig()
         if faceTrackingChanged { updateFaceTracking() }
         if silenceChanged { updateSilence() }
-        if canvasChanged || slicesChanged || backgroundChanged || cameraDelayChanged {
-            Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || cameraDelayChanged) }
+        if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
+            Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged) }
         } else {
             if audioChanged { Task { await refreshAudioMix() } }
             scheduleRefresh()

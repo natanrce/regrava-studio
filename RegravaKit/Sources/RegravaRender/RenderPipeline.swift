@@ -261,7 +261,7 @@ public struct PlaybackMedia: @unchecked Sendable {
 /// to its speed (gaps between clips are left out). Composition time is playback time.
 public enum PlaybackComposition {
     public static func make(asset: AVAsset, slices: [Slice]) async throws -> AVAsset {
-        try await composition(asset: asset, slices: slices, camera: nil, backgroundAudio: nil, playbackDurationMs: 0) ?? asset
+        try await composition(asset: asset, slices: slices, camera: nil, backgroundAudio: nil, clicks: [], playbackDurationMs: 0)?.asset ?? asset
     }
 
     /// The webcam movie of a project: saved beside the screen recording.
@@ -281,19 +281,27 @@ public enum PlaybackComposition {
             if FileManager.default.fileExists(atPath: url.path) { backgroundURL = url }
         }
         let resolver = project.resolver
-        let playable = try await composition(
+        // Click sounds: each at its event's playback time, at speed 1.
+        var clicks: [(url: URL, atMs: Double)] = []
+        if let set = audio.clickSoundEffect, audio.clickSoundEffectVolume > 0 {
+            clicks = project.plannedClickSounds.compactMap { c in BundledSounds.click(set, c.kind).map { ($0, c.playbackTimeMs) } }
+        }
+        let built = try await composition(
             asset: asset, slices: project.slices, camera: cameraAsset(project: project, recording: asset),
             cameraOffsetMs: project.camera.delayAdjustmentMs,
-            backgroundAudio: backgroundURL, playbackDurationMs: resolver.playbackDurationMs
-        ) ?? asset
+            backgroundAudio: backgroundURL, clicks: clicks, playbackDurationMs: resolver.playbackDurationMs
+        )
+        let playable = built?.asset ?? asset
         let tracks = try await playable.loadTracks(withMediaType: .audio)
         guard !tracks.isEmpty else { return PlaybackMedia(asset: playable, audioMix: nil) }
         let sources = project.recording.audioSources
         var parameters: [AVAudioMixInputParameters] = []
         for (index, track) in tracks.enumerated() {
             let input = AVMutableAudioMixInputParameters(track: track)
-            if backgroundURL != nil && index == tracks.count - 1 && playable !== asset {
+            if let built, track.trackID == built.backgroundTrackID {
                 input.setVolume(Float(audio.backgroundAudioVolume * audio.volume), at: .zero)
+            } else if let built, built.clickTrackIDs.contains(track.trackID) {
+                input.setVolume(Float(audio.clickSoundEffectVolume * audio.volume), at: .zero)
             } else if index < sources.count {
                 let source = sources[index]
                 if audio.isMuted(source) {
@@ -314,11 +322,17 @@ public enum PlaybackComposition {
         return PlaybackMedia(asset: playable, audioMix: mix)
     }
 
+    struct Built {
+        var asset: AVAsset
+        var backgroundTrackID: CMPersistentTrackID?
+        var clickTrackIDs: Set<CMPersistentTrackID>
+    }
+
     /// nil when the file can be played as it is.
-    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, cameraOffsetMs: Double = 0, backgroundAudio: URL?, playbackDurationMs: Double) async throws -> AVAsset? {
+    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, cameraOffsetMs: Double = 0, backgroundAudio: URL?, clicks: [(url: URL, atMs: Double)], playbackDurationMs: Double) async throws -> Built? {
         let duration = try await asset.load(.duration)
         let durationMs = duration.seconds * 1000
-        if backgroundAudio == nil, camera == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
+        if backgroundAudio == nil, clicks.isEmpty, camera == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
             return nil
         }
         let composition = AVMutableComposition()
@@ -371,6 +385,7 @@ public enum PlaybackComposition {
             try await insertSliced(track, type: .audio, sourceDurationMs: durationMs)
         }
         // Background audio, repeated until the end (`repeatUntilMs`).
+        var backgroundTrackID: CMPersistentTrackID?
         if let backgroundAudio {
             let music = AVURLAsset(url: backgroundAudio)
             if let source = try await music.loadTracks(withMediaType: .audio).first,
@@ -383,8 +398,37 @@ public enum PlaybackComposition {
                     try target.insertTimeRange(CMTimeRange(start: .zero, duration: piece), of: source, at: cursor)
                     cursor = cursor + piece
                 }
+                backgroundTrackID = target.trackID
             }
         }
-        return composition
+        // Click sounds overlap freely: each goes on the first click track that is free by then.
+        var clickTracks: [(track: AVMutableCompositionTrack, endMs: Double)] = []
+        // The assets stay referenced until the inserts are done: a track outlives its asset badly.
+        var sounds: [URL: (asset: AVURLAsset, track: AVAssetTrack, range: CMTimeRange)] = [:]
+        for click in clicks.sorted(by: { $0.atMs < $1.atMs }) {
+            if sounds[click.url] == nil {
+                let file = AVURLAsset(url: click.url)
+                if let track = try await file.loadTracks(withMediaType: .audio).first {
+                    sounds[click.url] = (file, track, try await track.load(.timeRange))
+                }
+            }
+            guard let sound = sounds[click.url], sound.range.duration.seconds > 0 else { continue }
+            // Cut short at the end of the video.
+            let remaining = CMTime(seconds: max(playbackDurationMs - click.atMs, 0) / 1000, preferredTimescale: sound.range.duration.timescale)
+            let piece = CMTimeRange(start: sound.range.start, duration: CMTimeMinimum(sound.range.duration, remaining))
+            guard piece.duration.seconds > 0 else { continue }
+            let length = piece.duration.seconds * 1000
+            let index: Int
+            if let free = clickTracks.firstIndex(where: { $0.endMs <= click.atMs }) {
+                index = free
+            } else if let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                clickTracks.append((track, 0))
+                index = clickTracks.count - 1
+            } else { continue }
+            let at = CMTime(seconds: click.atMs / 1000, preferredTimescale: 44_100)
+            try clickTracks[index].track.insertTimeRange(piece, of: sound.track, at: at)
+            clickTracks[index].endMs = click.atMs + length
+        }
+        return Built(asset: composition, backgroundTrackID: backgroundTrackID, clickTrackIDs: Set(clickTracks.map { $0.track.trackID }))
     }
 }

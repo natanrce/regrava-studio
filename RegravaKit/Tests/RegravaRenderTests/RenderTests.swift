@@ -250,6 +250,23 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    @Test func clickSoundsAddAnAudioTrack() async throws {
+        try await withTestVideo { source, dir in
+            var project = sampleProject(duration: 2000)
+            project.mouseEvents.append(MouseEvent(kind: .down, timeMs: 1200, position: Vec2(10, 10)))
+            project.audio.clickSoundEffect = .logitechMXMaster
+            #expect(project.plannedClickSounds.count == 1)
+            #expect(BundledSounds.click(.logitechMXMaster, .click) != nil)
+            let media = try await PlaybackComposition.media(asset: AVURLAsset(url: source), project: project, assetsDirectory: dir)
+            let tracks = try await media.asset.loadTracks(withMediaType: .audio)
+            #expect(!tracks.isEmpty)
+            let output = dir.appendingPathComponent("clicks.mp4")
+            try await ProjectExporter.export(project: project, videoURL: source, settings: .defaults(for: .mp4), to: output, cursors: nil)
+            let exported = try await AVURLAsset(url: output).loadTracks(withMediaType: .audio)
+            #expect(!exported.isEmpty)
+        }
+    }
+
     @Test func webcamBecomesTheSecondVideoTrack() async throws {
         try await withTestVideo { source, dir in
             let assets = ProjectStore.assetsURL(bundle: dir)
