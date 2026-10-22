@@ -24,9 +24,18 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.collectionBehavior.insert(.fullScreenNone)
         // Taller for recordings that can have a device frame.
         let height: CGFloat = model.project.canHaveDeviceFrame ? 780 : 740
-        window.setContentSize(NSSize(width: 1280, height: height))
-        window.minSize = NSSize(width: 1280, height: height)
+        let minimum = NSSize(width: 1280, height: height)
+        window.setContentSize(minimum)
+        window.contentMinSize = minimum
+        window.minSize = minimum
         window.setFrameAutosaveName("project")
+        // A saved frame from before the minimum (or from a smaller screen) is restored as is;
+        // grow it back so the layout never breaks.
+        if window.frame.width < minimum.width || window.frame.height < minimum.height {
+            var frame = window.frame
+            frame.size = NSSize(width: max(frame.width, minimum.width), height: max(frame.height, minimum.height))
+            window.setFrame(frame, display: false)
+        }
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -43,6 +52,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     // MARK: Window
+
+    /// Never smaller than the minimum, even if something resets `minSize`.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(width: max(frameSize.width, sender.minSize.width), height: max(frameSize.height, sender.minSize.height))
+    }
 
     func windowDidResize(_ notification: Notification) { positionTrafficLights() }
     func windowDidBecomeKey(_ notification: Notification) { positionTrafficLights() }
