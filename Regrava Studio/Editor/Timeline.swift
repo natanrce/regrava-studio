@@ -809,7 +809,7 @@ private struct ZoomItem: View {
         }
         .gesture(moveGesture)
         .simultaneousGesture(TapGesture().onEnded { tap() })
-        .nativeContextMenu { editor.zoomMenu(zoom) }
+        .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.zoomMenu(zoom) }
         .offset(x: geometry.sx(zoom.startMs) + 1)
     }
 
@@ -1000,7 +1000,7 @@ private struct MaskItem: View {
                     editor.openMask(mask.id)
                 }
             })
-            .nativeContextMenu { editor.maskMenu(mask) }
+            .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.maskMenu(mask) }
             .offset(x: geometry.sx(mask.startMs) + 1)
     }
 
@@ -1174,7 +1174,7 @@ private struct LayoutItem: View {
                     editor.openLayout(layout.id)
                 }
             })
-            .nativeContextMenu { editor.layoutMenu(layout) }
+            .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.layoutMenu(layout) }
             .offset(x: geometry.sx(layout.startMs) + 1)
     }
 

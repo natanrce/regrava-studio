@@ -99,9 +99,16 @@ extension EditorModel {
                 for i in project.zooms.indices where ids.contains(project.zooms[i].id) { project.zooms[i].presentation = presentation }
             }
         }
+        func preview(_ presentation: ZoomPresentation) -> (Bool) -> Void {
+            { [weak self] inside in
+                self?.menuPreview = inside ? { project in
+                    for i in project.zooms.indices where ids.contains(project.zooms[i].id) { project.zooms[i].presentation = presentation }
+                } : nil
+            }
+        }
         let palette: [MenuRow] = [.palette([
-            .init(title: "Classic", icon: "arrow.up.left.and.down.right.magnifyingglass", isSelected: first.presentation == .screen) { setPresentation(.screen) },
-            .init(title: "Loupe", icon: "sparkle.magnifyingglass", isSelected: first.presentation == .loupe) { setPresentation(.loupe) },
+            .init(title: "Classic", icon: "arrow.up.left.and.down.right.magnifyingglass", isSelected: first.presentation == .screen, preview: preview(.screen)) { setPresentation(.screen) },
+            .init(title: "Loupe", icon: "sparkle.magnifyingglass", isSelected: first.presentation == .loupe, preview: preview(.loupe)) { setPresentation(.loupe) },
         ])]
 
         var level: [MenuRow] = [
@@ -184,11 +191,18 @@ extension EditorModel {
 
     func layoutMenu(_ layout: CameraLayoutRange) -> [[MenuRow]] {
         func set(_ type: CameraLayoutType) { updateLayout(layout.id) { $0.type = type } }
+        func preview(_ type: CameraLayoutType) -> (Bool) -> Void {
+            { [weak self] inside in
+                self?.menuPreview = inside ? { project in
+                    if let i = project.cameraLayouts.firstIndex(where: { $0.id == layout.id }) { project.cameraLayouts[i].type = type }
+                } : nil
+            }
+        }
         let palette: [MenuRow] = [.palette([
-            .init(title: "Overlay", icon: "square.grid.3x3", isSelected: layout.type == .cameraOverlay) { set(.cameraOverlay) },
-            .init(title: "Cutout", icon: "person.and.background.dotted", isSelected: layout.type == .cutoutCamera) { set(.cutoutCamera) },
-            .init(title: "Fullscreen", icon: "person.crop.rectangle", isSelected: layout.type == .fullscreenCamera) { set(.fullscreenCamera) },
-            .init(title: "Hide camera", icon: "macwindow", isSelected: layout.type == .screenOnly) { set(.screenOnly) },
+            .init(title: "Overlay", icon: "square.grid.3x3", isSelected: layout.type == .cameraOverlay, preview: preview(.cameraOverlay)) { set(.cameraOverlay) },
+            .init(title: "Cutout", icon: "person.and.background.dotted", isSelected: layout.type == .cutoutCamera, preview: preview(.cutoutCamera)) { set(.cutoutCamera) },
+            .init(title: "Fullscreen", icon: "person.crop.rectangle", isSelected: layout.type == .fullscreenCamera, preview: preview(.fullscreenCamera)) { set(.fullscreenCamera) },
+            .init(title: "Hide camera", icon: "macwindow", isSelected: layout.type == .screenOnly, preview: preview(.screenOnly)) { set(.screenOnly) },
         ])]
         let split: [MenuRow] = [.command(.init(title: "Split layout at current time", icon: "scissors", shortcut: .plain("c")) { [weak self] in
             guard let self else { return }
@@ -219,9 +233,16 @@ extension EditorModel {
 
     func maskMenu(_ mask: MaskRange) -> [[MenuRow]] {
         func set(_ type: MaskType) { updateMask(mask.id) { $0.type = type } }
+        func preview(_ type: MaskType) -> (Bool) -> Void {
+            { [weak self] inside in
+                self?.menuPreview = inside ? { project in
+                    if let i = project.masks.firstIndex(where: { $0.id == mask.id }) { project.masks[i].type = type }
+                } : nil
+            }
+        }
         let palette: [MenuRow] = [.palette([
-            .init(title: "Highlight", icon: "circle.rectangle.filled.pattern.diagonalline", isSelected: mask.type == .highlight) { set(.highlight) },
-            .init(title: "Sensitive data", icon: "circle.filled.pattern.diagonalline.rectangle", isSelected: mask.type == .sensitiveData) { set(.sensitiveData) },
+            .init(title: "Highlight", icon: "circle.rectangle.filled.pattern.diagonalline", isSelected: mask.type == .highlight, preview: preview(.highlight)) { set(.highlight) },
+            .init(title: "Sensitive data", icon: "circle.filled.pattern.diagonalline.rectangle", isSelected: mask.type == .sensitiveData, preview: preview(.sensitiveData)) { set(.sensitiveData) },
         ])]
         let someEnabled = project.masks.contains { !$0.isDisabled }
         let edits: [MenuRow] = [

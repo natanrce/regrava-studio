@@ -330,11 +330,18 @@ final class EditorModel: ObservableObject {
         didSet { if presetPreview != oldValue { scheduleRefresh() } }
     }
 
-    /// The project as rendered (with the hovered preset, if any).
+    /// A context menu option under the pointer (`highlight` → `preview()`); not part of history,
+    /// cleared when the pointer leaves it or the menu closes.
+    var menuPreview: ((inout Project) -> Void)? {
+        didSet { scheduleRefresh() }
+    }
+
+    /// The project as rendered (with the hovered preset or menu option, if any).
     private var renderedProject: Project {
-        guard let presetPreview else { return project }
+        guard presetPreview != nil || menuPreview != nil else { return project }
         var preview = project
-        preview.apply(presetPreview)
+        if let presetPreview { preview.apply(presetPreview) }
+        menuPreview?(&preview)
         return preview
     }
 

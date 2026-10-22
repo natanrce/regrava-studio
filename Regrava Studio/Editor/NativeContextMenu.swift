@@ -23,6 +23,8 @@ enum MenuRow {
         var title: String
         var icon: String
         var isSelected: Bool
+        /// Pointing at the option previews it; nil = no preview.
+        var preview: ((Bool) -> Void)? = nil
         var action: () -> Void
     }
 
@@ -44,9 +46,14 @@ struct MenuShortcut {
 
 enum NativeContextMenu {
     /// Groups in order; empty groups are skipped, destructive commands move to a last group.
-    static func build(_ groups: [[MenuRow]]) -> NSMenu {
+    static func build(_ groups: [[MenuRow]], onClose: (() -> Void)? = nil) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        if let onClose {
+            let delegate = MenuCloseDelegate(onClose)
+            menu.delegate = delegate
+            objc_setAssociatedObject(menu, &MenuCloseDelegate.key, delegate, .OBJC_ASSOCIATION_RETAIN)
+        }
         var regular: [[MenuRow]] = []
         var destructive: [MenuRow] = []
         for group in groups {
@@ -122,6 +129,13 @@ enum NativeContextMenu {
     static func popUp(_ menu: NSMenu, event: NSEvent, in view: NSView) {
         NSMenu.popUpContextMenu(menu, with: event, for: view)
     }
+}
+
+private final class MenuCloseDelegate: NSObject, NSMenuDelegate {
+    nonisolated(unsafe) static var key = 0
+    let onClose: () -> Void
+    init(_ onClose: @escaping () -> Void) { self.onClose = onClose }
+    func menuDidClose(_ menu: NSMenu) { onClose() }
 }
 
 private final class NativeMenuCommandItem: NSMenuItem {
@@ -210,6 +224,7 @@ private final class PaletteRowView: NSView {
         ])
         for (index, option) in options.enumerated() {
             let button = PaletteButton(title: option.title, icon: option.icon)
+            button.onHover = { [weak self] inside in self?.options[index].preview?(inside) }
             button.tag = index
             button.target = self
             button.action = #selector(choose(_:))
@@ -223,6 +238,7 @@ private final class PaletteRowView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func choose(_ sender: NSButton) {
+        options[sender.tag].preview?(false)
         options[sender.tag].action()
         for i in options.indices { options[i].isSelected = i == sender.tag }
         refresh()
@@ -237,7 +253,25 @@ private final class PaletteRowView: NSView {
 
 private final class PaletteButton: NSButton {
     var isChosen = false { didSet { updateLook() } }
+    var onHover: ((Bool) -> Void)?
+    private var isHovered = false { didSet { updateLook() } }
     private let symbolName: String
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        onHover?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        onHover?(false)
+    }
 
     init(title: String, icon: String) {
         symbolName = icon
@@ -263,7 +297,8 @@ private final class PaletteButton: NSButton {
             .foregroundColor: isChosen ? NSColor.controlAccentColor : NSColor.labelColor,
             .font: NSFont.menuFont(ofSize: 0),
         ])
-        layer?.backgroundColor = isChosen ? NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor : NSColor.clear.cgColor
+        layer?.backgroundColor = isChosen ? NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
+            : isHovered ? NSColor.labelColor.withAlphaComponent(0.08).cgColor : NSColor.clear.cgColor
     }
 }
 
@@ -271,20 +306,25 @@ private final class PaletteButton: NSButton {
 
 extension View {
     /// Shows the native menu built by `rows` on right click (and ⌃-click).
-    func nativeContextMenu(_ rows: @escaping () -> [[MenuRow]]) -> some View {
-        overlay(NativeContextMenuTrigger(rows: rows))
+    func nativeContextMenu(onClose: (() -> Void)? = nil, _ rows: @escaping () -> [[MenuRow]]) -> some View {
+        overlay(NativeContextMenuTrigger(rows: rows, onClose: onClose))
     }
 }
 
 private struct NativeContextMenuTrigger: NSViewRepresentable {
     var rows: () -> [[MenuRow]]
+    var onClose: (() -> Void)?
 
     func makeNSView(context: Context) -> TriggerView { TriggerView() }
 
-    func updateNSView(_ view: TriggerView, context: Context) { view.rows = rows }
+    func updateNSView(_ view: TriggerView, context: Context) {
+        view.rows = rows
+        view.onClose = onClose
+    }
 
     final class TriggerView: NSView {
         var rows: (() -> [[MenuRow]])?
+        var onClose: (() -> Void)?
 
         /// Only right clicks land here; everything else goes to the SwiftUI content below.
         override func hitTest(_ point: NSPoint) -> NSView? {
@@ -302,7 +342,7 @@ private struct NativeContextMenuTrigger: NSViewRepresentable {
 
         private func show(_ event: NSEvent) {
             guard let rows else { return }
-            let menu = NativeContextMenu.build(rows())
+            let menu = NativeContextMenu.build(rows(), onClose: onClose)
             guard !menu.items.isEmpty else { return }
             NativeContextMenu.popUp(menu, event: event, in: self)
         }
