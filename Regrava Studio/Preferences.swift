@@ -136,6 +136,9 @@ final class Preferences: ObservableObject {
     @Published var openRecentProjectsWithRecordingPicker: Bool
     @Published var webcamPreviewType: String
     @Published var showSpeakerNotes: Bool
+    /// Timeline waveform.
+    @Published var hideAudioWaveform: Bool
+    @Published var enableSmoothWaveform: Bool
     /// Options ▸ Advanced ▸ Recording Engine: "auto" (Use Modern Engine If Available) or "modern".
     @Published var recordingEngine: String
     /// Saved area dimensions ("Saved" menu of the area picker).
@@ -192,6 +195,8 @@ final class Preferences: ObservableObject {
         openRecentProjectsWithRecordingPicker = bool("openRecentProjectsWithRecordingPicker", false)
         webcamPreviewType = store.string(forKey: "webcamPreviewType") ?? "square"
         showSpeakerNotes = bool("showSpeakerNotes", false)
+        hideAudioWaveform = bool("hideAudioWaveform", false)
+        enableSmoothWaveform = bool("enableSmoothWaveform", true)
         recordingEngine = store.string(forKey: "recordingUseScreenCaptureKit") ?? "auto"
         recordingAreaCropPresets = decode("recordingAreaCropPresets") ?? []
         lastPickedArea = decode("lastPickedArea")
@@ -243,6 +248,8 @@ final class Preferences: ObservableObject {
         set("openRecentProjectsWithRecordingPicker", openRecentProjectsWithRecordingPicker)
         set("webcamPreviewType", webcamPreviewType)
         set("showSpeakerNotes", showSpeakerNotes)
+        set("hideAudioWaveform", hideAudioWaveform)
+        set("enableSmoothWaveform", enableSmoothWaveform)
         set("recordingUseScreenCaptureKit", recordingEngine)
         encode("recordingAreaCropPresets", recordingAreaCropPresets)
         encode("lastPickedArea", lastPickedArea)
@@ -282,6 +289,8 @@ final class Preferences: ObservableObject {
         openRecentProjectsWithRecordingPicker = false
         webcamPreviewType = "square"
         showSpeakerNotes = false
+        hideAudioWaveform = false
+        enableSmoothWaveform = true
         recordingEngine = "auto"
         recordingAreaCropPresets = []
         lastPickedArea = nil

@@ -96,6 +96,8 @@ final class EditorModel: ObservableObject {
     /// The timeline's scroll and zoom, published on their own object: only the timeline redraws
     /// while they change (scroll and pinch fire for every trackpad event).
     let viewport = TimelineViewport()
+    /// Audio waveforms drawn in the clips.
+    let waveforms = TimelineWaveforms()
     /// Visible timeline duration (zoom level of the timeline).
     var visibleDurationMs: Double {
         get { viewport.visibleDurationMs }
@@ -348,7 +350,10 @@ final class EditorModel: ObservableObject {
         if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
             Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged) }
         } else {
-            if audioChanged { Task { await refreshAudioMix() } }
+            if audioChanged {
+                waveforms.update(project: project, bundle: bundleURL, video: videoURL)
+                Task { await refreshAudioMix() }
+            }
             scheduleRefresh()
         }
     }
@@ -372,6 +377,7 @@ final class EditorModel: ObservableObject {
     func rebuildComposition(replacingItem: Bool = false) async {
         let snapshot = RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundleURL)
         renderState.replace(with: snapshot)
+        waveforms.update(project: project, bundle: bundleURL, video: videoURL)
         do {
             let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL))
             let asset = media.asset

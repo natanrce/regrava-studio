@@ -43,7 +43,7 @@ struct EditorTimeline: View {
                 VStack(alignment: .leading, spacing: 11.3) {
                     Ruler(geometry: geo, duration: editor.durationMs).frame(height: 20)
                     VStack(alignment: .leading, spacing: 12) {
-                        ClipTrack(editor: editor, geometry: geo, hover: hover)
+                        ClipTrack(editor: editor, waveforms: editor.waveforms, geometry: geo, hover: hover)
                         ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
                         // Camera layouts track, only once a layout exists.
                         if !editor.project.cameraLayouts.isEmpty {
@@ -370,6 +370,8 @@ private struct HoverWords: View {
 
 private struct ClipTrack: View {
     @ObservedObject var editor: EditorModel
+    @ObservedObject var waveforms: TimelineWaveforms
+    @ObservedObject private var preferences = Preferences.shared
     var geometry: TimelineGeometry
     var hover: TimelineHover
 
@@ -377,7 +379,7 @@ private struct ClipTrack: View {
         let slices = editor.project.slices
         ZStack(alignment: .topLeading) {
             ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
-                SliceItem(editor: editor, slice: slice, index: index, geometry: geometry, hoverPlaybackMs: { [hover] in hover.x.map { geometry.time($0) } })
+                SliceItem(editor: editor, slice: slice, index: index, geometry: geometry, waveforms: preferences.hideAudioWaveform ? [] : waveforms.layers, isSmoothWaveform: preferences.enableSmoothWaveform, hoverPlaybackMs: { [hover] in hover.x.map { geometry.time($0) } })
             }
             // Marks above the track: cut and trim pins, typing suggestions, recording flags.
             ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
@@ -446,7 +448,10 @@ private struct SliceItem: View {
     var slice: Slice
     var index: Int
     var geometry: TimelineGeometry
+    var waveforms: [TimelineWaveforms.Layer]
+    var isSmoothWaveform: Bool
     var hoverPlaybackMs: () -> Double?
+    @Environment(\.displayScale) private var displayScale
     @State private var hovered = false
     @State private var dragOrigin: Slice?
 
@@ -471,6 +476,7 @@ private struct SliceItem: View {
             isActive: isOpen,
             isSelected: isOpen
         )
+        .overlay(alignment: .bottomLeading) { waveform(start: start, width: width) }
         .overlay { timeLines(start: start, width: width) }
         .overlay { TrackItemLabels(kind: "Clip", chips: chips, width: width) }
         .overlay(alignment: .leading) { if handle >= 16 { trimHandle(.start, width: handle) } }
@@ -488,6 +494,19 @@ private struct SliceItem: View {
         }
         .nativeContextMenu { editor.sliceMenu(slice) }
         .offset(x: start + 1)
+    }
+
+    /// The waveforms under the lines, only over the part on screen.
+    @ViewBuilder
+    private func waveform(start: CGFloat, width: CGFloat) -> some View {
+        let lower = max(0, -start - 1), upper = min(width, geometry.width - start - 1)
+        if !waveforms.isEmpty, upper > lower {
+            SliceWaveform(layers: waveforms, slice: slice, geometry: geometry, originX: start + 1, visible: lower...upper, isSmooth: isSmoothWaveform, scale: displayScale)
+                .equatable()
+                .frame(width: width, height: AudioWaveform.heightPx, alignment: .leading)
+                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10))
+                .allowsHitTesting(false)
+        }
     }
 
     /// Vertical lines every `marksInterval` inside the clip, at 68/255 (slice-waveform `lines`).

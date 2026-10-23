@@ -162,6 +162,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             builder.group("settings-zooms")
             builder.item("Automatically create zooms", checked: preferences.createAutomaticZooms) { preferences.createAutomaticZooms.toggle() }
         case "view":
+            // Only while an editor is open (no `showIfDisabled`).
+            if AppController.shared.keyEditor != nil {
+                builder.group("editor-waveform")
+                builder.item("Show audio waveform", icon: "waveform", checked: !preferences.hideAudioWaveform) { preferences.hideAudioWaveform.toggle() }
+                builder.item("Smooth waveform", icon: "waveform", checked: preferences.enableSmoothWaveform) { preferences.enableSmoothWaveform.toggle() }
+            }
             builder.group("recording")
             builder.item("Show recording widget", icon: "menubar.dock.rectangle.badge.record", checked: preferences.showRecordingWidget, shortcut: shortcuts[.toggleRecordingWidget] ?? nil) {
                 preferences.showRecordingWidget.toggle()
