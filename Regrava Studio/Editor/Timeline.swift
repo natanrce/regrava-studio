@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RegravaCore
 import SwiftUI
 
@@ -10,13 +11,19 @@ enum TrackColors {
     static let layout = Color(hex: 0x65575E)
 }
 
+/// The pointer over the timeline, kept apart from the timeline so following it only redraws
+/// the hover needle and the words near it, not every track.
+@MainActor final class TimelineHover: ObservableObject {
+    @Published var x: CGFloat?
+}
+
 /// Timeline: ruler, clip track, zoom track, playheads; scroll/zoom/scrub.
 struct EditorTimeline: View {
     /// Redraws with the playhead (`EditorModel.clock`).
     @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     @ObservedObject var viewport: TimelineViewport
-    @State private var hoverX: CGFloat?
+    @StateObject private var hover = TimelineHover()
     @State private var width: CGFloat = 1
     @State private var wheelMonitor: Any?
     @State private var isHovering = false
@@ -36,15 +43,15 @@ struct EditorTimeline: View {
                 VStack(alignment: .leading, spacing: 11.3) {
                     Ruler(geometry: geo, duration: editor.durationMs).frame(height: 20)
                     VStack(alignment: .leading, spacing: 12) {
-                        ClipTrack(editor: editor, geometry: geo, hoverPlaybackMs: hoverX.map { time($0) })
-                        ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                        ClipTrack(editor: editor, geometry: geo, hover: hover)
+                        ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
                         // Camera layouts track, only once a layout exists.
                         if !editor.project.cameraLayouts.isEmpty {
-                            LayoutTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                            LayoutTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
                         }
                         // Masks track, only once a mask exists.
                         if !editor.project.masks.isEmpty {
-                            MaskTrack(editor: editor, geometry: geo, hoverTimeMs: hoverX.map { geo.sourceTime($0) })
+                            MaskTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
                         }
                         // Shortcuts track, last, while the Keyboard Shortcuts panel is open.
                         if editor.showsShortcutsTrack {
@@ -57,14 +64,7 @@ struct EditorTimeline: View {
 
                 // Hover playhead over the tracks, under the playhead; it drops down to 18 px as it nears
                 // the playhead (`hideNear`).
-                if let hoverX, !editor.isPlaying, !editor.isSplitToolActive {
-                    Playhead(color: Playhead.secondaryColor, height: geometry.size.height, isPrimary: false)
-                        .offset(x: hoverX, y: Playhead.drop(distanceMs: abs(time(hoverX) - editor.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
-                        .allowsHitTesting(false)
-                }
-                if editor.isSplitToolActive, let hoverX {
-                    SplitBeam(height: geometry.size.height).offset(x: hoverX).allowsHitTesting(false)
-                }
+                HoverNeedle(editor: editor, hover: hover, geometry: geo, height: geometry.size.height)
                 Playhead(color: Theme.Colors.primary, height: geometry.size.height)
                     .offset(x: x(editor.currentTimeMs))
                     .allowsHitTesting(false)
@@ -76,11 +76,11 @@ struct EditorTimeline: View {
                 case .active(let location):
                     if editor.isSplitToolActive { SplitCursor.cursor.set() }
                     isHovering = true
-                    hoverX = location.x
+                    hover.x = location.x
                     editor.scrub(to: time(location.x))
                 case .ended:
                     isHovering = false
-                    hoverX = nil
+                    hover.x = nil
                     editor.endScrub()
                 }
             }
@@ -113,7 +113,7 @@ struct EditorTimeline: View {
         guard wheelMonitor == nil else { return }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { event in
             guard isHovering else { return event }
-            let anchor = hoverX.map { time($0) }
+            let anchor = hover.x.map { time($0) }
             if event.type == .magnify {
                 editor.setVisibleDuration(editor.visibleDurationMs * (1 - event.magnification), anchorMs: anchor)
             } else if event.modifierFlags.contains(.command) {
@@ -322,18 +322,62 @@ struct TrackItemLabels: View {
     }
 }
 
+/// The second playhead under the pointer while paused; it drops down to 18 px as it nears the
+/// playhead (`hideNear`). The split tool shows its beam there instead.
+private struct HoverNeedle: View {
+    @ObservedObject var editor: EditorModel
+    @ObservedObject var hover: TimelineHover
+    @EnvironmentObject private var clock: PlaybackClock
+    var geometry: TimelineGeometry
+    var height: CGFloat
+
+    var body: some View {
+        if let x = hover.x {
+            if editor.isSplitToolActive {
+                SplitBeam(height: height).offset(x: x).allowsHitTesting(false)
+            } else if !editor.isPlaying {
+                Playhead(color: Playhead.secondaryColor, height: height, isPrimary: false)
+                    .offset(x: x, y: Playhead.drop(distanceMs: abs(geometry.time(x) - clock.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+/// Transcript words near the hover position, while paused: 4 px above the clip track,
+/// over the marks there, each x sprung on its own.
+private struct HoverWords: View {
+    @ObservedObject var editor: EditorModel
+    @ObservedObject var hover: TimelineHover
+    var geometry: TimelineGeometry
+
+    var body: some View {
+        if !editor.isPlaying, let x = hover.x, editor.transcript != nil {
+            let hoverPlaybackMs = geometry.time(x)
+            let labels = TimelineWords.labels(editor.clientTranscript, resolver: geometry.resolver, previewMs: hoverPlaybackMs, pxPerMs: geometry.pxPerMs)
+            ZStack {
+                ForEach(labels, id: \.id) { label in
+                    TimelineWordLabel(text: label.text, x: x + label.offset, opacity: label.opacity)
+                        .zIndex(label.opacity * 100)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 // MARK: - Clip track
 
 private struct ClipTrack: View {
     @ObservedObject var editor: EditorModel
     var geometry: TimelineGeometry
-    var hoverPlaybackMs: Double?
+    var hover: TimelineHover
 
     var body: some View {
         let slices = editor.project.slices
         ZStack(alignment: .topLeading) {
             ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
-                SliceItem(editor: editor, slice: slice, index: index, geometry: geometry, hoverPlaybackMs: hoverPlaybackMs)
+                SliceItem(editor: editor, slice: slice, index: index, geometry: geometry, hoverPlaybackMs: { [hover] in hover.x.map { geometry.time($0) } })
             }
             // Marks above the track: cut and trim pins, typing suggestions, recording flags.
             ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
@@ -353,18 +397,7 @@ private struct ClipTrack: View {
         .frame(height: 48)
         // Transcript words near the hover position, while paused: 4 px above the clip track,
         // over the marks there, each x sprung on its own.
-        .overlay(alignment: .topLeading) {
-            if !editor.isPlaying, let hoverPlaybackMs, editor.transcript != nil {
-                let labels = TimelineWords.labels(editor.clientTranscript, resolver: geometry.resolver, previewMs: hoverPlaybackMs, pxPerMs: geometry.pxPerMs)
-                ZStack {
-                    ForEach(labels, id: \.id) { label in
-                        TimelineWordLabel(text: label.text, x: geometry.x(hoverPlaybackMs) + label.offset, opacity: label.opacity)
-                            .zIndex(label.opacity * 100)
-                    }
-                }
-                .allowsHitTesting(false)
-            }
-        }
+        .overlay(alignment: .topLeading) { HoverWords(editor: editor, hover: hover, geometry: geometry) }
         .zIndex(1)
     }
 
@@ -413,7 +446,7 @@ private struct SliceItem: View {
     var slice: Slice
     var index: Int
     var geometry: TimelineGeometry
-    var hoverPlaybackMs: Double?
+    var hoverPlaybackMs: () -> Double?
     @State private var hovered = false
     @State private var dragOrigin: Slice?
 
@@ -447,7 +480,7 @@ private struct SliceItem: View {
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { hovered = $0 }
         .onTapGesture {
-            if editor.isSplitToolActive, let hoverPlaybackMs {
+            if editor.isSplitToolActive, let hoverPlaybackMs = hoverPlaybackMs() {
                 editor.splitSlice(atPlayback: hoverPlaybackMs)
             } else {
                 editor.openSlice(slice.id)
@@ -630,7 +663,7 @@ private struct TypingSuggestionChip: View {
 private struct ZoomTrack: View {
     @ObservedObject var editor: EditorModel
     var geometry: TimelineGeometry
-    var hoverTimeMs: Double?
+    var hoverTimeMs: () -> Double?
     @State private var hoveringTrack = false
     @State private var focusTask: Task<Void, Never>?
     @State private var ghostTimeMs: Double?
@@ -790,7 +823,7 @@ private struct ZoomItem: View {
     var geometry: TimelineGeometry
     var height: CGFloat
     var isFocused: Bool
-    var hoverTimeMs: Double?
+    var hoverTimeMs: () -> Double?
     @State private var hovered = false
     @State private var dragOrigin: ZoomRange?
 
@@ -832,7 +865,7 @@ private struct ZoomItem: View {
     }
 
     private func tap() {
-        if editor.isSplitToolActive, let hoverTimeMs {
+        if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
             editor.splitZoom(zoom.id, at: hoverTimeMs)
             return
         }
@@ -887,7 +920,7 @@ enum EditorShortcuts {
 private struct MaskTrack: View {
     @ObservedObject var editor: EditorModel
     var geometry: TimelineGeometry
-    var hoverTimeMs: Double?
+    var hoverTimeMs: () -> Double?
     @State private var hoveringTrack = false
     @State private var focusTask: Task<Void, Never>?
     @State private var ghostTimeMs: Double?
@@ -985,7 +1018,7 @@ private struct MaskItem: View {
     var geometry: TimelineGeometry
     var height: CGFloat
     var isFocused: Bool
-    var hoverTimeMs: Double?
+    var hoverTimeMs: () -> Double?
     @State private var hovered = false
     @State private var dragOrigin: MaskRange?
 
@@ -1014,7 +1047,7 @@ private struct MaskItem: View {
                     .onEnded { _ in dragOrigin = nil }
             )
             .simultaneousGesture(TapGesture().onEnded {
-                if editor.isSplitToolActive, let hoverTimeMs {
+                if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
                     editor.splitMask(mask.id, at: hoverTimeMs)
                 } else {
                     editor.openMask(mask.id)
@@ -1051,7 +1084,7 @@ private struct MaskItem: View {
 private struct LayoutTrack: View {
     @ObservedObject var editor: EditorModel
     var geometry: TimelineGeometry
-    var hoverTimeMs: Double?
+    var hoverTimeMs: () -> Double?
     @State private var hoveringTrack = false
     @State private var focusTask: Task<Void, Never>?
     @State private var ghostTimeMs: Double?
@@ -1149,7 +1182,7 @@ private struct LayoutItem: View {
     var geometry: TimelineGeometry
     var height: CGFloat
     var isFocused: Bool
-    var hoverTimeMs: Double?
+    var hoverTimeMs: () -> Double?
     @State private var hovered = false
     @State private var dragOrigin: CameraLayoutRange?
 
@@ -1190,7 +1223,7 @@ private struct LayoutItem: View {
                     .onEnded { _ in dragOrigin = nil }
             )
             .simultaneousGesture(TapGesture().onEnded {
-                if editor.isSplitToolActive, let hoverTimeMs {
+                if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
                     editor.splitLayout(layout.id, at: hoverTimeMs)
                 } else {
                     editor.openLayout(layout.id)
