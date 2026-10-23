@@ -116,26 +116,30 @@ struct SliceWaveform: View, Equatable {
     }
 
     var body: some View {
-        let height = AudioWaveform.heightPx
-        if let image = render() {
-            Image(decorative: image, scale: scale)
-                .frame(width: visible.upperBound - visible.lowerBound, height: height)
+        let (columns, layerData) = heights()
+        let width = visible.upperBound - visible.lowerBound
+        if !columns.isEmpty {
+            Rectangle()
+                .fill(Color.black)
+                .frame(width: width, height: AudioWaveform.heightPx)
+                .colorEffect(ShaderLibrary.sliceWaveform(.floatArray(columns), .floatArray(layerData), .float(Float(scale)), .float(Float(AudioWaveform.heightPx))))
                 .offset(x: visible.lowerBound)
         }
     }
 
-    private func render() -> CGImage? {
+    /// Per device-pixel column and layer: the shape and ghost heights in points, for the shader.
+    private func heights() -> ([Float], [Float]) {
         let s = Double(scale)
-        let columns = Int(((visible.upperBound - visible.lowerBound) * scale).rounded(.up))
-        let rows = Int(AudioWaveform.heightPx * s)
-        guard columns > 0, rows > 0, !layers.isEmpty else { return nil }
-        var pixels = [Float](repeating: 0, count: columns * rows * 4)
+        let columnCount = Int(((visible.upperBound - visible.lowerBound) * scale).rounded(.up))
+        guard columnCount > 0, !layers.isEmpty else { return ([], []) }
         let pxPerMs = Double(geometry.pxPerMs)
         let pxPerBin: Double = isSmooth ? 5 : 2
         let playbackStart = geometry.resolver.sourceToPlayback(slice.sourceStartMs)
         let speed = slice.timeScale
-        for layer in layers {
-            let r = Float(Double((layer.hex >> 16) & 0xFF) / 255), g = Float(Double((layer.hex >> 8) & 0xFF) / 255), b = Float(Double(layer.hex & 0xFF) / 255)
+        var columns = [Float](repeating: 0, count: columnCount * layers.count * 2)
+        var layerData: [Float] = []
+        for (l, layer) in layers.enumerated() {
+            layerData += [Float((layer.hex >> 16) & 0xFF) / 255, Float((layer.hex >> 8) & 0xFF) / 255, Float(layer.hex & 0xFF) / 255, Float(layer.opacity)]
             let volume: Double
             switch layer.volume {
             case .slice(let source): volume = slice.volume(for: source)
@@ -144,47 +148,18 @@ struct SliceWaveform: View, Equatable {
             let ghost = volume < 0.999
             let count = Double(layer.pyramid.sampleCount)
             let samplesPerBin = (layer.isLooping ? 1 : speed) / pxPerMs * AudioWaveform.samplesPerMs * pxPerBin
-            for column in 0..<columns {
+            for column in 0..<columnCount {
                 let x = Double(originX + visible.lowerBound) + (Double(column) + 0.5) / s
                 let playbackMs = geometry.scrollOffsetMs + (x - Double(EditorTimeline.horizontalPadding)) / pxPerMs
                 let position = layer.isLooping
                     ? (playbackMs * AudioWaveform.samplesPerMs).truncatingRemainder(dividingBy: max(count, 1))
                     : (slice.sourceStartMs + (playbackMs - playbackStart) * speed) * AudioWaveform.samplesPerMs
                 let level = layer.pyramid.envelope(at: position, samplesPerBin: samplesPerBin)
-                guard level > 0 else { continue }
-                let shapeHeight = level * volume * AudioWaveform.heightPx
-                let ghostHeight = level * AudioWaveform.heightPx
-                for row in 0..<rows {
-                    let fromBottom = (Double(rows - row) - 0.5) / s
-                    let shape = Float(layer.opacity * Self.fillUnder(shapeHeight, fromBottom, s))
-                    let outline = ghost ? Float(0.1 * Self.fillUnder(ghostHeight, fromBottom, s)) : 0
-                    let alpha = shape + outline * (1 - shape)
-                    guard alpha > 0 else { continue }
-                    // Premultiplied source-over onto the layers below.
-                    let i = (row * columns + column) * 4
-                    let keep = 1 - alpha
-                    pixels[i] = r * alpha + pixels[i] * keep
-                    pixels[i + 1] = g * alpha + pixels[i + 1] * keep
-                    pixels[i + 2] = b * alpha + pixels[i + 2] * keep
-                    pixels[i + 3] = alpha + pixels[i + 3] * keep
-                }
+                let i = (column * layers.count + l) * 2
+                columns[i] = Float(level * volume * AudioWaveform.heightPx)
+                columns[i + 1] = ghost ? Float(level * AudioWaveform.heightPx) : 0
             }
         }
-        var bytes = [UInt8](repeating: 0, count: pixels.count)
-        for i in 0..<pixels.count { bytes[i] = UInt8(min(max(pixels[i], 0), 1) * 255 + 0.5) }
-        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
-        return CGImage(
-            width: columns, height: rows, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: columns * 4,
-            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
-        )
-    }
-
-    /// `fillUnder`: 1 device px of anti-aliasing at the top, fading from 50 % at the bottom to
-    /// 100 % at the column's own top.
-    private static func fillUnder(_ height: Double, _ fromBottom: Double, _ scale: Double) -> Double {
-        let coverage = min(max((height - fromBottom) * scale + 0.5, 0), 1)
-        guard coverage > 0 else { return 0 }
-        return coverage * (0.5 + 0.5 * min(max(fromBottom / max(height, 1), 0), 1))
+        return (columns, layerData)
     }
 }
