@@ -25,6 +25,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let shortcuts: ShortcutRenderer?
     /// The device frame around an iPhone/iPad recording, when on.
     private let deviceFrame: ResolvedDeviceFrame?
+    /// The recorded area kept (`cropWindow01`), 0…1 top-left.
+    private let screenCrop01: Rect2
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
 
@@ -43,10 +45,21 @@ public final class FrameCompositor: @unchecked Sendable {
         shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         deviceFrame = project.activeDeviceFrame
+        screenCrop01 = project.screenCrop01
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
     }
 
     private var canvasHeight: Double { layout.canvas.height }
+
+    /// Only the crop of the recording, moved to the origin (Core Image is y-up).
+    private func cropped(_ image: CIImage) -> CIImage {
+        guard screenCrop01 != Rect2(x: 0, y: 0, width: 1, height: 1) else { return image }
+        let w = image.extent.width, h = image.extent.height
+        let c = screenCrop01
+        let rect = CGRect(x: c.x * w, y: (1 - c.y - c.height) * h, width: c.width * w, height: c.height * h).integral.intersection(image.extent)
+        guard !rect.isEmpty else { return image }
+        return image.cropped(to: rect).transformed(by: CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
+    }
 
     private func ciRect(_ r: Rect2) -> CGRect {
         CGRect(x: r.x, y: canvasHeight - r.y - r.height, width: r.width, height: r.height)
@@ -65,7 +78,7 @@ public final class FrameCompositor: @unchecked Sendable {
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
         // Masks act on the recording itself, so they follow zoom and motion blur.
-        let src = MaskRenderer.apply(frame.mask, to: source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)))
+        let src = MaskRenderer.apply(frame.mask, to: cropped(source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))))
         var output = session(over: background, source: src, camera: cameraImage, frame: frame, quality: quality)
         // The glass loupe over the whole session, camera and cursor included.
         if let lens = frame.loupe {

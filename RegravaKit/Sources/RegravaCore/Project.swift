@@ -269,6 +269,8 @@ public struct Project: Codable, Hashable, Sendable {
     public var audio = AudioConfig()
     /// Device frame around iPhone/iPad recordings (`device`).
     public var device = DeviceConfig()
+    /// The recorded area kept on screen (`crop`).
+    public var crop = ScreenCropConfig()
     /// Camera image settings (`cameraConfig`).
     public var camera = CameraConfig()
     public var captions = CaptionsConfig()
@@ -323,6 +325,7 @@ public struct Project: Codable, Hashable, Sendable {
         masks = c.value(.masks, default: [])
         audio = c.value(.audio, default: AudioConfig())
         device = c.value(.device, default: DeviceConfig())
+        crop = c.value(.crop, default: ScreenCropConfig())
         camera = c.value(.camera, default: CameraConfig())
         captions = c.value(.captions, default: CaptionsConfig())
         defaultLayout = c.value(.defaultLayout, default: DefaultCameraLayout())

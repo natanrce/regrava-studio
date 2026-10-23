@@ -488,7 +488,8 @@ public extension Project {
         StageInfo(
             aspectRatio: style.aspectRatio,
             // With a device frame the layout fits the whole device body (`recordingBodySize`).
-            sourceSize: activeDeviceFrame.map { Size2(width: $0.device.width, height: $0.device.height) } ?? recording.videoSize,
+            // The cropped recording (`recordingBodySize`).
+            sourceSize: activeDeviceFrame.map { Size2(width: $0.device.width, height: $0.device.height) } ?? croppedVideoSize,
             paddingRatio01: style.paddingRatio,
             avoidEmptyZoomArea: style.avoidEmptyZoomArea,
             cameraSourceAspectRatio: cameraSourceAspectRatio

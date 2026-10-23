@@ -105,7 +105,9 @@ public final class CameraTrack: @unchecked Sendable {
     private let typeEvents: [MouseEvent]
     private let cursorConfig: CursorConfig
 
-    public init(project: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, sampleRateHz: Double? = nil) {
+    public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, sampleRateHz: Double? = nil) {
+        // Everything below works in the crop's space.
+        let project = fullProject.screenCropSpace
         let layout = CanvasLayout(project: project)
         self.layout = layout
         let timeline = LayoutTimeline(project: project)

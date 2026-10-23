@@ -76,7 +76,8 @@ public extension Project {
     /// Rectangle for a new mask: the last mask's, else 350×80 centred.
     var defaultMaskBounds: [Rect2] {
         if let last = masks.last, !last.bounds.isEmpty { return last.bounds }
-        let size = recording.videoSize
+        // Centred on the cropped size without the crop's origin.
+        let size = croppedVideoSize
         let width = min(size.width, MaskRange.defaultSize.width)
         let height = min(size.height, MaskRange.defaultSize.height)
         return [Rect2(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height)]
@@ -84,12 +85,14 @@ public extension Project {
 
     /// Rectangle of a click-placed mask: default size centred on the point, kept inside.
     func clickedMaskBounds(at point01: Vec2) -> Rect2 {
-        let size = recording.videoSize
+        // `point01` is in the crop; kept inside it.
+        let crop = screenCropRect
+        let size = crop.size
         let width = min(size.width, MaskRange.defaultSize.width)
         let height = min(size.height, MaskRange.defaultSize.height)
         return Rect2(
-            x: clamp(point01.x * size.width - width / 2, 0, size.width - width),
-            y: clamp(point01.y * size.height - height / 2, 0, size.height - height),
+            x: crop.x + clamp(point01.x * size.width - width / 2, 0, size.width - width),
+            y: crop.y + clamp(point01.y * size.height - height / 2, 0, size.height - height),
             width: width,
             height: height
         )
