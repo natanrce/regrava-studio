@@ -183,12 +183,16 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 editor.updateLayout(layout) { $0.type = type }
             // Copy / cut the open zoom, layout or mask, else copy the frame.
             case ("c", [.command]):
-                if let zoom = openZoom { editor.copyZoom(zoom) }
+                // Several selected zooms have no single target: the frame is copied instead.
+                if editor.selectedZoomIDs.count > 1 { editor.copyCurrentFrame() }
+                else if let zoom = editor.selectedZoomIDs.first ?? openZoom { editor.copyZoom(zoom) }
                 else if let layout = editor.openLayoutID { editor.copyLayout(layout) }
                 else if let mask = editor.openMaskID { editor.copyMask(mask) }
                 else { editor.copyCurrentFrame() }
             case ("x", [.command]):
-                if let zoom = openZoom { editor.cutZoom(zoom) }
+                // …and Cut does nothing.
+                if editor.selectedZoomIDs.count > 1 { return true }
+                else if let zoom = editor.selectedZoomIDs.first ?? openZoom { editor.cutZoom(zoom) }
                 else if let layout = editor.openLayoutID { editor.cutLayout(layout) }
                 else if let mask = editor.openMaskID { editor.cutMask(mask) }
                 else { return false }
