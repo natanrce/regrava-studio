@@ -534,6 +534,8 @@ final class RecordingCoordinator: ObservableObject {
                       let config = try? JSONDecoder().decode(PresetConfig.self, from: data) {
                 project.apply(config)
             }
+            // New projects use the last chosen microphone mode, unless their config set one.
+            if !preferences.useLastProjectConfigForNewProjects { project.audio.microphoneAudioPreset = preferences.microphoneAudioPreset }
             project.autoZoom.isEnabled = preferences.createAutomaticZooms
             project.regenerateAutomaticZooms()
             try ProjectStore.save(project, to: bundleURL)

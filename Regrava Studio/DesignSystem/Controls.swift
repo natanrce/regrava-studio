@@ -232,6 +232,11 @@ struct SegmentedPicker<Value: Hashable>: View {
     /// Options share the full width equally (`isWide`); otherwise the row scrolls
     /// horizontally instead of truncating labels (`isScrollable`).
     var isWide = false
+    /// A 0…1 processing bar under an option (`progressSelector`), nil = none.
+    var progress: ((Value) -> Double?)? = nil
+    var isPaused: (Value) -> Bool = { _ in false }
+    /// A small pill after the label ("Beta").
+    var badge: ((Value) -> String?)? = nil
     @Binding var selection: Value
 
     private var row: some View {
@@ -243,7 +248,10 @@ struct SegmentedPicker<Value: Hashable>: View {
                     isSelected: option == selection,
                     isDisabled: isDisabled(option),
                     height: size.box.height ?? 38,
-                    isWide: isWide
+                    isWide: isWide,
+                    progress: progress?(option) ?? nil,
+                    isPaused: isPaused(option),
+                    badge: badge?(option) ?? nil
                 ) { selection = option }
             }
         }
@@ -283,6 +291,9 @@ private struct SegmentOption: View {
     var isDisabled: Bool
     var height: CGFloat
     var isWide = false
+    var progress: Double? = nil
+    var isPaused = false
+    var badge: String? = nil
     var action: () -> Void
     @State private var hovered = false
 
@@ -291,7 +302,16 @@ private struct SegmentOption: View {
             HStack(spacing: Theme.gap(1)) {
                 if let icon { Image(systemName: icon).font(.system(size: 14)) }
                 Text(title).font(Theme.Typo.controlCopy).lineLimit(1)
+                if let badge {
+                    Text(badge)
+                        .font(Theme.Typo.label)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Theme.Colors.hover))
+                }
             }
+            // Lifted 2 px over the bar while there is one (`--progress-lift`).
+            .offset(y: progress == nil ? 0 : -2)
             .padding(.horizontal, 12)
             .frame(maxWidth: isWide ? .infinity : nil)
             .frame(height: height)
@@ -303,6 +323,9 @@ private struct SegmentOption: View {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(isSelected ? Color.white.opacity(0.25) : .clear, lineWidth: 1)
             )
+            .overlay(alignment: .bottom) {
+                if let progress { ProgressStrip(progress: progress, isPaused: isPaused).padding(.horizontal, 8).padding(.bottom, 5) }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
@@ -310,6 +333,35 @@ private struct SegmentOption: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? Theme.disabledOpacity : 1)
         .onHover { hovered = $0 }
+    }
+}
+
+/// A 2 px bar in the current colour over a 15% track, with a moving sheen; dimmed when paused.
+private struct ProgressStrip: View {
+    var progress: Double
+    var isPaused: Bool
+    @State private var sheen = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(isPaused ? 0 : 0.15))
+                Capsule()
+                    .fill(Color.primary)
+                    .frame(width: max(2, geometry.size.width * min(max(progress, 0), 1)))
+                    .overlay {
+                        if !isPaused {
+                            LinearGradient(colors: [.clear, .white.opacity(0.54), .clear], startPoint: .leading, endPoint: .trailing)
+                                .offset(x: sheen ? geometry.size.width : -geometry.size.width)
+                                .animation(.linear(duration: 1.23).repeatForever(autoreverses: false), value: sheen)
+                        }
+                    }
+                    .clipShape(Capsule())
+            }
+            .opacity(isPaused ? 0.4 : 1)
+        }
+        .frame(height: 2)
+        .onAppear { sheen = true }
     }
 }
 

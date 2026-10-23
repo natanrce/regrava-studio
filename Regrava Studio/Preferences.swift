@@ -160,6 +160,8 @@ final class Preferences: ObservableObject {
     @Published var playbackPreviewMaxHeight: Int
     /// Zoom level for new zooms (nil = 2).
     @Published var defaultZoomLevel: Double?
+    /// The last chosen microphone mode, used by new projects.
+    @Published var microphoneAudioPreset: MicrophoneAudioPreset
     // Quick export
     @Published var showQuickExportWidget: Bool
     @Published var alwaysSaveProjectWhenUsingQuickExportWidget: Bool
@@ -203,6 +205,7 @@ final class Preferences: ObservableObject {
         playbackPreviewResolution = store.object(forKey: "playbackPreviewResolution") as? Double ?? 1
         playbackPreviewMaxHeight = store.object(forKey: "playbackPreviewMaxHeight") as? Int ?? 1080
         defaultZoomLevel = store.object(forKey: "defaultZoomLevel") as? Double
+        microphoneAudioPreset = (store.string(forKey: "microphoneAudioPreset")).flatMap(MicrophoneAudioPreset.init(rawValue:)) ?? .voice
         showQuickExportWidget = bool("showQuickExportWidget", true)
         alwaysSaveProjectWhenUsingQuickExportWidget = bool("alwaysSaveProjectWhenUsingQuickExportWidget", false)
         editProjectTitleWhenUsingQuickExportWidget = bool("editProjectTitleWhenUsingQuickExportWidget", false)
@@ -252,6 +255,7 @@ final class Preferences: ObservableObject {
         set("playbackPreviewResolution", playbackPreviewResolution)
         set("playbackPreviewMaxHeight", playbackPreviewMaxHeight)
         set("defaultZoomLevel", defaultZoomLevel)
+        set("microphoneAudioPreset", microphoneAudioPreset.rawValue)
         set("showQuickExportWidget", showQuickExportWidget)
         set("alwaysSaveProjectWhenUsingQuickExportWidget", alwaysSaveProjectWhenUsingQuickExportWidget)
         set("editProjectTitleWhenUsingQuickExportWidget", editProjectTitleWhenUsingQuickExportWidget)
@@ -290,6 +294,7 @@ final class Preferences: ObservableObject {
         playbackPreviewResolution = 1
         playbackPreviewMaxHeight = 1080
         defaultZoomLevel = nil
+        microphoneAudioPreset = .voice
         showQuickExportWidget = true
         alwaysSaveProjectWhenUsingQuickExportWidget = false
         editProjectTitleWhenUsingQuickExportWidget = false

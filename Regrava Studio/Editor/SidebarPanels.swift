@@ -715,7 +715,32 @@ struct AudioPanel: View {
                     NamedField(name: "Microphone") {
                         VStack(alignment: .leading, spacing: Theme.gap(1)) {
                             ToggleRow(title: "Mute microphone", isOn: editor.binding(\.audio.muteMicrophone))
-                            // "Microphone audio mode" shows only when processing presets are supported.
+                            // Shown when not muted and more than one mode is supported.
+                            let presets = EditorModel.supportedMicrophonePresets
+                            if !audio.muteMicrophone && presets.count > 1 {
+                                NamedField(name: "Microphone audio mode") {
+                                    SegmentedPicker(
+                                        options: presets,
+                                        label: { $0.label },
+                                        description: { $0.detail },
+                                        progress: { editor.microphoneRenderProgress[$0] },
+                                        isPaused: { editor.pausedMicrophoneRenders.contains($0) },
+                                        badge: { $0.badge },
+                                        selection: Binding(
+                                            get: { audio.microphoneAudioPreset },
+                                            set: { preset in
+                                                if preset == audio.microphoneAudioPreset {
+                                                    editor.toggleMicrophoneRender(preset)
+                                                } else {
+                                                    editor.change { $0.audio.microphoneAudioPreset = preset }
+                                                    // Also the default for new projects.
+                                                    Preferences.shared.microphoneAudioPreset = preset
+                                                }
+                                            }
+                                        )
+                                    )
+                                }
+                            }
                             if audio.muteMicrophone {
                                 Callout(icon: "speaker.slash.fill", message: "Microphone is muted.")
                             }

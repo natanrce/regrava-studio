@@ -299,10 +299,17 @@ public enum PlaybackComposition {
         if let set = audio.clickSoundEffect, audio.clickSoundEffectVolume > 0 {
             clicks = project.plannedClickSounds.compactMap { c in BundledSounds.click(set, c.kind).map { ($0, c.playbackTimeMs) } }
         }
+        // The microphone plays from its best finished render (`bestReadyPath`): the chosen mode's,
+        // else Standard's, else the take itself.
+        var microphone: (index: Int, url: URL)?
+        if let bundle = assetsDirectory?.deletingLastPathComponent(), let index = project.recording.audioSources.firstIndex(of: .microphone),
+           let url = MicrophoneRenderer.bestReadyURL(bundle: bundle, preset: audio.microphoneAudioPreset) {
+            microphone = (index, url)
+        }
         let built = try await composition(
             asset: asset, slices: project.slices, camera: cameraAsset(project: project, recording: asset),
             cameraOffsetMs: project.camera.delayAdjustmentMs,
-            backgroundAudio: backgroundURL, clicks: clicks, playbackDurationMs: resolver.playbackDurationMs
+            backgroundAudio: backgroundURL, clicks: clicks, microphone: microphone, playbackDurationMs: resolver.playbackDurationMs
         )
         let playable = built?.asset ?? asset
         let tracks = try await playable.loadTracks(withMediaType: .audio)
@@ -342,10 +349,10 @@ public enum PlaybackComposition {
     }
 
     /// nil when the file can be played as it is.
-    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, cameraOffsetMs: Double = 0, backgroundAudio: URL?, clicks: [(url: URL, atMs: Double)], playbackDurationMs: Double) async throws -> Built? {
+    private static func composition(asset: AVAsset, slices: [Slice], camera: AVAsset?, cameraOffsetMs: Double = 0, backgroundAudio: URL?, clicks: [(url: URL, atMs: Double)], microphone: (index: Int, url: URL)? = nil, playbackDurationMs: Double) async throws -> Built? {
         let duration = try await asset.load(.duration)
         let durationMs = duration.seconds * 1000
-        if backgroundAudio == nil, clicks.isEmpty, camera == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
+        if backgroundAudio == nil, clicks.isEmpty, camera == nil, microphone == nil, slices.count == 1, let only = slices.first, only.timeScale == 1, only.sourceStartMs <= 0, only.sourceEndMs >= durationMs - 1 {
             return nil
         }
         let composition = AVMutableComposition()
@@ -394,8 +401,15 @@ public enum PlaybackComposition {
             // Camera time = recording time + delay, clamped to the movie.
             try await insertSliced(track, type: .video, sourceDurationMs: try await camera.load(.duration).seconds * 1000, offsetMs: cameraOffsetMs, holdEdges: true)
         }
-        for track in try await asset.loadTracks(withMediaType: .audio) {
-            try await insertSliced(track, type: .audio, sourceDurationMs: durationMs)
+        // Kept alive until the inserts are done.
+        let rendered = microphone.map { AVURLAsset(url: $0.url) }
+        for (index, track) in try await asset.loadTracks(withMediaType: .audio).enumerated() {
+            if index == microphone?.index, let rendered, let replacement = try await rendered.loadTracks(withMediaType: .audio).first {
+                // Same timeline as the take, so the same clips apply.
+                try await insertSliced(replacement, type: .audio, sourceDurationMs: try await rendered.load(.duration).seconds * 1000)
+            } else {
+                try await insertSliced(track, type: .audio, sourceDurationMs: durationMs)
+            }
         }
         // Background audio, repeated until the end (`repeatUntilMs`).
         var backgroundTrackID: CMPersistentTrackID?

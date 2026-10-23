@@ -54,6 +54,11 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomIDs: Set<UUID> = []
     /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
     var itemClipboard: ItemClipboard?
+    /// Microphone renders under way, 0…1 (`media.audioRenderState` partial).
+    @Published var microphoneRenderProgress: [MicrophoneAudioPreset: Double] = [:]
+    /// Renders paused by re-clicking their option.
+    @Published var pausedMicrophoneRenders: Set<MicrophoneAudioPreset> = []
+    private var microphoneRenderTasks: [MicrophoneAudioPreset: Task<Void, Never>] = [:]
     var defaultZoomLevelTask: Task<Void, Never>?
     /// Zoom add tool armed from the add-tools rail.
     @Published var isAddZoomToolArmed = false
@@ -137,6 +142,7 @@ final class EditorModel: ObservableObject {
         await rebuildComposition()
         updateFaceTracking()
         updateSilence()
+        syncMicrophoneRenders()
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -148,6 +154,63 @@ final class EditorModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: Microphone modes
+
+    /// Modes the picker offers: the speech-model ones only where those models run.
+    static var supportedMicrophonePresets: [MicrophoneAudioPreset] {
+        [.channelFix, .voice, .loud] + (SpeechModels.isAvailable ? [.noiseReduction, .podcast] : [])
+    }
+
+    /// Muted: every render pauses. Otherwise Standard always renders first (the fallback), then
+    /// the chosen mode.
+    func syncMicrophoneRenders() {
+        let audio = project.audio
+        guard let index = project.recording.audioSources.firstIndex(of: .microphone), !audio.muteMicrophone else {
+            for task in microphoneRenderTasks.values { task.cancel() }
+            microphoneRenderTasks = [:]
+            return
+        }
+        var wanted: [MicrophoneAudioPreset] = [.voice]
+        let preset = audio.microphoneAudioPreset
+        if preset != .voice, Self.supportedMicrophonePresets.contains(preset), !pausedMicrophoneRenders.contains(preset) { wanted.append(preset) }
+        for (running, task) in microphoneRenderTasks where !wanted.contains(running) {
+            task.cancel()
+            microphoneRenderTasks[running] = nil
+        }
+        // One render at a time, in order.
+        guard microphoneRenderTasks.isEmpty,
+              let next = wanted.first(where: { MicrophoneRenderer.readyURL(bundle: bundleURL, preset: $0) == nil }) else { return }
+        let recording = videoURL, bundle = bundleURL
+        microphoneRenderProgress[next] = 0
+        microphoneRenderTasks[next] = Task { [weak self] in
+            do {
+                try await MicrophoneRenderer.render(recording: recording, microphoneTrackIndex: index, preset: next, bundle: bundle) { value in
+                    Task { @MainActor in self?.microphoneRenderProgress[next] = value }
+                }
+                guard let self else { return }
+                self.microphoneRenderProgress[next] = nil
+                self.microphoneRenderTasks[next] = nil
+                if next == self.project.audio.microphoneAudioPreset || next == .voice { await self.rebuildComposition(replacingItem: true) }
+                self.syncMicrophoneRenders()
+            } catch {
+                guard let self else { return }
+                self.microphoneRenderTasks[next] = nil
+                if !(error is CancellationError) { self.microphoneRenderProgress[next] = nil }
+            }
+        }
+    }
+
+    /// Re-clicking the chosen non-Standard mode pauses or resumes its render.
+    func toggleMicrophoneRender(_ preset: MicrophoneAudioPreset) {
+        guard preset != .voice, MicrophoneRenderer.readyURL(bundle: bundleURL, preset: preset) == nil else { return }
+        if pausedMicrophoneRenders.contains(preset) { pausedMicrophoneRenders.remove(preset) } else {
+            pausedMicrophoneRenders.insert(preset)
+            microphoneRenderTasks[preset]?.cancel()
+            microphoneRenderTasks[preset] = nil
+        }
+        syncMicrophoneRenders()
     }
 
     // MARK: Changes & history
@@ -232,6 +295,8 @@ final class EditorModel: ObservableObject {
         let faceTrackingChanged = updated.camera.enableFaceTracking != project.camera.enableFaceTracking
         let silenceChanged = updated.camera.hideDuringSilenceMs != project.camera.hideDuringSilenceMs
         let cursorStyleChanged = updated.cursor.set != project.cursor.set
+        let micModeChanged = updated.audio.microphoneAudioPreset != project.audio.microphoneAudioPreset
+            || updated.audio.muteMicrophone != project.audio.muteMicrophone
         project = updated
         // A new cursor style means new images (picked before the next snapshot is made).
         if cursorStyleChanged { cursors = CursorLibrary.make(project: project, bundle: bundleURL) }
@@ -245,6 +310,11 @@ final class EditorModel: ObservableObject {
         isDirty = true
         scheduleAutosave()
         rememberLastProjectConfig()
+        if micModeChanged {
+            syncMicrophoneRenders()
+            // The microphone plays from a different finished render, if there is one.
+            Task { await rebuildComposition(replacingItem: true) }
+        }
         if faceTrackingChanged { updateFaceTracking() }
         if silenceChanged { updateSilence() }
         if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
