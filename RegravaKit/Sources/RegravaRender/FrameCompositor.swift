@@ -352,6 +352,11 @@ public final class FrameCompositor: @unchecked Sendable {
                 }
             }
         }
+        var trailPx = 0.0
+        if strength > 0, let before = frame.previousCameraRect {
+            let trailStart = rect.lerp(to: before, strength)
+            if !rect.isClose(to: trailStart, tolerance: 1) { trailPx = rect.cornerTravel(to: trailStart) }
+        }
         let opacity = frame.cameraOpacity
         if opacity < 1 {
             let blur = 10 * (1 - opacity) * layout.scale
@@ -363,7 +368,19 @@ public final class FrameCompositor: @unchecked Sendable {
                 "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity)),
             ])
         }
-        return layer
+        return grained(layer, timeMs: frame.timeMs, trailPx: trailPx)
+    }
+
+    private static let grainKernel = RenderKernels.color("filmGrain")
+
+    /// `cameraConfig.grain` after the trail and the opacity: weaker along a trail (÷ √trail px),
+    /// seeded at 24 Hz over 1024 frames. No UI sets it in 4.1; it shows only for projects that
+    /// carry a value.
+    private func grained(_ layer: CIImage, timeMs: Double, trailPx: Double) -> CIImage {
+        let intensity = camera.grain / sqrt(max(trailPx, 1))
+        guard intensity >= 0.001, let kernel = Self.grainKernel else { return layer }
+        let seed = Double(((Int(floor(timeMs * 24 / 1000)) % 1024) + 1024) % 1024)
+        return kernel.apply(extent: layer.extent, arguments: [layer, CIVector(x: intensity, y: seed, z: 0, w: 0)]) ?? layer
     }
 
     private static let sharpenKernel = RenderKernels.general("casSharpen")

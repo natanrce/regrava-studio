@@ -532,5 +532,42 @@ float4 loupeGlassShaded(sampler content0, sampler content1, sampler content2, sa
     return loupeShade(mix(scene, color, coverage), rel, coverage, bayer, L);
 }
 
+
+// MARK: Camera film grain
+
+float3 hashGrainCell(float x, float y, float seed) {
+    float3 h = fract(float3(x, y, seed) * float3(0.1031, 0.103, 0.0973));
+    h = h + dot(h, h.yxz + 33.33);
+    return fract((h.xxy + h.yxx) * h.zyx) * 2.0 - 1.0;
+}
+
+float3 grainLatticeNoise(float2 coords, float seed) {
+    float2 cell = floor(coords);
+    float2 f = coords - cell;
+    float2 e = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float3 c00 = hashGrainCell(cell.x, cell.y, seed);
+    float3 c10 = hashGrainCell(cell.x + 1.0, cell.y, seed);
+    float3 c01 = hashGrainCell(cell.x, cell.y + 1.0, seed);
+    float3 c11 = hashGrainCell(cell.x + 1.0, cell.y + 1.0, seed);
+    return mix(mix(c00, c10, e.x), mix(c01, c11, e.x), e.y);
+}
+
+/// Grain on the camera layer: value noise of 1.1 px cells plus 1.7× coarser cells, 65% mono,
+/// strongest in midtones, added to the sqrt-encoded colour.
+float4 filmGrain(sample_t c, float4 params, destination dest) {
+    float intensity = params.x, seed = params.y;
+    if (intensity < 0.001 || c.a < 0.001) return c;
+    float3 s = sqrt(max(c.rgb / c.a, float3(0.0)));
+    float2 texel = dest.coord();
+    float2 fine = texel * (1.0 / 1.1);
+    float2 coarse = fine * (1.0 / 1.7) + 511.5;
+    float3 noise = (grainLatticeNoise(fine, seed) * 0.65 + grainLatticeNoise(coarse, seed + 1024.0) * 0.35) * 3.0;
+    float3 grain = mix(float3(noise.y), noise, 0.35);
+    float luma = clamp(dot(s, float3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+    float response = smoothstep(0.0, 0.1, luma) * (1.0 - 0.65 * smoothstep(0.55, 1.0, luma));
+    s = clamp(s + grain * intensity * 0.09 * response, float3(0.0), float3(1.0));
+    return float4(s * s * c.a, c.a);
+}
+
 }
 }
