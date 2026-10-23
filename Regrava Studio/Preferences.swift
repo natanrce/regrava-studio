@@ -149,6 +149,9 @@ final class Preferences: ObservableObject {
     @Published var recordingCameraID: String?
     @Published var recordingMicrophoneID: String?
     @Published var recordingSystemAudio: Bool
+    /// With system audio on: the bundle IDs of the apps recorded, nil for every app
+    /// (`systemAudio: "all" | string[]`).
+    @Published var recordingSystemAudioApps: [String]?
     // Editing
     @Published var useLastProjectConfigForNewProjects: Bool
     /// Preset applied to new projects ("Use as default for new projects").
@@ -203,6 +206,7 @@ final class Preferences: ObservableObject {
         recordingCameraID = store.string(forKey: "recordingCameraID")
         recordingMicrophoneID = store.string(forKey: "recordingMicrophoneID")
         recordingSystemAudio = bool("recordingSystemAudio", false)
+        recordingSystemAudioApps = decode("recordingSystemAudioApps")
         useLastProjectConfigForNewProjects = bool("useLastProjectConfigForNewProjects", false)
         defaultPresetID = UserDefaults.standard.string(forKey: "defaultPresetId")
         autoSaveProject = bool("autoSaveProject", true)
@@ -256,6 +260,7 @@ final class Preferences: ObservableObject {
         set("recordingCameraID", recordingCameraID)
         set("recordingMicrophoneID", recordingMicrophoneID)
         set("recordingSystemAudio", recordingSystemAudio)
+        encode("recordingSystemAudioApps", recordingSystemAudioApps)
         set("useLastProjectConfigForNewProjects", useLastProjectConfigForNewProjects)
         set("autoSaveProject", autoSaveProject)
         set("presetsFolderPath", presetsFolderPath)
@@ -297,6 +302,7 @@ final class Preferences: ObservableObject {
         recordingCameraID = nil
         recordingMicrophoneID = nil
         recordingSystemAudio = false
+        recordingSystemAudioApps = nil
         useLastProjectConfigForNewProjects = false
         autoSaveProject = true
         presetsFolderPath = nil

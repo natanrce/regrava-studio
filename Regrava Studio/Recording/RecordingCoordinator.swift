@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import RegravaCapture
 import RegravaCore
+@preconcurrency import ScreenCaptureKit
 import SwiftUI
 
 enum SourceType: String, CaseIterable {
@@ -167,6 +168,40 @@ final class RecordingCoordinator: ObservableObject {
     var systemAudio: Bool {
         get { preferences.recordingSystemAudio }
         set { objectWillChange.send(); preferences.recordingSystemAudio = newValue }
+    }
+
+    /// nil records every app; otherwise the selected apps' bundle IDs, kept while they are not running.
+    var systemAudioApps: [String]? {
+        get { preferences.recordingSystemAudioApps }
+        set { objectWillChange.send(); preferences.recordingSystemAudioApps = newValue }
+    }
+
+    /// Adds or removes one app from the selection.
+    func setSystemAudioApp(_ bundleID: String, on: Bool) {
+        var apps = systemAudioApps ?? []
+        if on, !apps.contains(bundleID) { apps.append(bundleID) }
+        if !on { apps.removeAll { $0 == bundleID } }
+        systemAudioApps = apps
+    }
+
+    /// An app that can be recorded (`capture.audioSources`: name, bundleId, appPath, processId).
+    struct AudioSourceApp: Hashable {
+        var name: String
+        var bundleID: String
+        var appPath: String
+        var processID: pid_t
+    }
+
+    @Published private(set) var audioSourceApps: [AudioSourceApp] = []
+
+    /// The running apps ScreenCaptureKit can record, in its order.
+    func refreshAudioSourceApps() async {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return }
+        let apps = content.applications.compactMap { app -> AudioSourceApp? in
+            guard !app.bundleIdentifier.isEmpty, let path = NSRunningApplication(processIdentifier: app.processID)?.bundleURL?.path else { return nil }
+            return AudioSourceApp(name: app.applicationName, bundleID: app.bundleIdentifier, appPath: path, processID: app.processID)
+        }
+        if apps != audioSourceApps { audioSourceApps = apps }
     }
 
     // MARK: Picker
@@ -387,9 +422,16 @@ final class RecordingCoordinator: ObservableObject {
 
         let bundle = makeBundleURL()
         bundleURL = bundle
+        // Selected apps become the pids of every listed source with that bundle ID.
+        var pids: [pid_t]?
+        if systemAudio, let apps = systemAudioApps {
+            await refreshAudioSourceApps()
+            pids = Array(Set(audioSourceApps.filter { apps.contains($0.bundleID) }.map(\.processID)))
+        }
         let options = CaptureOptions(
             fps: 60,
             capturesSystemAudio: systemAudio,
+            systemAudioProcessIDs: pids,
             microphoneID: microphoneID,
             hidesDesktopIcons: preferences.hideDesktopContentWhileRecording,
             cameraID: cameraID,

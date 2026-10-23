@@ -9,9 +9,29 @@ final class MenuBuilder {
     let menu = NSMenu()
     private var currentGroup: String?
     private var hostedViews: [NSView] = []
+    /// Rebuilds the items of the open menu (`contextMenu.update`).
+    private var rebuild: ((MenuBuilder) -> Void)?
 
     init() {
         menu.autoenablesItems = false
+    }
+
+    /// A menu whose items are built again, in place and without closing, after every toggle
+    /// and on `refresh()`.
+    static func live(_ build: @escaping (MenuBuilder) -> Void) -> MenuBuilder {
+        let builder = MenuBuilder()
+        builder.rebuild = build
+        build(builder)
+        return builder
+    }
+
+    func refresh() {
+        guard let rebuild else { return }
+        menu.removeAllItems()
+        hostedViews = []
+        currentGroup = nil
+        rebuild(self)
+        alignHostedRows()
     }
 
     /// Starts a group; a separator is inserted when the group changes.
@@ -69,8 +89,12 @@ final class MenuBuilder {
     }
 
     /// Switch row (`type: "toggle"`).
-    func toggle(_ title: String, icon: String? = nil, isOn: Bool, enabled: Bool = true, onChange: @escaping (Bool) -> Void) {
-        hosted(MenuToggleRow(title: title, icon: icon, isOn: isOn, onChange: onChange).disabled(!enabled))
+    func toggle(_ title: String, icon: String? = nil, image: NSImage? = nil, isOn: Bool, enabled: Bool = true, onChange: @escaping (Bool) -> Void) {
+        let live = rebuild != nil
+        hosted(MenuToggleRow(title: title, icon: icon, image: image, isOn: isOn, onChange: { [weak self] value in
+            onChange(value)
+            if live { DispatchQueue.main.async { self?.refresh() } }
+        }).disabled(!enabled))
     }
 
     /// Inline segmented control (`type: "segmented"`).
@@ -168,11 +192,13 @@ extension KeyShortcut {
 private struct MenuToggleRow: View {
     var title: String
     var icon: String?
+    var image: NSImage?
     @State var isOn: Bool
     var onChange: (Bool) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
+            if let image { Image(nsImage: image).resizable().frame(width: 16, height: 16) }
             if let icon { Image(systemName: icon).frame(width: 16) }
             Text(title).font(.system(size: 13))
             Spacer(minLength: 24)

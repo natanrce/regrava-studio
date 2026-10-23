@@ -296,25 +296,60 @@ private struct MicrophoneButton: View {
 private struct SystemAudioButton: View {
     @ObservedObject var coordinator: RecordingCoordinator
 
+    /// `Record system audio` / `Sound from N app|apps` (stored IDs) / `No system audio`.
+    private var title: String {
+        guard coordinator.systemAudio else { return "No system audio" }
+        guard let apps = coordinator.systemAudioApps else { return "Record system audio" }
+        return "Sound from \(apps.count) app\(apps.count == 1 ? "" : "s")"
+    }
+
     var body: some View {
         DeviceButton(
             icon: "music.note.tv",
-            title: coordinator.systemAudio ? "Record system audio" : "No system audio",
+            title: title,
             isActive: coordinator.systemAudio,
             width: nil,
             action: showMenu
         ) { EmptyView() }
     }
 
-    /// Per-app selection needs per-app audio filtering, which this recorder does not do yet:
-    /// "From all apps" stays on.
+    /// The toggles, then the apps, rebuilt in place as they change.
     private func showMenu(_ anchor: NSView?) {
-        let menu = MenuBuilder()
-        menu.toggle("Record system audio", isOn: coordinator.systemAudio) { coordinator.systemAudio = $0 }
-        if coordinator.systemAudio {
-            menu.toggle("From all apps", isOn: true, enabled: false) { _ in }
+        let coordinator = self.coordinator
+        Task { @MainActor in
+            await coordinator.refreshAudioSourceApps()
+            let menu = MenuBuilder.live { menu in
+                menu.group("system-audio")
+                // On means every app, off means none (`"all"` / `null`).
+                menu.toggle("Record system audio", isOn: coordinator.systemAudio) { on in
+                    coordinator.systemAudio = on
+                    coordinator.systemAudioApps = nil
+                }
+                guard coordinator.systemAudio else { return }
+                let all = coordinator.systemAudioApps == nil
+                menu.toggle("From all apps", isOn: all) { on in coordinator.systemAudioApps = on ? nil : [] }
+                menu.group("apps")
+                menu.header("Apps")
+                for app in coordinator.audioSourceApps {
+                    let selected = all || (coordinator.systemAudioApps?.contains(app.bundleID) ?? false)
+                    menu.toggle(app.name, image: NSWorkspace.shared.icon(forFile: app.appPath), isOn: selected, enabled: !all) { on in
+                        coordinator.setSystemAudioApp(app.bundleID, on: on)
+                    }
+                }
+            }
+            // Apps that start or quit while the menu is open update it.
+            let center = NSWorkspace.shared.notificationCenter
+            let observers = [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification].map { name in
+                center.addObserver(forName: name, object: nil, queue: .main) { _ in
+                    Task { @MainActor in
+                        await coordinator.refreshAudioSourceApps()
+                        menu.refresh()
+                    }
+                }
+            }
+            menu.popUp(below: anchor)
+            observers.forEach(center.removeObserver)
         }
-        menu.popUp(below: anchor)
     }
 }
 
