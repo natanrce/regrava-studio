@@ -47,7 +47,9 @@ public enum MicrophoneRenderer {
         progress(0.1)
         // Resampling happened on reading (48 kHz).
         stages.removeAll { if case .resample = $0 { return true } else { return false } }
+        // One measure of the take serves every step; only `normalize` moves the speech level.
         let measure = Measure(audio)
+        guard var speech = measure.typicalLoudLevelDb else { throw RenderError.failed("The microphone has no speech level: nothing was measured.") }
         var index = 0
         while index < stages.count {
             try Task.checkCancellation()
@@ -57,7 +59,7 @@ public enum MicrophoneRenderer {
                 while index < stages.count, case .audioUnit = stages[index] { units.append(stages[index]); index += 1 }
                 audio = try AppleUnits.render(audio, units: units)
             } else {
-                audio = try await apply(stages[index], to: audio, measure: measure)
+                audio = try await apply(stages[index], to: audio, measure: measure, speech: &speech)
                 index += 1
             }
             progress(0.1 + 0.8 * Double(index) / Double(stages.count))
@@ -71,14 +73,16 @@ public enum MicrophoneRenderer {
         progress(1)
     }
 
-    private static func apply(_ stage: AudioProcessor, to audio: Stereo, measure: Measure) async throws -> Stereo {
+    private static func apply(_ stage: AudioProcessor, to audio: Stereo, measure: Measure, speech: inout Double) async throws -> Stereo {
         switch stage {
         case .resample, .audioUnit:
             return audio
         case let .normalize(peakDb, silentChannelBelowDb):
-            return ChannelFix.normalize(audio, peakDb: peakDb, silentChannelBelowDb: silentChannelBelowDb)
+            let (out, gain) = ChannelFix.normalize(audio, measure: measure, peakDb: peakDb, silentChannelBelowDb: silentChannelBelowDb)
+            speech += 20 * log10(Double(gain) + 1e-20)
+            return out
         case let .leveler(targetDb, holdBelowSpeechDb, floorDb, gainRangeDb, windowMs, lookMs, fallMs, riseMs):
-            return Leveler.process(audio, speechLevelDb: Measure(audio).typicalLoudLevelDb, targetDb: targetDb, holdBelowSpeechDb: holdBelowSpeechDb, floorDb: floorDb, gainRangeDb: gainRangeDb, windowMs: windowMs, lookMs: lookMs, fallMs: fallMs, riseMs: riseMs)
+            return Leveler.process(audio, speechLevelDb: speech, targetDb: targetDb, holdBelowSpeechDb: holdBelowSpeechDb, floorDb: floorDb, gainRangeDb: gainRangeDb, windowMs: windowMs, lookMs: lookMs, fallMs: fallMs, riseMs: riseMs)
         case let .keep(sounds, fadeMs, pauseDb):
             let ranges = try await Keep.keptRanges(audio, sounds: sounds)
             return Keep.apply(audio, kept: ranges, fadeMs: fadeMs ?? 10, pauseDb: pauseDb)
@@ -162,30 +166,58 @@ public enum SpeechModels {
 
 // MARK: - Measure, normalize
 
-/// A first pass over the take (`Measure`): levels the other steps read.
+/// The first pass over the take (`Measure`): the mono mix in 4096-sample blocks every 2048, each
+/// block's level in a 1 dB histogram from −75 dB (silence in the bottom bin); peak and
+/// per-channel RMS of the whole take.
 struct Measure {
-    /// The level speech typically reaches (dBFS), from 400 ms RMS windows: the 90th percentile of
-    /// the windows above −60 dB.
-    let typicalLoudLevelDb: Double
+    static let quietest = -75.0
+    static let loudAbove = 0.4
+
+    var rows: [Int]
+    var peak: Float
+    var channelRMS: (Double, Double)
 
     init(_ audio: MicrophoneRenderer.Stereo) {
-        let window = Int(MicrophoneRenderer.sampleRate * 0.4)
-        var levels: [Double] = []
+        rows = [Int](repeating: 0, count: Int(-Self.quietest) + 1)
+        var pl: Float = 0, pr: Float = 0
+        vDSP_maxmgv(audio.left, 1, &pl, vDSP_Length(audio.count))
+        vDSP_maxmgv(audio.right, 1, &pr, vDSP_Length(audio.count))
+        peak = max(pl, pr)
+        var sl: Float = 0, sr: Float = 0
+        vDSP_svesq(audio.left, 1, &sl, vDSP_Length(audio.count))
+        vDSP_svesq(audio.right, 1, &sr, vDSP_Length(audio.count))
+        let n = Double(max(audio.count, 1))
+        channelRMS = (sqrt(Double(sl) / n), sqrt(Double(sr) / n))
+        var mono = [Float](repeating: 0, count: audio.count)
+        vDSP_vadd(audio.left, 1, audio.right, 1, &mono, 1, vDSP_Length(audio.count))
+        var half: Float = 0.5
+        vDSP_vsmul(mono, 1, &half, &mono, 1, vDSP_Length(audio.count))
         var start = 0
-        while start + window <= audio.count {
+        while start + 4096 <= mono.count {
             var sum: Float = 0
-            audio.left.withUnsafeBufferPointer { l in audio.right.withUnsafeBufferPointer { r in
-                var a: Float = 0, b: Float = 0
-                vDSP_svesq(l.baseAddress! + start, 1, &a, vDSP_Length(window))
-                vDSP_svesq(r.baseAddress! + start, 1, &b, vDSP_Length(window))
-                sum = (a + b) / 2
-            } }
-            let db = 10 * log10(Double(sum) / Double(window) + 1e-12)
-            if db > -60 { levels.append(db) }
-            start += window / 2
+            mono.withUnsafeBufferPointer { vDSP_svesq($0.baseAddress! + start, 1, &sum, 4096) }
+            let db = 10 * log10(Double(sum) / 4096 + 1e-20)
+            let row = Int(clamp(db - Self.quietest, 0, Double(rows.count - 1)))
+            rows[row] += 1
+            start += 2048
         }
-        levels.sort()
-        typicalLoudLevelDb = levels.isEmpty ? -30 : levels[min(levels.count - 1, Int(Double(levels.count) * 0.9))]
+    }
+
+    /// `percentileRow(p)`: the first row whose cumulative count exceeds `p` of the total.
+    func percentileRow(_ p: Double) -> Int? {
+        let total = rows.reduce(0, +)
+        guard total > 0 else { return nil }
+        var cumulative = 0
+        for (i, count) in rows.enumerated() {
+            cumulative += count
+            if Double(cumulative) > p * Double(total) { return i }
+        }
+        return rows.count - 1
+    }
+
+    /// `typicalLoudLevel`: the 70th-percentile block level, the lower edge of its 1 dB bin.
+    var typicalLoudLevelDb: Double? {
+        percentileRow(Self.loudAbove + (1 - Self.loudAbove) * 0.5).map { Self.quietest + Double($0) }
     }
 }
 
@@ -196,73 +228,83 @@ enum ChannelFix {
         return 10 * log10(Double(ms) + 1e-12)
     }
 
-    /// `normalize`: a channel `silentChannelBelowDb` or more under the other becomes a copy of
-    /// it; then the peak goes to `peakDb` (nil keeps the level).
-    static func normalize(_ audio: MicrophoneRenderer.Stereo, peakDb: Double?, silentChannelBelowDb: Double) -> MicrophoneRenderer.Stereo {
+    /// `Normalize`: gain = 10^(peakDb/20) ÷ the take's sample peak; a channel whose whole-take RMS is
+    /// `silentChannelBelowDb` under the other becomes a copy of it. Returns the gain.
+    static func normalize(_ audio: MicrophoneRenderer.Stereo, measure: Measure, peakDb: Double?, silentChannelBelowDb: Double) -> (MicrophoneRenderer.Stereo, gain: Float) {
         var out = audio
-        let l = rmsDb(audio.left), r = rmsDb(audio.right)
-        if l - r >= silentChannelBelowDb { out.right = out.left } else if r - l >= silentChannelBelowDb { out.left = out.right }
-        guard let peakDb else { return out }
-        var pl: Float = 0, pr: Float = 0
-        vDSP_maxmgv(out.left, 1, &pl, vDSP_Length(out.count))
-        vDSP_maxmgv(out.right, 1, &pr, vDSP_Length(out.count))
-        let peak = max(pl, pr)
-        guard peak > 1e-6 else { return out }
-        var gain = Float(pow(10, peakDb / 20)) / peak
-        vDSP_vsmul(out.left, 1, &gain, &out.left, 1, vDSP_Length(out.count))
-        vDSP_vsmul(out.right, 1, &gain, &out.right, 1, vDSP_Length(out.count))
-        return out
+        var gain: Float = 1
+        if let peakDb, measure.peak > 0 { gain = Float(pow(10, peakDb / 20)) / measure.peak }
+        if gain != 1 {
+            vDSP_vsmul(out.left, 1, &gain, &out.left, 1, vDSP_Length(out.count))
+            vDSP_vsmul(out.right, 1, &gain, &out.right, 1, vDSP_Length(out.count))
+        }
+        let t = pow(10, silentChannelBelowDb / 20)
+        let (l, r) = measure.channelRMS
+        if t * l < r && t * r >= l { out.left = out.right } else if t * l >= r && t * r < l { out.right = out.left }
+        return (out, gain)
+    }
+
+    static func normalize(_ audio: MicrophoneRenderer.Stereo, peakDb: Double?, silentChannelBelowDb: Double) -> MicrophoneRenderer.Stereo {
+        normalize(audio, measure: Measure(audio), peakDb: peakDb, silentChannelBelowDb: silentChannelBelowDb).0
     }
 }
 
 // MARK: - Leveler
 
-/// "Brings speech to `targetDb` over seconds. Holds still in pauses so noise never comes up." The
-/// gain follows the windowed level (looking `lookMs` ahead), rising over `riseMs` and falling over
-/// `fallMs`, and holds where the level is `holdBelowSpeechDb` under speech or under `floorDb`.
+/// `Leveler`: "Brings speech to `targetDb` over seconds. Holds still in pauses so noise never comes
+/// up." 10 ms hops; the gain freezes while the look-ahead hops are under max(speech −
+/// holdBelowSpeech, floor), else follows target − the centred window's level through a one-pole
+/// (fall going down, rise going up) and ramps linearly across each hop.
 enum Leveler {
     static func process(_ audio: MicrophoneRenderer.Stereo, speechLevelDb: Double, targetDb: Double, holdBelowSpeechDb: Double, floorDb: Double, gainRangeDb: ClosedRange<Double>, windowMs: Double, lookMs: Double, fallMs: Double, riseMs: Double) -> MicrophoneRenderer.Stereo {
-        let sr = MicrophoneRenderer.sampleRate
-        let hop = 480 // 10 ms control rate
-        let window = max(Int(sr * windowMs / 1000), hop)
-        let look = Int(sr * lookMs / 1000)
+        let stride = 480
         let n = audio.count
         guard n > 0 else { return audio }
-        // Mean square per hop, then a running window.
-        let hops = (n + hop - 1) / hop
+        func hopCount(_ ms: Double) -> Int { Int((((ms / 1000) * 48_000).rounded() / Double(stride)).rounded()) }
+        let half = hopCount(windowMs) / 2, lookHops = hopCount(lookMs)
+        let holdThreshold = max(speechLevelDb - holdBelowSpeechDb, floorDb)
+        let fallCoef = exp(-0.01 / max(fallMs / 1000, 1e-9)), riseCoef = exp(-0.01 / max(riseMs / 1000, 1e-9))
+        let hops = (n + stride - 1) / stride
         var power = [Double](repeating: 0, count: hops)
         for h in 0..<hops {
-            let s = h * hop, e = min(s + hop, n)
+            let s0 = h * stride, e0 = min(s0 + stride, n)
             var sum = 0.0
-            for i in s..<e { sum += Double(audio.left[i] * audio.left[i] + audio.right[i] * audio.right[i]) / 2 }
-            power[h] = sum / Double(max(e - s, 1))
+            for i in s0..<e0 { sum += Double(audio.left[i] * audio.left[i] + audio.right[i] * audio.right[i]) * 0.5 }
+            power[h] = sum / Double(stride)
         }
-        let span = max(window / hop, 1), ahead = look / hop
-        var gainsDb = [Double](repeating: 0, count: hops)
-        var current = clamp(targetDb - speechLevelDb, gainRangeDb.lowerBound, gainRangeDb.upperBound)
-        let riseCoef = exp(-Double(hop) / (sr * max(riseMs, 1) / 1000))
-        let fallCoef = exp(-Double(hop) / (sr * max(fallMs, 1) / 1000))
         var prefix = [Double](repeating: 0, count: hops + 1)
         for h in 0..<hops { prefix[h + 1] = prefix[h] + power[h] }
-        for h in 0..<hops {
-            let centre = h + ahead
-            let lo = max(0, centre - span / 2), hi = min(hops, centre + span / 2 + 1)
-            let level = 10 * log10((prefix[hi] - prefix[lo]) / Double(max(hi - lo, 1)) + 1e-12)
-            if level > floorDb && level > speechLevelDb - holdBelowSpeechDb {
-                let wanted = clamp(targetDb - level, gainRangeDb.lowerBound, gainRangeDb.upperBound)
-                let coef = wanted > current ? riseCoef : fallCoef
-                current = wanted + (current - wanted) * coef
-            }
-            gainsDb[h] = current
+        func level(_ lo: Int, _ hi: Int) -> Double {
+            let a = max(0, lo), b = min(hops, hi)
+            guard b > a else { return -200 }
+            return 10 * log10((prefix[b] - prefix[a]) / Double(b - a) + 1e-20)
         }
+        var smoothed: Double?
+        var lastApplied: Double?
         var out = audio
-        for i in 0..<n {
-            let h = i / hop
-            let t = Double(i % hop) / Double(hop)
-            let next = min(h + 1, hops - 1)
-            let g = Float(pow(10, (gainsDb[h] + (gainsDb[next] - gainsDb[h]) * t) / 20))
-            out.left[i] *= g
-            out.right[i] *= g
+        for counter in 0..<hops {
+            let i = counter + 1
+            var gainLinear: Double
+            if level(i, i + lookHops) < holdThreshold {
+                gainLinear = smoothed.map { pow(10, $0 / 20) } ?? 1
+            } else {
+                // The centred window reaches only as far ahead as is buffered (lookHops + 1).
+                let L = level(i - half, min(i + half + 1, counter + lookHops + 2))
+                let g = clamp(targetDb - L, gainRangeDb.lowerBound, gainRangeDb.upperBound)
+                let prev = smoothed ?? g
+                let coef = g < prev ? fallCoef : riseCoef
+                smoothed = coef * prev + (1 - coef) * g
+                gainLinear = pow(10, smoothed! / 20)
+            }
+            let previous = lastApplied ?? gainLinear
+            let s0 = counter * stride, e0 = min(s0 + stride, n)
+            for f in s0..<e0 {
+                let k = Double(f - s0) / Double(stride)
+                let g = Float(previous + (gainLinear - previous) * k)
+                out.left[f] *= g
+                out.right[f] *= g
+            }
+            lastApplied = gainLinear
         }
         return out
     }
@@ -270,9 +312,10 @@ enum Leveler {
 
 // MARK: - Keep (SoundAnalysis)
 
-/// "Silence outside the speech, and the sounds near it": Apple's sound classifier scores 1 s
-/// windows every half second; a stretch with neither speech nor a nearby kept sound, at least
-/// `shortestCutMs` long, is turned down to `pauseDb` (or silenced) with `fadeMs` fades.
+/// `ClassifySound` → `Keep`: Apple's sound classifier scores 1 s windows every half second; speech
+/// windows, and near-speech sounds within `withinMs` of one, are kept; gaps shorter than
+/// `shortestCutMs` (also at the head and tail) stay. Outside, the gain fades linearly over `fadeMs`
+/// down to `pauseDb` (or silence).
 enum Keep {
     final class Collector: NSObject, SNResultsObserving, @unchecked Sendable {
         var windows: [(start: Double, end: Double, scores: [String: Double])] = []
@@ -285,10 +328,10 @@ enum Keep {
     }
 
     static func keptRanges(_ audio: MicrophoneRenderer.Stereo, sounds: AudioProcessor.KeptSounds) async throws -> [ClosedRange<Double>] {
-        let format = AVAudioFormat(standardFormatWithSampleRate: MicrophoneRenderer.sampleRate, channels: 1)!
+        let format = AVAudioFormat(standardFormatWithSampleRate: MicrophoneRenderer.sampleRate, channels: 2)!
         let analyzer = SNAudioStreamAnalyzer(format: format)
         let request = try SNClassifySoundRequest(classifierIdentifier: .version1)
-        request.windowDuration = CMTime(seconds: 1, preferredTimescale: 48_000)
+        request.windowDuration = CMTime(value: 1, timescale: 1)
         request.overlapFactor = 0.5
         let collector = Collector()
         try analyzer.add(request, withObserver: collector)
@@ -298,51 +341,55 @@ enum Keep {
             let n = min(chunk, audio.count - start)
             let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n))!
             buffer.frameLength = AVAudioFrameCount(n)
-            for i in 0..<n { buffer.floatChannelData![0][i] = (audio.left[start + i] + audio.right[start + i]) / 2 }
+            audio.left.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress! + start, count: n) }
+            audio.right.withUnsafeBufferPointer { buffer.floatChannelData![1].update(from: $0.baseAddress! + start, count: n) }
             analyzer.analyze(buffer, atAudioFramePosition: AVAudioFramePosition(start))
             start += n
         }
         analyzer.completeAnalysis()
-        let windows = collector.windows
-        let speech = windows.filter { w in sounds.speechLabels.contains { (w.scores[$0] ?? 0) >= sounds.speechConfidence } }
-        let near = windows.filter { w in
-            sounds.nearSpeechLabels.contains { (w.scores[$0] ?? 0) >= sounds.nearSpeechConfidence }
-                && speech.contains { s in s.start - sounds.nearSpeechWithinMs / 1000 <= w.end && w.start <= s.end + sounds.nearSpeechWithinMs / 1000 }
+        let windows = collector.windows.map { w in
+            (start: w.start, end: w.end,
+             speech: sounds.speechLabels.map { w.scores[$0] ?? 0 }.max() ?? 0,
+             near: sounds.nearSpeechLabels.map { w.scores[$0] ?? 0 }.max() ?? 0)
         }
-        // Merge kept windows; gaps shorter than `shortestCutMs` stay kept.
-        let kept = (speech + near).map { $0.start...$0.end }.sorted { $0.lowerBound < $1.lowerBound }
-        var merged: [ClosedRange<Double>] = []
-        for range in kept {
-            if let last = merged.last, range.lowerBound - last.upperBound < sounds.shortestCutMs / 1000 {
-                merged[merged.count - 1] = last.lowerBound...max(last.upperBound, range.upperBound)
-            } else {
-                merged.append(range)
-            }
+        let within = sounds.nearSpeechWithinMs / 1000, shortestCut = sounds.shortestCutMs / 1000
+        let speech = windows.filter { $0.speech >= sounds.speechConfidence }.map { ($0.start, $0.end) }
+        let near = windows.filter { $0.speech < sounds.speechConfidence && $0.near >= sounds.nearSpeechConfidence }
+            .filter { w in speech.contains { s in max(s.0 - w.end, w.start - s.1) <= within } }
+            .map { ($0.start, $0.end) }
+        var merged: [(Double, Double)] = []
+        for r in (speech + near).sorted(by: { $0.0 < $1.0 }) {
+            if let last = merged.last, r.0 - last.1 < shortestCut { merged[merged.count - 1].1 = max(last.1, r.1) } else { merged.append(r) }
         }
-        // The edges count as kept unless the cut there is long enough too.
-        let duration = Double(audio.count) / MicrophoneRenderer.sampleRate
-        if let first = merged.first, first.lowerBound < sounds.shortestCutMs / 1000 { merged[0] = 0...first.upperBound }
-        if let last = merged.last, duration - last.upperBound < sounds.shortestCutMs / 1000 { merged[merged.count - 1] = last.lowerBound...duration }
-        return merged
+        let length = Double(audio.count) / MicrophoneRenderer.sampleRate
+        if let first = merged.first, first.0 < shortestCut { merged[0].0 = 0 }
+        if let last = merged.last, length - last.1 < shortestCut { merged[merged.count - 1].1 = max(last.0, length) }
+        return merged.map { $0.0...$0.1 }
     }
 
+    /// `gain = pause + (1 − pause)·clamp(1 − d / fade, 0, 1)` with `d` the distance to the
+    /// nearest kept range; kept audio is never attenuated.
     static func apply(_ audio: MicrophoneRenderer.Stereo, kept: [ClosedRange<Double>], fadeMs: Double, pauseDb: Double?) -> MicrophoneRenderer.Stereo {
         let sr = MicrophoneRenderer.sampleRate
-        let low = Float(pauseDb.map { pow(10, $0 / 20) } ?? 0)
-        let fade = max(sr * fadeMs / 1000, 1)
-        var out = audio
-        // Gain 1 inside kept ranges, `low` elsewhere, ramping over `fade` samples at each edge.
-        var target = [Float](repeating: low, count: audio.count)
-        for range in kept {
-            let s = max(Int(range.lowerBound * sr), 0), e = min(Int(range.upperBound * sr), audio.count)
-            if s < e { for i in s..<e { target[i] = 1 } }
+        let pause = pauseDb.map { pow(10, $0 / 20) } ?? 0
+        let fade = max(1, (fadeMs / 1000 * sr).rounded())
+        var ranges: [(Int, Int)] = []
+        for r in kept.map({ k in (Int((k.lowerBound * sr).rounded()), Int((k.upperBound * sr).rounded())) }).sorted(by: { $0.0 < $1.0 }) {
+            if let last = ranges.last, r.0 <= last.1 { ranges[ranges.count - 1].1 = max(last.1, r.1) } else { ranges.append(r) }
         }
-        var g: Float = target.first ?? 1
-        let step = (1 - low) / Float(fade)
-        for i in 0..<audio.count {
-            if g < target[i] { g = min(target[i], g + step) } else if g > target[i] { g = max(target[i], g - step) }
-            out.left[i] *= g
-            out.right[i] *= g
+        var out = audio
+        var j = 0
+        for p in 0..<audio.count {
+            while j < ranges.count && ranges[j].1 <= p { j += 1 }
+            var d = Double.infinity
+            if j < ranges.count { d = ranges[j].0 <= p ? 0 : Double(ranges[j].0 - p) }
+            if j > 0 { d = min(d, Double(p - ranges[j - 1].1 + 1)) }
+            let w = clamp(1 - d / fade, 0, 1)
+            let g = Float(pause + (1 - pause) * w)
+            if g != 1 {
+                out.left[p] *= g
+                out.right[p] *= g
+            }
         }
         return out
     }
