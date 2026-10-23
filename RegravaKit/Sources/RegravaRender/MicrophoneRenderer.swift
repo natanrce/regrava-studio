@@ -49,6 +49,7 @@ public enum MicrophoneRenderer {
         stages.removeAll { if case .resample = $0 { return true } else { return false } }
         // One measure of the take serves every step; only `normalize` moves the speech level.
         let measure = Measure(audio)
+        let take = audio
         guard var speech = measure.typicalLoudLevelDb else { throw RenderError.failed("The microphone has no speech level: nothing was measured.") }
         var index = 0
         while index < stages.count {
@@ -59,7 +60,7 @@ public enum MicrophoneRenderer {
                 while index < stages.count, case .audioUnit = stages[index] { units.append(stages[index]); index += 1 }
                 audio = try AppleUnits.render(audio, units: units)
             } else {
-                audio = try await apply(stages[index], to: audio, measure: measure, speech: &speech)
+                audio = try await apply(stages[index], to: audio, take: take, measure: measure, speech: &speech)
                 index += 1
             }
             progress(0.1 + 0.8 * Double(index) / Double(stages.count))
@@ -73,7 +74,7 @@ public enum MicrophoneRenderer {
         progress(1)
     }
 
-    private static func apply(_ stage: AudioProcessor, to audio: Stereo, measure: Measure, speech: inout Double) async throws -> Stereo {
+    private static func apply(_ stage: AudioProcessor, to audio: Stereo, take: Stereo, measure: Measure, speech: inout Double) async throws -> Stereo {
         switch stage {
         case .resample, .audioUnit:
             return audio
@@ -88,9 +89,14 @@ public enum MicrophoneRenderer {
             return Keep.apply(audio, kept: ranges, fadeMs: fadeMs ?? 10, pauseDb: pauseDb)
         case .mossFormer2, .tfRestormer:
             throw RenderError.needsSpeechModels
-        case .matchEq, .dynamicEq, .restoreSibilance:
-            // Only in the Podcast chain, which needs the speech models too.
-            throw RenderError.needsSpeechModels
+        case let .matchEq(target, correctionDb):
+            // From the take's own spectrum, before any step (`measure.bandLevels`).
+            guard let bands = measure.bandLevels else { return audio }
+            return MatchEq.process(audio, measuredBands: bands, target: target, correctionDb: correctionDb)
+        case let .dynamicEq(frame, detectorHz, referenceHz, allowedDb, ratio, maxCutDb, cutHz, taperOctaves, attackMs, releaseMs):
+            return DynamicEq.process(audio, frame: frame, detectorHz: detectorHz, referenceHz: referenceHz, allowedDb: allowedDb, ratio: ratio, maxCutDb: maxCutDb, cutHz: cutHz, taperOctaves: taperOctaves, attackMs: attackMs, releaseMs: releaseMs)
+        case .restoreSibilance:
+            return RestoreSibilance.process(audio, take: take, speechLevelDb: speech)
         }
     }
 
@@ -176,6 +182,10 @@ struct Measure {
     var rows: [Int]
     var peak: Float
     var channelRMS: (Double, Double)
+    /// Power per 1 dB row in the 25 third-octave bands (for `bandLevels`).
+    var rowBands: [[Double]]
+    /// Power per bin over every block (for `highestFrequencyWithContent`).
+    var totalSpectrum: [Double]
 
     init(_ audio: MicrophoneRenderer.Stereo) {
         rows = [Int](repeating: 0, count: Int(-Self.quietest) + 1)
@@ -192,6 +202,19 @@ struct Measure {
         vDSP_vadd(audio.left, 1, audio.right, 1, &mono, 1, vDSP_Length(audio.count))
         var half: Float = 0.5
         vDSP_vsmul(mono, 1, &half, &mono, 1, vDSP_Length(audio.count))
+        rowBands = [[Double]](repeating: [Double](repeating: 0, count: 25), count: rows.count)
+        totalSpectrum = [Double](repeating: 0, count: 2049)
+        // Symmetric Hann over 4096 and each bin's third-octave band `round(3·log2(f/1000)) + 12`.
+        let window = (0..<4096).map { Float(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / 4095)) }
+        let bandOfBin: [Int] = (0...2048).map { k in
+            let f = max(Double(k) * MicrophoneRenderer.sampleRate / 4096, 1)
+            let b = (3 * log2(f / 1000)).rounded(.toNearestOrAwayFromZero) + 12
+            return b >= 0 && b <= 24 ? Int(b) : -1
+        }
+        let setup = vDSP_DFT_zrop_CreateSetup(nil, 4096, .FORWARD)!
+        defer { vDSP_DFT_DestroySetup(setup) }
+        var inRe = [Float](repeating: 0, count: 2048), inIm = [Float](repeating: 0, count: 2048)
+        var outRe = [Float](repeating: 0, count: 2048), outIm = [Float](repeating: 0, count: 2048)
         var start = 0
         while start + 4096 <= mono.count {
             var sum: Float = 0
@@ -199,8 +222,38 @@ struct Measure {
             let db = 10 * log10(Double(sum) / 4096 + 1e-20)
             let row = Int(clamp(db - Self.quietest, 0, Double(rows.count - 1)))
             rows[row] += 1
+            for n in 0..<2048 {
+                inRe[n] = mono[start + 2 * n] * window[2 * n]
+                inIm[n] = mono[start + 2 * n + 1] * window[2 * n + 1]
+            }
+            vDSP_DFT_Execute(setup, inRe, inIm, &outRe, &outIm)
+            for k in 0...2048 {
+                let re = k == 0 ? outRe[0] : k == 2048 ? outIm[0] : outRe[k]
+                let im = k == 0 || k == 2048 ? 0 : outIm[k]
+                let p = Double(re * re + im * im) / 4
+                totalSpectrum[k] += p
+                if bandOfBin[k] >= 0 { rowBands[row][bandOfBin[k]] += p }
+            }
             start += 2048
         }
+    }
+
+    /// `bandLevels`: the loudest ~60% of blocks' spectrum in 25 third-octave bands, dB re 1 kHz.
+    var bandLevels: [Double]? {
+        guard let r = percentileRow(Self.loudAbove) else { return nil }
+        let start = rows[(r + 1)...].contains { $0 > 0 } ? r + 1 : r
+        var p = [Double](repeating: 0, count: 25)
+        for row in start..<rows.count { for i in 0..<25 { p[i] += rowBands[row][i] } }
+        let ref = 10 * log10(p[12] + 1e-20)
+        return p.map { 10 * log10($0 + 1e-20) - ref }
+    }
+
+    /// `highestFrequencyWithContent(within:)`: the highest bin whose total power is within `dB` of the peak bin.
+    func highestFrequencyWithContent(withinDb dB: Double) -> Double? {
+        guard let peak = totalSpectrum.max(), peak > 0 else { return nil }
+        let threshold = peak * pow(10, -dB / 10)
+        guard let k = totalSpectrum.lastIndex(where: { $0 > threshold }) else { return nil }
+        return Double(k) * MicrophoneRenderer.sampleRate / 4096
     }
 
     /// `percentileRow(p)`: the first row whose cumulative count exceeds `p` of the total.
