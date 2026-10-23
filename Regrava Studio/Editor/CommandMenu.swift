@@ -41,6 +41,9 @@ extension EditorModel {
             EditorAction(name: "Undo", group: "Project", icon: "arrow.uturn.backward", shortcut: "⌘ Z", isEnabled: canUndo) { [weak self] in self?.undo() },
             EditorAction(name: "Redo", group: "Project", icon: "arrow.uturn.forward", shortcut: "⌘ ⇧ Z", isEnabled: canRedo) { [weak self] in self?.redo() },
             EditorAction(name: "Show project in Finder", group: "Project", icon: "folder", shortcut: "⌘ ⇧ O", perform: finder),
+            EditorAction(name: "Crop", group: "Editor", icon: "crop", isEnabled: project.canChangeCrop) { [weak self] in
+                self.map { ScreenCropWindow.show(for: $0) }
+            },
             EditorAction(name: "Split at current time", group: "Slice", icon: "scissors", shortcut: "C") { [weak self] in self.map { $0.splitSlice(atPlayback: $0.currentTimeMs) } },
             EditorAction(name: "Reset trims and cuts for all slices", group: "Slice", icon: "arrowshape.turn.up.left") { [weak self] in self?.resetAllSlices() },
             // "Add " + the add tool's presentation label.

@@ -356,6 +356,12 @@ private struct LayoutControls: View {
             .fixedSize()
             .tooltip("Output aspect ratio")
 
+            // "Crop" (`openCropWindow`): hidden where the crop can't change.
+            if editor.project.canChangeCrop {
+                RSButton(title: "Crop", icon: "crop", kind: .transparent, size: .small) { ScreenCropWindow.show(for: editor) }
+                    .tooltip("Crop recorded area")
+            }
+
             Spacer()
 
             HStack(spacing: Theme.gap(0)) {
@@ -598,11 +604,13 @@ private struct MaskOverlays: View {
         return masks.first { $0.isWithinShowWindow(t) }
     }
 
+    /// Mask bounds stay in whole-recording pixels; the area shows the crop.
     private func rect(_ bound: Rect2, in area: CGRect) -> CGRect {
-        let size = editor.project.recording.videoSize
+        let crop = editor.project.screenCropRect
+        let size = crop.size
         return CGRect(
-            x: area.minX + bound.x / size.width * area.width,
-            y: area.minY + bound.y / size.height * area.height,
+            x: area.minX + (bound.x - crop.x) / size.width * area.width,
+            y: area.minY + (bound.y - crop.y) / size.height * area.height,
             width: bound.width / size.width * area.width,
             height: bound.height / size.height * area.height
         )
@@ -610,10 +618,11 @@ private struct MaskOverlays: View {
 
     private func recording(_ rect: CGRect, _ fallback: Rect2, area: CGRect) -> Rect2 {
         guard area.width > 0, area.height > 0 else { return fallback }
-        let size = editor.project.recording.videoSize
+        let crop = editor.project.screenCropRect
+        let size = crop.size
         return Rect2(
-            x: (rect.minX - area.minX) / area.width * size.width,
-            y: (rect.minY - area.minY) / area.height * size.height,
+            x: crop.x + (rect.minX - area.minX) / area.width * size.width,
+            y: crop.y + (rect.minY - area.minY) / area.height * size.height,
             width: rect.width / area.width * size.width,
             height: rect.height / area.height * size.height
         )
@@ -635,9 +644,8 @@ private struct MaskOverlays: View {
                         .onEnded { value in
                             let drawn = drawing
                             drawing = nil
-                            let size = editor.project.recording.videoSize
                             if let drawn, drawn.width >= 6, drawn.height >= 6 {
-                                editor.addMask(type: editor.addMaskType, bounds: recording(drawn, Rect2(x: 0, y: 0, width: size.width, height: size.height), area: area))
+                                editor.addMask(type: editor.addMaskType, bounds: recording(drawn, editor.project.screenCropRect, area: area))
                             } else if abs(value.translation.width) < 3 && abs(value.translation.height) < 3 {
                                 let p = clampPoint(value.location, area)
                                 let point01 = Vec2((p.x - area.minX) / max(area.width, 1), (p.y - area.minY) / max(area.height, 1))

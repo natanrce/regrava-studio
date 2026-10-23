@@ -21,19 +21,70 @@ enum CameraCropWindow {
     }
 }
 
+/// "Crop" (crop the recorded area), the same window as the camera's: id "crop-window", in
+/// recording points, no mirror, the screen still at the playhead.
+enum ScreenCropWindow {
+    @MainActor
+    static func show(for editor: EditorModel) {
+        editor.pause()
+        let key = "crop-window-\(ObjectIdentifier(editor).hashValue)"
+        if ToolWindowController.focus(key) { return }
+        let model = CameraCropModel(screenOf: editor)
+        ToolWindowController.open(key: key, title: "Crop", autosaveName: "crop-window") { close in
+            AnyView(CameraCropView(model: model, close: close))
+        }
+    }
+}
+
 @MainActor
 final class CameraCropModel: ObservableObject {
     let editor: EditorModel
     let mirror: Bool
+    let title: String
     @Published var state: CameraCropState
     @Published var frameImage: NSImage?
+    private let commit: (CameraCropModel) -> Void
 
     init(editor: EditorModel) {
         self.editor = editor
         let project = editor.project
         mirror = project.camera.mirror
+        title = "Crop Camera"
         state = CameraCropState(videoSize: project.recording.cameraSize, crop01: project.camera.crop01, mirror: project.camera.mirror)
+        commit = { model in
+            let crop = model.state.confirmedCrop01(mirror: model.mirror)
+            model.editor.change { $0.camera.crop01 = crop }
+        }
         loadFrame()
+    }
+
+    /// The screen crop: in points (so the 200 minimum is 200 pt), always written on confirm.
+    init(screenOf editor: EditorModel) {
+        self.editor = editor
+        let project = editor.project
+        mirror = false
+        title = "Crop"
+        let points = Size2(width: project.recording.videoSize.width / max(project.recording.pointPixelScale, 0.0001), height: project.recording.videoSize.height / max(project.recording.pointPixelScale, 0.0001))
+        state = CameraCropState(videoSize: points, crop01: project.crop.rect01, mirror: false)
+        commit = { model in
+            let rect = model.state.crop01
+            model.editor.change { $0.crop.rect01 = rect }
+        }
+        loadScreenFrame()
+    }
+
+    /// The raw screen frame at the playhead.
+    private func loadScreenFrame() {
+        let url = editor.videoURL
+        let seconds = editor.currentSourceTimeMs / 1000
+        Task {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 0.1, preferredTimescale: 600)
+            if let image = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image {
+                frameImage = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+            }
+        }
     }
 
     /// The webcam frame at the playhead, shifted by the camera delay.
@@ -52,11 +103,9 @@ final class CameraCropModel: ObservableObject {
         }
     }
 
-    /// "Confirm changes": stored unmirrored, nil for the whole frame.
-    func confirm() {
-        let crop = state.confirmedCrop01(mirror: mirror)
-        editor.change { $0.camera.crop01 = crop }
-    }
+    /// "Confirm changes": the camera's is stored unmirrored (nil for the whole frame); the
+    /// screen's always writes `crop.rect01`.
+    func confirm() { commit(self) }
 
     /// Arrow keys: move by 1 (⇧ 10) px; with ⌘, ←/→ change the width and ↑/↓ the height
     /// (↑ reduces it, as the code does).
@@ -85,7 +134,7 @@ struct CameraCropView: View {
     var body: some View {
         VStack(spacing: Theme.gap(1)) {
             HStack(spacing: 0) {
-                Text("Crop Camera")
+                Text(model.title)
                     .font(Theme.Typo.copy.weight(.medium))
                     .lineLimit(1)
                     .frame(maxWidth: 300)

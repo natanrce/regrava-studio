@@ -496,7 +496,7 @@ struct ZoomInspector: View {
                                 selection: editor.zoomBinding(zoomID, \.mode)
                             )
                             if zoom.mode == .manual {
-                                DotPicker(point: editor.zoomBinding(zoomID, \.manualTarget), aspectRatio: editor.project.recording.videoSize.aspectRatio) {
+                                DotPicker(point: editor.zoomBinding(zoomID, \.manualTarget), aspectRatio: editor.project.croppedVideoSize.aspectRatio) {
                                     if let still { Image(nsImage: still).resizable() } else { Theme.Colors.lighterBg }
                                 }
                                 .task(id: zoom.startMs) { still = await stillFrame(at: zoom.startMs) }
@@ -531,7 +531,10 @@ struct ZoomInspector: View {
     private func stillFrame(at ms: Double) async -> NSImage? {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: editor.videoURL))
         generator.maximumSize = CGSize(width: 640, height: 640)
-        guard let image = try? await generator.image(at: CMTime(seconds: ms / 1000, preferredTimescale: 600)).image else { return nil }
+        guard var image = try? await generator.image(at: CMTime(seconds: ms / 1000, preferredTimescale: 600)).image else { return nil }
+        // The target point is in the crop, so is the still.
+        let c = editor.project.screenCrop01
+        if let cropped = image.cropping(to: CGRect(x: c.x * Double(image.width), y: c.y * Double(image.height), width: c.width * Double(image.width), height: c.height * Double(image.height)).integral) { image = cropped }
         return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
