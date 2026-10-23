@@ -97,6 +97,7 @@ final class RecordingCoordinator: ObservableObject {
     private let deviceRecorder = ExternalDeviceRecorder()
     let externalDevices = ExternalDeviceDiscovery.shared
     private var pickerPanel: GlassPanel<RecordingPickerView>?
+    private var pickerKeyMonitor: Any?
     private var recentProjectsPanel: RecentProjectsPanel?
     private var widgetPanel: GlassPanel<RecordingWidgetView>?
     private lazy var overlays = SourceOverlayController(coordinator: self)
@@ -193,6 +194,22 @@ final class RecordingCoordinator: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         microphoneLevel.monitor(deviceID: microphoneID)
         if let preselect { selectType(preselect) }
+        installPickerShortcuts()
+    }
+
+    /// 1, 2 and 3 pick display, window and area while the picker is open
+    /// (`selectRecordDisplayInPicker`…).
+    private func installPickerShortcuts() {
+        guard pickerKeyMonitor == nil else { return }
+        pickerKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.isPickerOpen, case .idle = self.phase,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function]).isEmpty,
+                  !(NSApp.keyWindow?.firstResponder is NSText) else { return event }
+            let types: [String: SourceType] = ["1": .display, "2": .window, "3": .area]
+            guard let type = event.charactersIgnoringModifiers.flatMap({ types[$0] }) else { return event }
+            if self.sourceType != type { self.selectType(type) }
+            return nil
+        }
     }
 
     func closePicker() {
@@ -202,6 +219,8 @@ final class RecordingCoordinator: ObservableObject {
         sourceType = nil
         selection = nil
         pickerPanel?.orderOut(nil)
+        if let pickerKeyMonitor { NSEvent.removeMonitor(pickerKeyMonitor) }
+        pickerKeyMonitor = nil
         overlays.hide()
         microphoneLevel.stop()
         onStateChange?()
