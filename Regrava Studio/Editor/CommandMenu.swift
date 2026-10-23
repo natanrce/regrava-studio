@@ -41,6 +41,12 @@ extension EditorModel {
             EditorAction(name: "Undo", group: "Project", icon: "arrow.uturn.backward", shortcut: "⌘ Z", isEnabled: canUndo) { [weak self] in self?.undo() },
             EditorAction(name: "Redo", group: "Project", icon: "arrow.uturn.forward", shortcut: "⌘ ⇧ Z", isEnabled: canRedo) { [weak self] in self?.redo() },
             EditorAction(name: "Show project in Finder", group: "Project", icon: "folder", shortcut: "⌘ ⇧ O", perform: finder),
+            EditorAction(name: RecordingRecovery.shared.actionName, group: "Recording", icon: "arrow.up.circle", isEnabled: !RecordingRecovery.shared.unfinished.isEmpty) {
+                Task { await RecordingRecovery.shared.recoverAll() }
+            },
+            EditorAction(name: "Try to recover recording from recording folder", group: "Recording", icon: "arrow.up.circle") {
+                Task { await RecordingRecovery.shared.recoverFromPickedFolder() }
+            },
             EditorAction(name: "Crop", group: "Editor", icon: "crop", isEnabled: project.canChangeCrop) { [weak self] in
                 self.map { ScreenCropWindow.show(for: $0) }
             },

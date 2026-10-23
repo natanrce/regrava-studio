@@ -104,7 +104,9 @@ final class RecordingCoordinator: ObservableObject {
     private lazy var overlays = SourceOverlayController(coordinator: self)
     private lazy var boundsIndicator = BoundsIndicatorController()
     private lazy var cameraPreview = CameraPreviewController(coordinator: self)
+    /// The recording folder (in "Recordings In Progress") until it becomes a project.
     private var bundleURL: URL?
+    private var endProblem: Error?
     private var activeSelection: RecordSelection?
     private var timer: Timer?
     private var workingTask: Task<Void, Never>?
@@ -114,9 +116,10 @@ final class RecordingCoordinator: ObservableObject {
     var onStateChange: (() -> Void)?
 
     init() {
+        // The capture ended by itself: finish what was recorded and say so (`recovered-from-error`).
         let unexpectedStop: (Error) -> Void = { [weak self] error in
             Task { @MainActor in
-                Dialogs.error("The recording stopped unexpectedly (\(error.localizedDescription)).")
+                self?.endProblem = error
                 await self?.finish()
             }
         }
@@ -214,6 +217,7 @@ final class RecordingCoordinator: ObservableObject {
             return
         }
         refreshDevices()
+        RecordingRecovery.shared.refresh()
         // Forget devices that are gone.
         if let id = cameraID, !cameras.contains(where: { $0.id == id }) { cameraID = nil }
         if let id = microphoneID, !microphones.contains(where: { $0.id == id }) { microphoneID = nil }
@@ -420,8 +424,16 @@ final class RecordingCoordinator: ObservableObject {
         pickerPanel?.orderOut(nil)
         isPickerOpen = false
 
-        let bundle = makeBundleURL()
+        let bundle: URL
+        do {
+            bundle = try makeRecordingFolder()
+        } catch {
+            phase = .idle
+            Dialogs.error("Failed to start recording (\(error.localizedDescription))")
+            return
+        }
         bundleURL = bundle
+        endProblem = nil
         // Selected apps become the pids of every listed source with that bundle ID.
         var pids: [pid_t]?
         if systemAudio, let apps = systemAudioApps {
@@ -445,7 +457,7 @@ final class RecordingCoordinator: ObservableObject {
         lastRecordsSound = recordsSound
         await RecordingSounds.playBegin(recordsSound: recordsSound)
         do {
-            let work = bundle.appendingPathComponent("segments", isDirectory: true)
+            let work = bundle
             if let source = selection.captureSource {
                 try await recorder.start(source: source, options: options, workDirectory: work)
             } else if let device = selectedDevice {
@@ -467,18 +479,16 @@ final class RecordingCoordinator: ObservableObject {
         onStateChange?()
     }
 
-    private func makeBundleURL() -> URL {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+    private func makeRecordingFolder() throws -> URL {
         let name: String
+        let mode: String
         switch selection {
-        case .display(let display): name = display.label
-        case .window(let window): name = window.appName
-        case .device: name = "External Device"
-        default: name = "Area"
+        case .display(let display): name = display.label; mode = "display"
+        case .window(let window): name = window.appName; mode = "window"
+        case .device: name = "External Device"; mode = "device"
+        default: name = "Area"; mode = "display"
         }
-        return preferences.projectsFolder
-            .appendingPathComponent("\(name) \(formatter.string(from: Date())).\(ProjectStore.fileExtension)", isDirectory: true)
+        return try RecordingFolders.makeFolder(name: name, mode: mode)
     }
 
     // MARK: Recording actions
@@ -550,61 +560,39 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
-    /// "Finish recording": joins segments, creates the project and runs the after-recording action.
+    /// "Finish recording": finalizes the folder, makes the project and runs the after-recording
+    /// action; the three outcomes of `finishAndCreateProject`.
     func finish() async {
-        guard phase == .recording || phase == .paused, let bundleURL else { return }
+        guard phase == .recording || phase == .paused, let folder = bundleURL else { return }
         phase = .finishing
         scheduleWorkingIndicator()
+        let problem = endProblem
+        endProblem = nil
+        var made: (bundle: URL, project: Project)?
+        var failure: Error?
         do {
-            let output = bundleURL.appendingPathComponent("recording.mov")
+            let output = folder.appendingPathComponent(RecordingFinalizer.videoFileName)
             let result = try await isDeviceRecording ? deviceRecorder.finish(to: output) : recorder.finish(to: output)
             RecordingSounds.playEnd()
-            try? FileManager.default.removeItem(at: bundleURL.appendingPathComponent("segments", isDirectory: true))
-            var cursors: [RecordedCursor] = []
-            for image in result.customCursors {
-                let url = ProjectStore.cursorImageURL(bundle: bundleURL, id: image.id)
-                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                guard (try? image.pngData.write(to: url)) != nil else { continue }
-                cursors.append(RecordedCursor(id: image.id, hotSpot: image.hotSpot, standardSize: image.size))
-            }
-            var project = Project(
-                recording: RecordingInfo(
-                    videoFileName: result.videoURL.lastPathComponent,
-                    videoSize: result.videoSize,
-                    pointPixelScale: result.pointPixelScale,
-                    durationMs: result.durationMs,
-                    fps: result.fps,
-                    cursors: cursors,
-                    audioSources: result.audioSources,
-                    cameraFileName: result.cameraURL?.lastPathComponent,
-                    cameraSize: result.cameraSize,
-                    mode: result.externalDevice != nil ? .externalDevice : (activeSelection.map { if case .window = $0 { return true } else { return false } } ?? false) ? .window : .display,
-                    externalDevice: result.externalDevice,
-                    flags: result.flags
-                ),
-                mouseEvents: result.mouseEvents,
-                markersMs: result.markersMs,
-                keystrokes: result.keystrokes
-            )
-            // New projects start from the default preset, or the last edited settings.
-            if let preset = PresetStore.shared.defaultPreset {
-                PresetStore.shared.copyAssets(of: preset, into: bundleURL)
-                project.apply(preset.preset.config)
-            } else if preferences.useLastProjectConfigForNewProjects,
-                      let data = UserDefaults.standard.data(forKey: "lastProjectConfig"),
-                      let config = try? JSONDecoder().decode(PresetConfig.self, from: data) {
-                project.apply(config)
-            }
-            // New projects use the last chosen microphone mode, unless their config set one.
-            if !preferences.useLastProjectConfigForNewProjects { project.audio.microphoneAudioPreset = preferences.microphoneAudioPreset }
-            project.autoZoom.isEnabled = preferences.createAutomaticZooms
-            project.regenerateAutomaticZooms()
-            try ProjectStore.save(project, to: bundleURL)
-            endRecordingUI()
-            AppController.shared.openProject(bundle: bundleURL, project: project, afterRecording: preferences.actionAfterRecording)
+            made = try RecordingFolders.createProject(from: result, folder: folder)
         } catch {
-            endRecordingUI()
-            Dialogs.error("Failed to finish recording (\(error.localizedDescription))")
+            failure = error
+        }
+        endRecordingUI()
+        RecordingRecovery.shared.refresh()
+        guard let made else {
+            // `finalization-failed`: the folder keeps the recording for recovery.
+            let message = "The recording finished, but could not be fully finalized (usually a disk-space problem). Your footage is safe. Free up some disk space, then recover it now - or later via File → Recover recording. (\(failure?.localizedDescription ?? ""))"
+            if Dialogs.confirm(title: "Recording needs to be recovered", message: message, confirm: "Recover now", cancel: "Later") {
+                await RecordingRecovery.shared.recover(folder)
+            }
+            return
+        }
+        if problem != nil {
+            Dialogs.info(title: "Recording successfully recovered after error", message: "The capture hit an error mid-recording, but your footage was recovered and will open now.")
+            AppController.shared.openProject(bundle: made.bundle, project: made.project)
+        } else {
+            AppController.shared.openProject(bundle: made.bundle, project: made.project, afterRecording: preferences.actionAfterRecording)
         }
     }
 

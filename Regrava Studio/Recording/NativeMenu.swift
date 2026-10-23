@@ -161,6 +161,13 @@ final class ClosureMenuItem: NSMenuItem {
     required init(coder: NSCoder) { fatalError() }
 
     @objc private func run() { handler?() }
+
+    /// With auto-enabling menus: whether the item can run now.
+    var isAvailable: (() -> Bool)?
+}
+
+extension ClosureMenuItem: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { isAvailable?() ?? true }
 }
 
 extension NSMenuItem {

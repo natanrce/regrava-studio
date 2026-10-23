@@ -54,7 +54,7 @@ public struct RecordingMetadata: Codable, Sendable {
 
     public init() {}
 
-    static let fileName = "metadata-raw.json"
+    public static let fileName = "metadata-raw.json"
 }
 
 /// Writes a recording folder's metadata and event logs while it records.

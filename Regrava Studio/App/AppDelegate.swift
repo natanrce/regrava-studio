@@ -88,6 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let file = NSMenu(title: "File")
         add(to: file, "Open project...", key: "o") { AppController.shared.openProjectPanel() }
         add(to: file, "Open last project", key: "z", modifiers: [.command, .option]) { AppController.shared.openLastProject() }
+        // "open" group, after the recent projects; its name counts them.
+        recoverItem = add(to: file, "Recover unfinished recordings") { Task { await RecordingRecovery.shared.recoverAll() } }
+        recoverItem?.image = NSImage(systemSymbolName: "arrow.up.circle", accessibilityDescription: nil)
+        (recoverItem as? ClosureMenuItem)?.isAvailable = { !RecordingRecovery.shared.unfinished.isEmpty }
+        file.identifier = NSUserInterfaceItemIdentifier("file")
+        file.delegate = self
         file.addItem(.separator())
         add(to: file, "Export...", key: "e", modifiers: [.command, .shift]) { AppController.shared.keyEditor?.model.openExportPicker() }
         file.addItem(.separator())
@@ -125,12 +131,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return main
     }
 
-    private func add(to menu: NSMenu, _ title: String, key: String, modifiers: NSEvent.ModifierFlags = .command, action: @escaping () -> Void) {
+    @discardableResult
+    private func add(to menu: NSMenu, _ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = .command, action: @escaping () -> Void) -> NSMenuItem {
         let item = ClosureMenuItem(title: title, action: action)
         item.keyEquivalent = key
         item.keyEquivalentModifierMask = modifiers
         menu.addItem(item)
+        return item
     }
+
+    /// File → "Recover N unfinished recordings", disabled when there are none (`canApply`).
+    private var recoverItem: NSMenuItem?
 
     private func addSubmenu(_ menu: NSMenu, title: String, to main: NSMenu) {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -161,6 +172,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             builder.group("settings-zooms")
             builder.item("Automatically create zooms", checked: preferences.createAutomaticZooms) { preferences.createAutomaticZooms.toggle() }
+        case "file":
+            let recovery = RecordingRecovery.shared
+            recovery.refresh()
+            recoverItem?.title = recovery.actionName
+            return
         case "view":
             // Only while an editor is open (no `showIfDisabled`).
             if AppController.shared.keyEditor != nil {

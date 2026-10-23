@@ -20,6 +20,8 @@ final class AppController {
     func launch() {
         // iPhones and iPads appear asynchronously once screen capture devices are allowed.
         ExternalDeviceDiscovery.shared.start()
+        // Recordings a crash or a quit left unfinished.
+        RecordingRecovery.shared.refresh()
         // Projects opened before are listed in the Dock menu too (oldest first, newest on top).
         for url in recentProjects.reversed() { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
         statusItem = StatusItemController(coordinator: recording)

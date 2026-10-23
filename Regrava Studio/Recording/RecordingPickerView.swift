@@ -6,11 +6,21 @@ import SwiftUI
 /// Record picker row.
 struct RecordingPickerView: View {
     @ObservedObject var coordinator: RecordingCoordinator
+    @ObservedObject private var recovery = RecordingRecovery.shared
 
     var body: some View {
         HStack(spacing: Theme.gap(1)) {
             PanelIconButton(icon: "xmark.circle.fill", size: 50, iconSize: 20) { coordinator.escape() }
             PanelDivider(verticalMargin: 10)
+            // Only while there is something to recover.
+            if !recovery.unfinished.isEmpty {
+                RSButton(title: recovery.actionName, icon: "arrow.up.circle", kind: .transparent, size: .big) {
+                    coordinator.closePicker()
+                    Task { await RecordingRecovery.shared.recoverAll() }
+                }
+                .fixedSize()
+                PanelDivider(verticalMargin: 10)
+            }
             if case let .countdown(total, startedAt) = coordinator.phase {
                 CountdownIndicator(total: total, startedAt: startedAt) { coordinator.continueCountdown() }
             } else {
