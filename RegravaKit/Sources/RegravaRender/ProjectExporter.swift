@@ -44,6 +44,17 @@ public enum ProjectExporter {
         try faces.save(bundle: bundle)
     }
 
+    /// Finishes the hover detection before rendering while the cursor follows hovers: export
+    /// frames wait for it ("detecting cursor hovers").
+    public static func completeHoverDetection(project: Project, bundle: URL) async throws {
+        guard project.cursor.followRecordedPositionOnHover, project.animation.mouseSpring != nil,
+              CursorHovers.load(bundle: bundle)?.covers(durationMs: project.recording.durationMs) != true else { return }
+        let video = bundle.appendingPathComponent(project.recording.videoFileName)
+        guard FileManager.default.fileExists(atPath: video.path) else { return }
+        let times = try await CursorHoverDetector.detect(video: video, events: project.mouseEvents, pointPixelScale: project.recording.pointPixelScale)
+        try CursorHovers(chunks: [.init(startMs: 0, endMs: project.recording.durationMs, result: times)]).save(bundle: bundle)
+    }
+
     public static func export(
         project: Project,
         videoURL: URL,
@@ -57,6 +68,7 @@ public enum ProjectExporter {
         let outputSize = settings.outputSize(canvas: project.canvasSize)
         // Export frames wait until face data covers them ("tracking face").
         try await completeFaceTracking(project: project, bundle: videoURL.deletingLastPathComponent())
+        try await completeHoverDetection(project: project, bundle: videoURL.deletingLastPathComponent())
         // And for the microphone's silences when the camera hides during them.
         try await SilenceAnalyzer.ensure(project: project, bundle: videoURL.deletingLastPathComponent(), recording: videoURL)
         let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent())

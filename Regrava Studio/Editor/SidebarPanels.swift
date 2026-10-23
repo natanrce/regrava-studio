@@ -319,13 +319,11 @@ struct CursorPanel: View {
                             description: "Regrava Studio will try to minimize rapid cursor changes (eg when quickly moving over some elements) when this option is enabled.",
                             isOn: editor.binding(\.cursor.optimizeOriginalTypes)
                         )
-                        // Needs hover detection in recordings, which is not implemented yet.
                         ToggleRow(
                             title: "Keep cursor in sync with hovers",
                             description: "When something lights up under the moving mouse, like a menu item or a button, the cursor gets there just in time, setting off a little earlier or moving a little faster, so the highlight never shows before the cursor does.",
                             isOn: editor.binding(\.cursor.followRecordedPositionOnHover)
                         )
-                        .disabled(true)
                     }
                 }
             }

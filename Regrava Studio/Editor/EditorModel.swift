@@ -143,6 +143,7 @@ final class EditorModel: ObservableObject {
         updateFaceTracking()
         updateSilence()
         syncMicrophoneRenders()
+        updateHoverDetection()
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -295,6 +296,7 @@ final class EditorModel: ObservableObject {
         let faceTrackingChanged = updated.camera.enableFaceTracking != project.camera.enableFaceTracking
         let silenceChanged = updated.camera.hideDuringSilenceMs != project.camera.hideDuringSilenceMs
         let cursorStyleChanged = updated.cursor.set != project.cursor.set
+        let oldFollowsHovers = project.cursor.followRecordedPositionOnHover, oldSpringIsNil = project.animation.mouseSpring == nil
         let micModeChanged = updated.audio.microphoneAudioPreset != project.audio.microphoneAudioPreset
             || updated.audio.muteMicrophone != project.audio.muteMicrophone
         project = updated
@@ -316,6 +318,7 @@ final class EditorModel: ObservableObject {
             Task { await rebuildComposition(replacingItem: true) }
         }
         if faceTrackingChanged { updateFaceTracking() }
+        if updated.cursor.followRecordedPositionOnHover != oldFollowsHovers || (updated.animation.mouseSpring == nil) != oldSpringIsNil { updateHoverDetection() }
         if silenceChanged { updateSilence() }
         if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
             Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged) }
@@ -486,6 +489,26 @@ final class EditorModel: ObservableObject {
             }
             if let faces { try? faces.save(bundle: bundle) }
             await MainActor.run { [weak self] in self?.scheduleRefresh() }
+        }
+    }
+
+    private var hoverDetectionTask: Task<Void, Never>?
+
+    /// The cursor follows hovers once the recording's hover changes are found
+    /// (`project.cursorHoverChanges`); runs in the background and redraws when done.
+    private func updateHoverDetection() {
+        let project = self.project
+        guard project.cursor.followRecordedPositionOnHover, project.animation.mouseSpring != nil, hoverDetectionTask == nil,
+              CursorHovers.load(bundle: bundleURL)?.covers(durationMs: project.recording.durationMs) != true else { return }
+        let bundle = bundleURL, video = videoURL
+        hoverDetectionTask = Task.detached(priority: .utility) { [weak self] in
+            if let times = try? await CursorHoverDetector.detect(video: video, events: project.mouseEvents, pointPixelScale: project.recording.pointPixelScale) {
+                try? CursorHovers(chunks: [.init(startMs: 0, endMs: project.recording.durationMs, result: times)]).save(bundle: bundle)
+            }
+            await MainActor.run { [weak self] in
+                self?.hoverDetectionTask = nil
+                self?.scheduleRefresh()
+            }
         }
     }
 

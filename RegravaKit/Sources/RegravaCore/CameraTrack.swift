@@ -105,7 +105,7 @@ public final class CameraTrack: @unchecked Sendable {
     private let typeEvents: [MouseEvent]
     private let cursorConfig: CursorConfig
 
-    public init(project: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], sampleRateHz: Double? = nil) {
+    public init(project: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, sampleRateHz: Double? = nil) {
         let layout = CanvasLayout(project: project)
         self.layout = layout
         let timeline = LayoutTimeline(project: project)
@@ -123,6 +123,7 @@ public final class CameraTrack: @unchecked Sendable {
         self.typeEvents = typeEvents
         let imageChanges = CursorTypes.imageChangeTimes(typeEvents, config: project.cursor)
         let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
+        let hoverTimes = project.cursorHoverTimes(hovers)
 
         let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, sparse: sparse, silence: silence)
 
@@ -133,12 +134,14 @@ public final class CameraTrack: @unchecked Sendable {
                 loopMs: project.cursor.loopPositionBeforeEndMs,
                 spring: project.animation.mouseSpring,
                 pointPixelScale: project.recording.pointPixelScale,
-                imageChangesMs: imageChanges
+                imageChangesMs: imageChanges,
+                hoverTimesMs: hoverTimes
             )
         ) {
             Self.planCursor(
                 pathEvents: pathEvents,
                 imageChangesMs: imageChanges,
+                hoverTimesMs: hoverTimes,
                 slices: project.slices,
                 resolver: resolver,
                 spring: project.animation.mouseSpring,
@@ -346,6 +349,7 @@ public final class CameraTrack: @unchecked Sendable {
     static func planCursor(
         pathEvents: [MouseEvent],
         imageChangesMs: [Double],
+        hoverTimesMs: [Double] = [],
         slices: [Slice],
         resolver: TimeResolver,
         spring: SpringConfig?,
@@ -355,6 +359,7 @@ public final class CameraTrack: @unchecked Sendable {
         var points: [CursorPathPoint] = []
         var syncEvents: [MouseEvent] = []
         var imageChanges: [Double] = []
+        var hovers: [Double] = []
         var cuts: [Double] = []
         var instant: [TimeRange] = []
         for (index, link) in resolver.links.enumerated() {
@@ -370,6 +375,10 @@ public final class CameraTrack: @unchecked Sendable {
             for change in imageChangesMs where change >= link.sourceStartMs && change <= link.sourceEndMs {
                 imageChanges.append(link.sourceToPlayback(change))
             }
+            // Hovers in cuts drop out; sped-up clips bring them closer.
+            for hover in hoverTimesMs where hover >= link.sourceStartMs && hover <= link.sourceEndMs {
+                hovers.append(link.sourceToPlayback(hover))
+            }
             if index > 0, resolver.links[index - 1].sourceEndMs != link.sourceStartMs {
                 cuts.append(link.playbackStartMs)
             }
@@ -380,7 +389,7 @@ public final class CameraTrack: @unchecked Sendable {
         points.sort { $0.timeMs < $1.timeMs }
         return SmoothedCursorPath.plan(
             points: points,
-            syncPoints: cursorSyncPoints(events: syncEvents, pointPixelScale: pointPixelScale, cursorImageChangesMs: imageChanges),
+            syncPoints: cursorSyncPoints(events: syncEvents, pointPixelScale: pointPixelScale, cursorImageChangesMs: imageChanges, hoverTimesMs: hovers),
             spring: spring,
             durationMs: resolver.playbackDurationMs,
             instantRanges: instant,
@@ -390,7 +399,7 @@ public final class CameraTrack: @unchecked Sendable {
 
     /// Moments the smoothed cursor must reach the recorded position: presses, releases and
     /// drags. Tolerances are in points, converted to video pixels.
-    public static func cursorSyncPoints(events: [MouseEvent], pointPixelScale: Double, cursorImageChangesMs: [Double] = []) -> [CursorSyncPoint] {
+    public static func cursorSyncPoints(events: [MouseEvent], pointPixelScale: Double, cursorImageChangesMs: [Double] = [], hoverTimesMs: [Double] = []) -> [CursorSyncPoint] {
         var points: [CursorSyncPoint] = []
         func add(_ t: Double, _ reason: CursorSyncReason) {
             points.append(CursorSyncPoint(timeMs: t, reason: reason, tolerance: reason.tolerancePoints * pointPixelScale))
@@ -402,6 +411,7 @@ public final class CameraTrack: @unchecked Sendable {
             case .move: break
             }
         }
+        for t in hoverTimesMs { add(t, .hover) }
         for t in cursorImageChangesMs { add(t, .cursorImage) }
         return points.sorted { $0.timeMs < $1.timeMs }
     }
@@ -629,6 +639,7 @@ final class CursorPathCache: @unchecked Sendable {
         var spring: SpringConfig?
         var pointPixelScale: Double
         var imageChangesMs: [Double]
+        var hoverTimesMs: [Double]
     }
 
     static let shared = CursorPathCache()

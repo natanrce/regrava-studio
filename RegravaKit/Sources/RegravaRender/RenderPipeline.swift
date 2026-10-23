@@ -22,7 +22,8 @@ public final class RenderState: @unchecked Sendable {
     public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil) -> Snapshot {
         let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
         let silence = assetsDirectory.flatMap { SilenceAnalyzer.stored(project: project, bundle: $0) } ?? []
-        let track = CameraTrack(project: project, faces: faces, silence: silence)
+        let hovers = assetsDirectory.flatMap(CursorHovers.load(bundle:))
+        let track = CameraTrack(project: project, faces: faces, silence: silence, hovers: hovers)
         // Captions read the transcript stored beside the project (source time, onset-adjusted).
         let transcript = assetsDirectory.flatMap { SessionTranscript.load(bundle: $0) }
             .map { TranscriptTiming.clientTranscript([(0, $0.transcript)]) } ?? []
