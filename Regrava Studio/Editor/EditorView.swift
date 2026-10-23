@@ -271,6 +271,7 @@ private struct PreviewSpace: View {
                     .frame(width: max(size.width, 420))
                 ZStack {
                     PlayerSurface(player: editor.player)
+                    ScrubSurface(display: editor.scrubDisplay).allowsHitTesting(false)
                     if editor.isAddLayoutToolArmed && !editor.isPlaying {
                         OverlayPlacementTool(editor: editor, size: size)
                     }

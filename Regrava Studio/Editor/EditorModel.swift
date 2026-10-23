@@ -141,8 +141,15 @@ final class EditorModel: ObservableObject {
     private var lastCoalesceKey: String?
     private var lastChangeAt = Date.distantPast
     private var isScrubbing = false {
-        didSet { if oldValue != isScrubbing { updateRenderQuality() } }
+        didSet {
+            guard oldValue != isScrubbing else { return }
+            if !isScrubbing { scrubDisplay.hide() }
+            updateRenderQuality()
+        }
     }
+    /// Hover scrubbing shows frames from native scrubbers over the player, never seeking it.
+    let scrubDisplay = ScrubDisplay()
+    private var scrubPreview: ScrubPreview?
     private var cancellables: Set<AnyCancellable> = []
 
     init(bundleURL: URL, project: Project) {
@@ -377,6 +384,10 @@ final class EditorModel: ObservableObject {
     func rebuildComposition(replacingItem: Bool = false) async {
         let snapshot = RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundleURL)
         renderState.replace(with: snapshot)
+        // New timing, camera delay or preview size: scrubbers start over.
+        scrubPreview?.close()
+        scrubPreview = nil
+        if isScrubbing { makeScrubPreview(); scrubPreview?.show(playbackMs: scrubTimeMs) }
         waveforms.update(project: project, bundle: bundleURL, video: videoURL)
         do {
             let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL))
@@ -480,7 +491,9 @@ final class EditorModel: ObservableObject {
             // Re-assigning the composition drops cached frames.
             if let base = self.baseConfiguration, let item = self.player.currentItem {
                 item.videoComposition = AVVideoComposition(configuration: base)
-                if !self.isPlaying { self.seek(to: self.isScrubbing ? self.scrubTimeMs : self.currentTimeMs, moveHead: false) }
+                if !self.isPlaying {
+                    if self.isScrubbing { self.scrubPreview?.refresh() } else { self.seek(to: self.currentTimeMs, moveHead: false) }
+                }
             }
         }
     }
@@ -624,13 +637,28 @@ final class EditorModel: ObservableObject {
         guard !isPlaying else { return }
         isScrubbing = true
         scrubTimeMs = clamp(timeMs, 0, durationMs)
-        seek(to: scrubTimeMs, moveHead: false)
+        if scrubPreview == nil { makeScrubPreview() }
+        scrubDisplay.activate()
+        scrubPreview?.show(playbackMs: scrubTimeMs)
     }
 
+    private func makeScrubPreview() {
+        let camera = project.recording.cameraFileName
+            .map { videoURL.deletingLastPathComponent().appendingPathComponent($0) }
+            .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        let preview = ScrubPreview(
+            state: renderState, screenURL: videoURL, cameraURL: camera, cameraOffsetMs: project.camera.delayAdjustmentMs,
+            resolver: project.resolver, canvas: project.canvasSize, output: previewOutputSize
+        )
+        let display = scrubDisplay
+        preview.onImage = { buffer in display.show(buffer) }
+        scrubPreview = preview
+    }
+
+    /// The player never left the playhead, so hiding the scrub frames is enough.
     func endScrub() {
         guard isScrubbing else { return }
         isScrubbing = false
-        if !isPlaying { seek(to: currentTimeMs) }
     }
 
     func step(frames: Int) {
@@ -1307,6 +1335,8 @@ final class EditorModel: ObservableObject {
     }
 
     func tearDown() {
+        scrubPreview?.close()
+        scrubPreview = nil
         // A pending transcript edit is written right away.
         if transcriptSaveTask != nil, let transcript {
             transcriptSaveTask?.cancel()
