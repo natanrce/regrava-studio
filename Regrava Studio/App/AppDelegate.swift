@@ -22,6 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Quitting mid-recording interrupts it; its folder is recovered on the next launch.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard AppController.shared.recording.isRecording else { return .terminateNow }
+        let quit = Dialogs.confirm(
+            title: "Regrava Studio",
+            message: "A recording is still in progress. Quitting now will interrupt it (the footage can be recovered on next launch). Quit anyway?",
+            confirm: "Quit",
+            cancel: "Cancel",
+            destructive: true
+        )
+        return quit ? .terminateNow : .terminateCancel
+    }
+
     /// Clicking the Dock icon while recording asks to finish.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         let recording = AppController.shared.recording
