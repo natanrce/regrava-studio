@@ -2,6 +2,7 @@
 import Accelerate
 import Foundation
 import RegravaCore
+import RegravaSpeech
 import SoundAnalysis
 
 /// Renders a project's microphone take through a preset's chain into an AAC 48 kHz stereo
@@ -87,8 +88,21 @@ public enum MicrophoneRenderer {
         case let .keep(sounds, fadeMs, pauseDb):
             let ranges = try await Keep.keptRanges(audio, sounds: sounds)
             return Keep.apply(audio, kept: ranges, fadeMs: fadeMs ?? 10, pauseDb: pauseDb)
-        case .mossFormer2, .tfRestormer:
-            throw RenderError.needsSpeechModels
+        case .mossFormer2:
+            // The models take the mono mix; their output goes to both channels.
+            let out = try SpeechModelRunner.mossFormer2(RestoreSibilance.mono(audio), sampleRate: sampleRate)
+            return Stereo(left: out, right: out)
+        case let .tfRestormer(bandEndsBelowPeakDb, pauseBelowSpeechDb, pauseLevelDb, shortestSilenceMs, keptAroundSpeechMs, fadeMs):
+            // "The model sees the take up to where its spectrum falls `bandEndsBelowPeakDb` under its peak."
+            guard let highest = measure.highestFrequencyWithContent(withinDb: bandEndsBelowPeakDb) else {
+                throw RenderError.failed("The microphone has nothing to restore: no frequency rises above the noise floor.")
+            }
+            let out = try SpeechModelRunner.tfRestormer(
+                RestoreSibilance.mono(audio), sampleRate: sampleRate, bandEndsBelowPeakDb: bandEndsBelowPeakDb,
+                pauseBelowSpeechDb: pauseBelowSpeechDb, pauseLevelDb: pauseLevelDb, shortestSilenceMs: shortestSilenceMs,
+                keptAroundSpeechMs: keptAroundSpeechMs, fadeMs: fadeMs, speechLevelDb: speech, highestFrequencyHz: highest
+            )
+            return Stereo(left: out, right: out)
         case let .matchEq(target, correctionDb):
             // From the take's own spectrum, before any step (`measure.bandLevels`).
             guard let bands = measure.bandLevels else { return audio }
@@ -165,9 +179,9 @@ public enum MicrophoneRenderer {
     }
 }
 
-/// Speech models (MossFormer2, TF-Restormer) are not implemented yet.
+/// The speech-model steps run on MLX (Apple silicon, weights bundled): `RegravaSpeech`.
 public enum SpeechModels {
-    public static var isAvailable: Bool { false }
+    public static var isAvailable: Bool { SpeechModelRunner.isAvailable }
 }
 
 // MARK: - Measure, normalize
