@@ -486,10 +486,10 @@ private struct TimeLabel: View {
     var body: some View {
         Text(Self.format(ms, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: omitFrames))
             .font(Theme.Typo.copy.monospacedDigit())
-            .foregroundStyle(Theme.Colors.tertiary)
+            // Tertiary, brighter on hover.
+            .foregroundStyle(hovered ? Theme.Colors.text.opacity(0.8) : Theme.Colors.tertiary)
             .lineLimit(1)
             .fixedSize()
-            .opacity(hovered ? 0.8 : 1)
             .frame(height: 38)
             .onHover { hovered = $0 }
             .onTapGesture {
