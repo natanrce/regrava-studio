@@ -57,6 +57,7 @@ enum UISnapshots {
         }
         write(onBackdrop(RecordingPickerView(coordinator: coordinator)).fixedSize(), width: 1100, height: 64, to: directory.appendingPathComponent("recording-picker.png"))
         write(onBackdrop(RecordingWidgetView(coordinator: coordinator).frame(width: 300)), width: 300, height: 48, to: directory.appendingPathComponent("recording-widget.png"))
+        write(SpeakerNotesView(store: .shared).environment(\.colorScheme, .dark).background(Color(hex: 0x1C1C1E)), width: 240, height: 320, to: directory.appendingPathComponent("speaker-notes.png"))
         write(StartRecordingButton(coordinator: coordinator).padding(20).background(Color.black.opacity(0.6)), width: 280, height: 90, to: directory.appendingPathComponent("start-button.png"))
 
         // Onboarding through its real window controller, so the window size is checked too.

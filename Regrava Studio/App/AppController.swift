@@ -36,6 +36,13 @@ final class AppController {
             .sink { [weak self] _ in DispatchQueue.main.async { self?.applyDockIconPolicy() } }
             .store(in: &cancellables)
         applyDockIconPolicy()
+        // The speaker notes window follows its setting, whatever else is open.
+        preferences.$showSpeakerNotes
+            .sink { visible in DispatchQueue.main.async { SpeakerNotesWindowController.shared.apply(visible) } }
+            .store(in: &cancellables)
+        recording.$phase
+            .sink { [weak self] _ in DispatchQueue.main.async { SpeakerNotesWindowController.shared.setRecording(self?.recording.isRecording == true) } }
+            .store(in: &cancellables)
 
         if Permissions.canRecord {
             recording.openPicker()
@@ -184,6 +191,8 @@ final class AppController {
         bind(.recordWindow) { recording.openPicker(preselect: .window) }
         bind(.recordArea) { recording.openPicker(preselect: .area) }
         bind(.toggleRecordingWidget) { Preferences.shared.showRecordingWidget.toggle() }
+        bind(.toggleShowSpeakerNotes) { Preferences.shared.showSpeakerNotes.toggle() }
+        bind(.toggleSpeakerNotesPrompter) { SpeakerNotesStore.shared.togglePlaying() }
         GlobalHotKeys.shared.register(bindings)
     }
 }

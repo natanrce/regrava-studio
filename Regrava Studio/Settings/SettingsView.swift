@@ -282,6 +282,10 @@ private struct ShortcutsSettings: View {
             Row(action: .recordArea, title: "Record area", icon: "square.dashed"),
         ],
         [
+            Row(action: .toggleShowSpeakerNotes, title: "Show speaker notes", icon: "note.text"),
+            Row(action: .toggleSpeakerNotesPrompter, title: "Start/Stop prompter in speaker notes", icon: "playpause"),
+        ],
+        [
             Row(action: .toggleRecordingWidget, title: "Show/Hide recording controls", icon: "rectangle.dashed.badge.record",
                 description: "While recording is in progress, will show widget allowing you to finish, cancel or restart recording."),
         ],

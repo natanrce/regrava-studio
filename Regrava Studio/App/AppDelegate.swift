@@ -198,6 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 builder.item("Smooth waveform", icon: "waveform", checked: preferences.enableSmoothWaveform) { preferences.enableSmoothWaveform.toggle() }
             }
             builder.group("recording")
+            builder.item(preferences.showSpeakerNotes ? "Hide speaker notes" : "Show speaker notes", icon: "text.bubble", checked: preferences.showSpeakerNotes, shortcut: shortcuts[.toggleShowSpeakerNotes] ?? nil) {
+                preferences.showSpeakerNotes.toggle()
+            }
             builder.item("Show recording widget", icon: "menubar.dock.rectangle.badge.record", checked: preferences.showRecordingWidget, shortcut: shortcuts[.toggleRecordingWidget] ?? nil) {
                 preferences.showRecordingWidget.toggle()
             }
