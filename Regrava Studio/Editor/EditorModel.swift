@@ -585,6 +585,11 @@ final class EditorModel: ObservableObject {
 
     private var scrubTimeMs: Double = 0
 
+    /// The source time the preview shows: the hovered moment while scrubbing, else the playhead.
+    var previewSourceTimeMs: Double {
+        isScrubbing ? project.resolver.playbackToSource(scrubTimeMs) : currentSourceTimeMs
+    }
+
     func togglePlay() {
         if isPlaying {
             player.pause()

@@ -139,7 +139,7 @@ struct SidebarPanel: View {
                     case .deviceFrame: DeviceFramePanel(editor: editor)
                     case .transcript:
                         RSButton(title: "Close Transcript editor", icon: "arrow.left", kind: .secondary) { editor.openSidebar(.background) }
-                            .padding(.bottom, Theme.gap(3))
+                            .padding(.bottom, 24)
                         TranscriptEditPanel(editor: editor)
                     default: GeneralPanel(editor: editor)
                     }

@@ -21,6 +21,8 @@ enum Theme {
         static let primaryActiveText = Color(hex: 0xA090FA)
         static let warning = Color(hex: 0xFF9800)
         static let danger = Color(hex: 0xFF453A)
+        /// `danger.activeText` (lightness + 20), derived: the transcript's cut preview.
+        static let dangerActiveText = Color(hex: 0xFFA6A0)
         static let success = Color(hex: 0x057C31)
         static let lighterBg = Color.white.opacity(0x05 / 255)
         /// "transparent" interactive background: value / hover / active.

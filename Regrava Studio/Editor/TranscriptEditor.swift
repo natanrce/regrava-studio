@@ -92,11 +92,13 @@ struct TranscriptTextEditor: NSViewRepresentable {
         view.isContinuousSpellCheckingEnabled = false
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.drawsBackground = false
-        view.textContainerInset = NSSize(width: 0, height: 4)
-        view.textContainer?.lineFragmentPadding = 14
-        view.textContainer?.widthTracksTextView = true
+        // 14 px on the left for the gutter dot, none on the right.
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = false
         view.isVerticallyResizable = true
-        view.insertionPointColor = NSColor(Theme.Colors.primary)
+        view.insertionPointColor = .white
+        view.selectedTextAttributes = [.backgroundColor: NSColor(Theme.Colors.primary).withAlphaComponent(0.35)]
         view.setAccessibilityLabel("Transcript")
         context.coordinator.textView = view
         return view
@@ -119,10 +121,10 @@ struct TranscriptTextEditor: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: TranscriptNSTextView, context: Context) -> CGSize? {
         let width = proposal.width ?? 300
-        nsView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        nsView.textContainer?.containerSize = NSSize(width: max(width - TranscriptNSTextView.gutter, 1), height: .greatestFiniteMagnitude)
         guard let manager = nsView.layoutManager, let container = nsView.textContainer else { return nil }
         manager.ensureLayout(for: container)
-        let height = manager.usedRect(for: container).height + nsView.textContainerInset.height * 2
+        let height = manager.usedRect(for: container).height
         return CGSize(width: width, height: max(height, 40))
     }
 
@@ -142,9 +144,9 @@ struct TranscriptTextEditor: NSViewRepresentable {
         /// Visible tokens with their character ranges, in text order.
         private(set) var ranges: [(token: TranscriptToken, range: NSRange)] = []
         private var activeRange: NSRange?
-        private var popover: NSPopover?
-        private var hosting: NSHostingController<TranscriptActionBar>?
-        var cutPreview = false { didSet { highlightActive() } }
+        private var panel: TranscriptActionPanel?
+        /// Hovering "Cut video" or "Cut transcript" colours what it would cut (`data-cut-preview`).
+        var cutPreview: TranscriptCutPreview? { didSet { highlightActive() } }
 
         // MARK: Building
 
@@ -154,10 +156,13 @@ struct TranscriptTextEditor: NSViewRepresentable {
             let project = editor.project
             let text = NSMutableAttributedString()
             let paragraph = NSMutableParagraphStyle()
-            paragraph.lineHeightMultiple = 1.75 / 1.2
-            paragraph.paragraphSpacing = 10
+            // `typo.copy` 13 px at line-height 1.75; 16 px between paragraphs.
+            paragraph.minimumLineHeight = 13 * 1.75
+            paragraph.maximumLineHeight = 13 * 1.75
+            paragraph.paragraphSpacing = 16
             let base: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 14),
+                .font: NSFont.systemFont(ofSize: 13),
+                .baselineOffset: (13 * 1.75 - NSFont.systemFont(ofSize: 13).boundingRectForFont.height) / 4,
                 .foregroundColor: NSColor(Theme.Colors.text),
                 .paragraphStyle: paragraph,
             ]
@@ -194,9 +199,10 @@ struct TranscriptTextEditor: NSViewRepresentable {
                 if deleted && !showDeleted { return nil }
                 let tightened = !deleted && playDuration < token.sourceEndMs - token.sourceStartMs - 50
                 let seconds = (tightened ? playDuration : token.sourceEndMs - token.sourceStartMs) / 1000
-                attrs[.font] = NSFont.systemFont(ofSize: 14 * 0.85)
-                attrs[.foregroundColor] = NSColor(Theme.Colors.tertiary)
-                attrs[.backgroundColor] = tightened ? NSColor(Theme.Colors.primary).withAlphaComponent(0.15) : NSColor(Theme.Colors.lighterBg)
+                attrs[.font] = NSFont.systemFont(ofSize: 13 * 0.85)
+                attrs[.foregroundColor] = tightened ? NSColor.white.withAlphaComponent(Theme.secondaryOpacity) : NSColor(Theme.Colors.tertiary)
+                // A capsule behind it, drawn by the text view.
+                attrs[.transcriptChip] = tightened ? NSColor(Theme.Colors.primary).withAlphaComponent(0.15) : NSColor.white.withAlphaComponent(0.06)
                 if deleted {
                     attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
                     attrs[.foregroundColor] = NSColor(Theme.Colors.tertiary).withAlphaComponent(0.4)
@@ -204,7 +210,11 @@ struct TranscriptTextEditor: NSViewRepresentable {
                 attrs[.toolTip] = tightened
                     ? String(format: "Pause tightened to %.1fs (was %.1fs) — ⌘Z undoes", playDuration / 1000, (token.sourceEndMs - token.sourceStartMs) / 1000)
                     : "Pause — click to select, then tighten it to a natural breath"
-                return NSAttributedString(string: String(format: " ··· %.1fs ", seconds), attributes: attrs)
+                // 6 px of padding on each side: a zero-width space and the last glyph carry it as kern.
+                let chip = NSMutableAttributedString(string: "\u{200B}" + String(format: "··· %.1fs", seconds), attributes: attrs)
+                chip.addAttribute(.kern, value: TranscriptNSTextView.chipPadding, range: NSRange(location: 0, length: 1))
+                chip.addAttribute(.kern, value: TranscriptNSTextView.chipPadding, range: NSRange(location: chip.length - 1, length: 1))
+                return chip
             }
             if token.wordType == "sound-label" {
                 if !project.captions.showSoundLabels { return nil }
@@ -232,22 +242,27 @@ struct TranscriptTextEditor: NSViewRepresentable {
 
         // MARK: Active word, cut preview
 
-        /// The playing word gets a primary 25% background and is scrolled into view while playing.
+        /// The playing word gets a primary 25% background only while playing, and is scrolled into
+        /// view then (`isPlaying ? activeEl : null`). The gutter dot follows the playhead's token,
+        /// playing or not.
         func highlightActive() {
             guard let editor, let textView, let manager = textView.layoutManager else { return }
             let full = NSRange(location: 0, length: textView.textStorage?.length ?? 0)
             manager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
             manager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
-            let t = editor.currentSourceTimeMs
-            if let active = ranges.first(where: { $0.token.kind == .word && $0.token.sourceStartMs <= t && t <= $0.token.sourceEndMs }) {
-                manager.addTemporaryAttribute(.backgroundColor, value: NSColor(Theme.Colors.primary).withAlphaComponent(0.25), forCharacterRange: active.range)
-                if editor.isPlaying && activeRange != active.range { textView.scrollRangeToVisible(active.range) }
+            let t = editor.previewSourceTimeMs
+            if let active = ranges.first(where: { $0.token.sourceStartMs <= t && t <= $0.token.sourceEndMs }) {
+                if editor.isPlaying && active.token.kind == .word {
+                    manager.addTemporaryAttribute(.backgroundColor, value: NSColor(Theme.Colors.primary).withAlphaComponent(0.25), forCharacterRange: active.range)
+                    if activeRange != active.range && !textView.recentlyScrolled { textView.scrollRangeToVisible(active.range) }
+                }
                 activeRange = active.range
+                textView.moveDot(to: active.range)
             }
-            if cutPreview {
-                for item in targets() where item.kind == .word && TranscriptEditing.isPresent(item, in: editor.project) {
+            if let cutPreview {
+                for item in targets() where TranscriptEditing.isPresent(item, in: editor.project) && (cutPreview == .video || (item.kind == .word && !item.isHidden)) {
                     if let r = ranges.first(where: { $0.token.id == item.id })?.range {
-                        manager.addTemporaryAttribute(.foregroundColor, value: NSColor(Theme.Colors.danger), forCharacterRange: r)
+                        manager.addTemporaryAttribute(.foregroundColor, value: NSColor(Theme.Colors.dangerActiveText), forCharacterRange: r)
                     }
                 }
             }
@@ -342,7 +357,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
             let targets = targets()
             let pressed = NSEvent.pressedMouseButtons != 0
             guard !targets.isEmpty, textView.window?.firstResponder === textView, !pressed else {
-                popover?.close()
+                closePopover()
                 return
             }
             // A dead key (´, ~, ¸) leaves marked text until the next key; wait for it.
@@ -353,44 +368,112 @@ struct TranscriptTextEditor: NSViewRepresentable {
             var glyphs = manager.glyphRange(forCharacterRange: selection.length > 0 ? selection : NSRange(location: max(selection.location - 1, 0), length: 1), actualCharacterRange: nil)
             if glyphs.length == 0 { glyphs.length = 1 }
             var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
-            rect.origin.x = 0
-            rect.size.width = 1
             rect = rect.offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y)
-            guard textView.window != nil, rect.intersects(textView.visibleRect) else {
-                popover?.close()
+            guard let window = textView.window, rect.intersects(textView.visibleRect) else {
+                closePopover()
                 return
             }
             let bar = TranscriptActionBar(editor: editor, targets: targets, onCutPreview: { [weak self] in self?.cutPreview = $0 }, onDone: { [weak self] in
-                self?.popover?.close()
+                self?.closePopover()
             })
-            if let popover, popover.isShown, let hosting {
-                hosting.rootView = bar
-                popover.contentSize = hosting.view.fittingSize
-                popover.positioningRect = rect
-                return
-            }
-            popover?.close()
-            let hosting = NSHostingController(rootView: bar)
-            hosting.sizingOptions = [.preferredContentSize]
-            let popover = NSPopover()
-            popover.behavior = .applicationDefined
-            popover.animates = false
-            popover.appearance = NSAppearance(named: .darkAqua)
-            popover.contentViewController = hosting
-            popover.contentSize = hosting.view.fittingSize
-            popover.show(relativeTo: rect, of: textView, preferredEdge: .minX)
-            self.popover = popover
-            self.hosting = hosting
+            // Popover to the left (`placement:"left"`, offset 16) of a 1 px anchor at the text's
+            // left edge, centred on the selection.
+            let anchor = window.convertToScreen(textView.convert(NSRect(x: textView.textContainerOrigin.x, y: rect.midY, width: 1, height: 0), to: nil))
+            let panel = self.panel ?? TranscriptActionPanel()
+            self.panel = panel
+            panel.show(bar, rightEdge: anchor.minX - 16, centerY: anchor.midY, in: window)
         }
 
-        func closePopover() { popover?.close() }
+        func closePopover() {
+            panel?.dismiss()
+            if cutPreview != nil { cutPreview = nil }
+        }
     }
 }
 
 /// The text view: hover scrubs, click seeks, ⌘⌫ cuts from the transcript, Esc clears.
+extension NSAttributedString.Key {
+    /// Fill of a pause chip's capsule.
+    static let transcriptChip = NSAttributedString.Key("regrava.transcriptChip")
+}
+
+enum TranscriptCutPreview { case video, transcript }
+
 final class TranscriptNSTextView: NSTextView {
     weak var coordinator: TranscriptTextEditor.Coordinator?
     private var downLocation: NSPoint?
+    /// Left inset holding the dot; the text starts after it (`padding-left: 14`).
+    static let gutter: CGFloat = 14
+    static let chipPadding: CGFloat = 6
+    private let dot = CALayer()
+    private var dotY: CGFloat?
+    private var lastWheel = Date.distantPast
+
+    /// No auto-scroll for 2 s after the user scrolled.
+    var recentlyScrolled: Bool { Date().timeIntervalSince(lastWheel) < 2 }
+
+    override var textContainerOrigin: NSPoint { NSPoint(x: Self.gutter, y: 0) }
+
+    override func scrollWheel(with event: NSEvent) {
+        lastWheel = Date()
+        super.scrollWheel(with: event)
+    }
+
+    /// The 5 px white dot at the gutter's left, beside the playhead's line (+1 px), moved on a
+    /// 430/30/1 spring; it keeps its place when no token is active.
+    func moveDot(to range: NSRange) {
+        guard let manager = layoutManager, let container = textContainer, range.location < (textStorage?.length ?? 0) else { return }
+        let glyph = manager.glyphIndexForCharacter(at: range.location)
+        let line = manager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        _ = container
+        let y = line.midY + textContainerOrigin.y + 1
+        if dot.superlayer == nil {
+            wantsLayer = true
+            dot.backgroundColor = NSColor.white.cgColor
+            dot.cornerRadius = 2.5
+            dot.bounds = CGRect(x: 0, y: 0, width: 5, height: 5)
+            dot.zPosition = 10
+            layer?.addSublayer(dot)
+        }
+        guard y != dotY else { return }
+        let target = CGPoint(x: 2.5, y: y)
+        if dotY == nil {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            dot.position = target
+            CATransaction.commit()
+        } else {
+            let spring = CASpringAnimation(keyPath: "position")
+            spring.stiffness = 430
+            spring.damping = 30
+            spring.mass = 1
+            spring.fromValue = dot.presentation()?.position ?? dot.position
+            spring.toValue = target
+            spring.duration = spring.settlingDuration
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            dot.position = target
+            CATransaction.commit()
+            dot.add(spring, forKey: "position")
+        }
+        dotY = y
+    }
+
+    /// Pause chips: a capsule 6 px wider than the text on each side.
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let storage = textStorage, let manager = layoutManager, let container = textContainer else { return }
+        storage.enumerateAttribute(.transcriptChip, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard let color = value as? NSColor else { return }
+            let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            manager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container) { box, _ in
+                var capsule = box.offsetBy(dx: self.textContainerOrigin.x, dy: self.textContainerOrigin.y)
+                capsule = capsule.insetBy(dx: 0, dy: (capsule.height - 16) / 2)
+                color.setFill()
+                NSBezierPath(roundedRect: capsule, xRadius: capsule.height / 2, yRadius: capsule.height / 2).fill()
+            }
+        }
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -417,11 +500,14 @@ final class TranscriptNSTextView: NSTextView {
         let source = item.token.sourceStartMs + 1 + (item.token.sourceEndMs - item.token.sourceStartMs - 1) * fraction
         guard editor.project.resolver.isSourceTimePresent(source) else { return }
         editor.scrub(to: editor.project.resolver.sourceToPlayback(source))
+        coordinator.highlightActive()
     }
 
+    /// Leaving the text snaps the dot back to the playhead.
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         coordinator?.editor?.endScrub()
+        coordinator?.highlightActive()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -471,11 +557,89 @@ final class TranscriptNSTextView: NSTextView {
     }
 }
 
-/// Buttons of the floating bar: Tighten pause / Cut video, Cut transcript, Restore, Play.
+/// The floating bar's arrowless glass panel, left of the transcript, over the canvas.
+@MainActor
+final class TranscriptActionPanel {
+    private var window: NSPanel?
+    private var host: NSHostingView<AnyView>?
+
+    func show(_ bar: TranscriptActionBar, rightEdge: CGFloat, centerY: CGFloat, in parent: NSWindow) {
+        let content = AnyView(bar.environment(\.colorScheme, .dark))
+        let isNew = window == nil
+        if window == nil {
+            let host = NSHostingView(rootView: content)
+            let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
+            panel.becomesKeyOnlyIfNeeded = true
+            panel.contentView = host
+            panel.appearance = NSAppearance(named: .darkAqua)
+            window = panel
+            self.host = host
+        } else {
+            host?.rootView = content
+        }
+        guard let window, let host else { return }
+        let size = host.fittingSize
+        // 40 px clear of the window's top and bottom.
+        let frame = parent.frame
+        let y = min(max(centerY - size.height / 2, frame.minY + 40), frame.maxY - 40 - size.height)
+        window.setFrame(NSRect(x: rightEdge - size.width, y: y, width: size.width, height: size.height), display: true)
+        if window.parent !== parent {
+            window.parent?.removeChildWindow(window)
+            parent.addChildWindow(window, ordered: .above)
+        }
+        if isNew || !window.isVisible {
+            window.alphaValue = 0
+            window.orderFront(nil)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                window.animator().alphaValue = 1
+            }
+        }
+    }
+
+    func dismiss() {
+        guard let window else { return }
+        window.parent?.removeChildWindow(window)
+        window.orderOut(nil)
+    }
+}
+
+/// One row of the bar: transparent, 38 px, padX 12, radius 6, hover white 8% (primary for Tighten).
+private struct TranscriptBarRow: View {
+    var title: String
+    var icon: String
+    var isPrimary = false
+    var action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.gap(1)) {
+                Image(systemName: icon).font(.system(size: 16)).frame(width: 20)
+                Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 6).fill(isPrimary ? Theme.Colors.primary : Color(hex: 0xFFFFFF, opacity: hovered ? 0x14 / 255 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.Colors.text)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// Buttons of the floating bar: Tighten pause / Cut video, Cut transcript, Restore, Play;
+/// tooltips on the left, ⌘⌫ only in Cut transcript's tooltip.
 struct TranscriptActionBar: View {
     @ObservedObject var editor: EditorModel
     var targets: [TranscriptToken]
-    var onCutPreview: (Bool) -> Void
+    var onCutPreview: (TranscriptCutPreview?) -> Void
     var onDone: () -> Void
 
     var body: some View {
@@ -486,42 +650,46 @@ struct TranscriptActionBar: View {
         let canCutVideo = !present.isEmpty
         let canCutTranscript = targets.contains { $0.kind == .word && !$0.isHidden && TranscriptEditing.isPresent($0, in: project) }
         let canRestore = targets.contains { !TranscriptEditing.isPresent($0, in: project) || $0.isHidden }
-        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+        VStack(alignment: .leading, spacing: 5.7) {
             if canTighten {
                 let n = targets.filter { $0.kind == .gap }.count
-                RSButton(title: n == 1 ? "Tighten pause" : "Tighten \(n) pauses", icon: "timeline.selection", kind: .primary, size: .small) {
+                TranscriptBarRow(title: n == 1 ? "Tighten pause" : "Tighten \(n) pauses", icon: "timeline.selection", isPrimary: true) {
                     editor.cutFromVideo(targets)
                     onDone()
                 }
-                .tooltip("Shorten this pause, keeping a natural breath on each side")
+                .tooltip("Shorten this pause, keeping a natural breath on each side", placement: .left)
             } else if canCutVideo {
-                RSButton(title: "Cut video", icon: "scissors", kind: .secondary, size: .small) {
-                    onCutPreview(false)
+                TranscriptBarRow(title: "Cut video", icon: "scissors") {
+                    onCutPreview(nil)
                     editor.cutFromVideo(targets)
                     onDone()
                 }
-                .tooltip("Cut this part out of the video")
-                .onHover { onCutPreview($0) }
+                .tooltip("Cut this part out of the video", placement: .left)
+                .onHover { onCutPreview($0 ? .video : nil) }
             }
             if canCutTranscript {
-                RSButton(title: "Cut transcript", icon: "text.badge.minus", kind: .secondary, size: .small, shortcut: "⌘⌫") {
+                TranscriptBarRow(title: "Cut transcript", icon: "text.badge.minus") {
+                    onCutPreview(nil)
                     editor.cutFromTranscript(targets)
                     onDone()
                 }
-                .tooltip("Cut this part from the transcript and captions only — the video is unchanged, and Restore brings it back")
+                .tooltip("Cut this part from the transcript and captions only — the video is unchanged, and Restore brings it back", shortcut: "⌘⌫", placement: .left)
+                .onHover { onCutPreview($0 ? .transcript : nil) }
             }
             if canRestore {
-                RSButton(title: "Restore", icon: "arrow.uturn.backward", kind: .secondary, size: .small) {
+                TranscriptBarRow(title: "Restore", icon: "arrow.uturn.backward") {
                     editor.restore(targets)
                     onDone()
                 }
-                .tooltip("Bring this part back into the video and captions")
+                .tooltip("Bring this part back into the video and captions", placement: .left)
             }
-            RSButton(title: "Play", icon: "play.fill", kind: .secondary, size: .small) { editor.audition(targets) }
-                .tooltip("Play this part once")
+            TranscriptBarRow(title: "Play", icon: "play.fill") { editor.audition(targets) }
+                .tooltip("Play this part once", placement: .left)
         }
-        .padding(Theme.gap(1))
+        .padding(6)
         .fixedSize()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .environment(\.colorScheme, .dark)
     }
 }
