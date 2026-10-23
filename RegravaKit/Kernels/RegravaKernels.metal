@@ -569,5 +569,11 @@ float4 filmGrain(sample_t c, float4 params, destination dest) {
     return float4(s * s * c.a, c.a);
 }
 
+
+/// `$ditherColor` on a whole layer (screen and camera parts, gradient backgrounds).
+float4 antiBandingDither(sample_t c, destination dest) {
+    return ditherColor(c, dest.coord());
+}
+
 }
 }

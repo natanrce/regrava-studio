@@ -109,7 +109,7 @@ public final class FrameCompositor: @unchecked Sendable {
                 screenImage = blurred
             }
         }
-        output = screenImage.composited(over: output)
+        output = Self.dithered(screenImage).composited(over: output)
 
         let videoToCanvas = frame.screenRect.width / max(layout.videoSize.width, 1)
         let pixelsPerPoint = pointPixelScale * cursorConfig.sizeMultiplier * videoToCanvas
@@ -378,9 +378,18 @@ public final class FrameCompositor: @unchecked Sendable {
     /// carry a value.
     private func grained(_ layer: CIImage, timeMs: Double, trailPx: Double) -> CIImage {
         let intensity = camera.grain / sqrt(max(trailPx, 1))
-        guard intensity >= 0.001, let kernel = Self.grainKernel else { return layer }
+        guard intensity >= 0.001, let kernel = Self.grainKernel else { return Self.dithered(layer) }
         let seed = Double(((Int(floor(timeMs * 24 / 1000)) % 1024) + 1024) % 1024)
-        return kernel.apply(extent: layer.extent, arguments: [layer, CIVector(x: intensity, y: seed, z: 0, w: 0)]) ?? layer
+        return Self.dithered(kernel.apply(extent: layer.extent, arguments: [layer, CIVector(x: intensity, y: seed, z: 0, w: 0)]) ?? layer)
+    }
+
+    private static let ditherKernel = RenderKernels.color("antiBandingDither")
+
+    /// The anti-banding dither every rect part and gradient gets (`$ditherColor`): half a 1/255
+    /// step of 8×8 Bayer noise at the output pixel, scaled by alpha.
+    static func dithered(_ image: CIImage) -> CIImage {
+        guard let kernel = ditherKernel, !image.extent.isInfinite else { return image }
+        return kernel.apply(extent: image.extent, arguments: [image]) ?? image
     }
 
     private static let sharpenKernel = RenderKernels.general("casSharpen")
@@ -588,7 +597,8 @@ public final class FrameCompositor: @unchecked Sendable {
         let stops = config.gradientStops.count >= 2 ? config.gradientStops : [config.gradientFrom, config.gradientTo]
         let width = max(Int(rect.width), 1), height = max(Int(rect.height), 1)
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+        // 16 bits per channel so the dither, not 8-bit steps, decides the banding.
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 16, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue),
               let cgGradient = CGGradient(
                 colorsSpace: space,
                 colors: stops.map { CGColor(srgbRed: $0.r, green: $0.g, blue: $0.b, alpha: $0.a) } as CFArray,
@@ -599,7 +609,7 @@ public final class FrameCompositor: @unchecked Sendable {
         // Core Graphics is bottom-left: top-left is (0, height).
         context.drawLinearGradient(cgGradient, start: CGPoint(x: 0, y: height), end: CGPoint(x: width, y: 0), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
         guard let image = context.makeImage() else { return CIImage(color: ciColor(config.gradientFrom)).cropped(to: rect) }
-        return CIImage(cgImage: image).cropped(to: rect)
+        return dithered(CIImage(cgImage: image).cropped(to: rect))
     }
 
     static func ciColor(_ c: RGBA, alpha: Double? = nil) -> CIColor {
