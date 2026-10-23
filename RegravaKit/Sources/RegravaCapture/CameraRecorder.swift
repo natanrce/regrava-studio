@@ -1,13 +1,15 @@
 @preconcurrency import AVFoundation
 import Foundation
 
-/// Records the webcam into its own movie while the screen is recorded.
+/// Records the webcam into its own channel (`channel-3-webcam-0`, an HLS playlist) while the
+/// screen is recorded.
 ///
 /// The camera runs continuously (through pauses); sample times use the host clock, the same
 /// clock as `ProcessInfo.systemUptime`, so the file can be cut to the screen's segments.
 final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     struct Result {
-        var url: URL
+        /// The flattened-later playlist.
+        var playlist: URL
         /// Uptime of the movie's first frame.
         var startUptime: TimeInterval
         var size: CGSize
@@ -16,15 +18,18 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "regrava.camera.recorder")
-    private let url: URL
-    private var writer: AVAssetWriter?
-    private var input: AVAssetWriterInput?
+    private let directory: URL
+    private let name: String
+    private var writer: SegmentedWriter?
+    /// First frame: its host time and size (for the recording's metadata).
+    var onStart: (@Sendable (TimeInterval, CGSize) -> Void)?
     private var startUptime: TimeInterval?
     private var size: CGSize = .zero
     private var isStopping = false
 
-    init(url: URL) {
-        self.url = url
+    init(directory: URL, name: String = "channel-3-webcam-0") {
+        self.directory = directory
+        self.name = name
     }
 
     /// Opens the camera at the largest format no taller than `maxHeight` and starts writing.
@@ -57,7 +62,6 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         output.setSampleBufferDelegate(self, queue: queue)
         session.addOutput(output)
         session.commitConfiguration()
-        try? FileManager.default.removeItem(at: url)
         session.startRunning()
     }
 
@@ -66,25 +70,18 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         if writer == nil {
             let width = CVPixelBufferGetWidth(image), height = CVPixelBufferGetHeight(image)
-            guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return }
-            let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            guard let writer = try? SegmentedWriter(directory: directory, name: name, mediaType: .video, outputSettings: [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
                 AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: width * height * 6],
-            ])
-            input.expectsMediaDataInRealTime = true
-            writer.add(input)
-            guard writer.startWriting() else { return }
-            writer.startSession(atSourceTime: time)
+            ]) else { return }
             self.writer = writer
-            self.input = input
             startUptime = time.seconds
             size = CGSize(width: width, height: height)
+            onStart?(time.seconds, size)
         }
-        if let input, input.isReadyForMoreMediaData {
-            input.append(sampleBuffer)
-        }
+        writer?.append(sampleBuffer)
     }
 
     /// Stops the camera and closes the movie; nil when nothing was recorded.
@@ -96,10 +93,8 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
         }
         session.stopRunning()
-        guard let writer, let input, let startUptime else { return nil }
-        input.markAsFinished()
-        await writer.finishWriting()
-        guard writer.status == .completed else { return nil }
-        return Result(url: url, startUptime: startUptime, size: size)
+        guard let writer, let startUptime else { return nil }
+        await writer.finish()
+        return Result(playlist: writer.playlistURL, startUptime: startUptime, size: size)
     }
 }

@@ -35,6 +35,9 @@ final class MouseTracker {
     private var lastCursorID: String?
     private var pollCount = 0
     private let cursors = CursorIdentifier()
+    /// Where samples are written as they come (the recording folder's event logs).
+    var journal: RecordingJournal?
+    private var savedCursorCount = 0
 
     /// Cursor images that are not standard system cursors, by id.
     var customCursors: [CapturedCursorImage] { cursors.customImages }
@@ -47,6 +50,7 @@ final class MouseTracker {
         lastCursorID = nil
         pollCount = 0
         cursors.reset()
+        savedCursorCount = 0
         poll()
 
         let timer = Timer(timeInterval: 1 / pollHz, repeats: true) { [weak self] _ in
@@ -102,7 +106,7 @@ final class MouseTracker {
         lastLocation = location
         // Movement while a button is held is a drag ("mouseDragged").
         let kind: MouseEventKind = NSEvent.pressedMouseButtons != 0 ? .drag : .move
-        samples.append(Sample(kind: kind, uptime: ProcessInfo.processInfo.systemUptime, location: location, button: 0, cursorID: lastCursorID, modifiers: Self.modifiers(NSEvent.modifierFlags)))
+        add(Sample(kind: kind, uptime: ProcessInfo.processInfo.systemUptime, location: location, button: 0, cursorID: lastCursorID, modifiers: Self.modifiers(NSEvent.modifierFlags)))
     }
 
     private func record(_ event: NSEvent) {
@@ -114,19 +118,31 @@ final class MouseTracker {
         }
         let location = event.cgEvent?.location ?? CGEvent(source: nil)?.location ?? .zero
         lastCursorID = cursors.currentID() ?? lastCursorID
-        samples.append(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber, cursorID: lastCursorID, modifiers: Self.modifiers(event.modifierFlags)))
+        add(Sample(kind: kind, uptime: event.timestamp, location: location, button: event.buttonNumber, cursorID: lastCursorID, modifiers: Self.modifiers(event.modifierFlags)))
     }
 
     /// `character` is the key ignoring modifiers except Shift, so ⌘⇧4 is "$" with command and
     /// shift, as the tables expect.
     private func recordKey(_ event: NSEvent) {
-        keySamples.append(KeySample(
+        let sample = KeySample(
             kind: event.type == .keyDown ? .down : .up,
             uptime: event.timestamp,
             character: event.charactersIgnoringModifiers ?? "",
             modifiers: Self.modifiers(event.modifierFlags),
             isARepeat: event.isARepeat
-        ))
+        )
+        keySamples.append(sample)
+        journal?.record(sample)
+    }
+
+    private func add(_ sample: Sample) {
+        samples.append(sample)
+        journal?.record(sample)
+        let custom = cursors.customImages
+        if custom.count != savedCursorCount {
+            savedCursorCount = custom.count
+            journal?.saveCursors(custom)
+        }
     }
 
     static func modifiers(_ flags: NSEvent.ModifierFlags) -> [KeyModifier] {

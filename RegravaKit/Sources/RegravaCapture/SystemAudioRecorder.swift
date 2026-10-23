@@ -7,22 +7,25 @@ import Foundation
 /// written to its own file, on the host clock so it can be cut to the screen's segments.
 final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     struct Result {
-        var url: URL
+        var playlist: URL
         /// Uptime of the file's first sample.
         var startUptime: TimeInterval
     }
 
-    private let url: URL
+    private let directory: URL
+    private let name: String
+    /// First sample's host time (for the recording's metadata).
+    var onStart: (@Sendable (TimeInterval) -> Void)?
     private let queue = DispatchQueue(label: "regrava.capture.system-audio", qos: .userInitiated)
     private let frames = FrameSink()
     private var stream: SCStream?
-    private var writer: AVAssetWriter?
-    private var input: AVAssetWriterInput?
+    private var writer: SegmentedWriter?
     private var startUptime: TimeInterval?
     private var isStopping = false
 
-    init(url: URL) {
-        self.url = url
+    init(directory: URL, name: String = "channel-4-system-audio-apps-0") {
+        self.directory = directory
+        self.name = name
     }
 
     /// Validation and lookup: an empty list is refused, and only pids still found among the
@@ -45,7 +48,6 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(frames, type: .screen, sampleHandlerQueue: frames.queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        try? FileManager.default.removeItem(at: url)
         try await stream.startCapture()
         self.stream = stream
     }
@@ -54,38 +56,26 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         guard type == .audio, !isStopping, sampleBuffer.isValid else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         if writer == nil {
-            guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return }
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 192_000,
-            ])
-            input.expectsMediaDataInRealTime = true
-            writer.add(input)
-            guard writer.startWriting() else { return }
-            writer.startSession(atSourceTime: time)
+            guard let writer = try? SegmentedWriter(directory: directory, name: name, mediaType: .audio, outputSettings: SegmentedWriter.audioSettings) else { return }
             self.writer = writer
-            self.input = input
             startUptime = time.seconds
+            onStart?(time.seconds)
         }
-        if let input, input.isReadyForMoreMediaData { input.append(sampleBuffer) }
+        writer?.append(sampleBuffer)
     }
 
     /// Stops the stream and closes the file; nil when no sound arrived.
     func stop() async -> Result? {
         try? await stream?.stopCapture()
         stream = nil
-        let (writer, input, start): (AVAssetWriter?, AVAssetWriterInput?, TimeInterval?) = await withCheckedContinuation { continuation in
+        let (writer, start): (SegmentedWriter?, TimeInterval?) = await withCheckedContinuation { continuation in
             queue.async {
                 self.isStopping = true
-                continuation.resume(returning: (self.writer, self.input, self.startUptime))
+                continuation.resume(returning: (self.writer, self.startUptime))
             }
         }
-        guard let writer, let input, let start else { return nil }
-        input.markAsFinished()
-        await writer.finishWriting()
-        guard writer.status == .completed else { return nil }
-        return Result(url: url, startUptime: start)
+        guard let writer, let start else { return nil }
+        await writer.finish()
+        return Result(playlist: writer.playlistURL, startUptime: start)
     }
 }

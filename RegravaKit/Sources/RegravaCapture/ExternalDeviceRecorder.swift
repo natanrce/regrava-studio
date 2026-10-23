@@ -22,7 +22,6 @@ public final class ExternalDeviceRecorder {
     public var onUnexpectedStop: ((Error) -> Void)?
 
     private struct Segment {
-        var url: URL
         var startUptime: TimeInterval
         var endUptime: TimeInterval?
     }
@@ -30,8 +29,8 @@ public final class ExternalDeviceRecorder {
     private var core: DeviceCaptureCore?
     private var camera: CameraRecorder?
     private var segments: [Segment] = []
-    private var markerUptimes: [TimeInterval] = []
     private var workDirectory: URL?
+    private var journal: RecordingJournal?
     private var device: ExternalDevice?
 
     public init() {}
@@ -47,15 +46,37 @@ public final class ExternalDeviceRecorder {
         guard phase == .idle else { throw CaptureError.busy }
         phase = .starting
         do {
-            try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+            let journal = try RecordingJournal(folder: workDirectory)
+            self.journal = journal
             self.workDirectory = workDirectory
             self.device = device
             segments = []
-            markerUptimes = []
+            journal.update {
+                $0.pointPixelScale = 1
+                $0.fps = 60
+                $0.device = ExternalDeviceInfo(deviceId: device.deviceId, name: device.name, modelId: device.modelId, modelMarketingName: device.modelMarketingName, orientationChanges: [])
+            }
             guard let captureDevice = AVCaptureDevice(uniqueID: device.deviceId) else {
                 throw CaptureError.failed("Failed to find or connect to selected device")
             }
-            let core = DeviceCaptureCore()
+            let core = DeviceCaptureCore(directory: workDirectory)
+            core.onFirstFrame = { size in
+                Task { @MainActor in journal.update { $0.videoSize = Size2(width: Double(size.width), height: Double(size.height)) } }
+            }
+            core.onOrientationChange = { change in
+                Task { @MainActor in
+                    journal.update { $0.orientationChanges.append(.init(uptime: change.uptime, contentRect: change.contentRect, angle: change.angle, animation: change.animation)) }
+                }
+            }
+            core.onChannelStart = { index, name, start in
+                Task { @MainActor in
+                    journal.update { metadata in
+                        guard let s = metadata.sessions.firstIndex(where: { $0.index == index }),
+                              let c = metadata.sessions[s].channels.firstIndex(where: { $0.playlist == name }) else { return }
+                        metadata.sessions[s].channels[c].startUptime = start
+                    }
+                }
+            }
             core.onFailure = { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.phase == .recording || self.phase == .paused else { return }
@@ -66,7 +87,12 @@ public final class ExternalDeviceRecorder {
             if options.capturesSystemAudio { try await core.startSystemAudio(processIDs: options.systemAudioProcessIDs) }
             self.core = core
             if let cameraID = options.cameraID {
-                let camera = CameraRecorder(url: workDirectory.appendingPathComponent("camera-raw.mov"))
+                let camera = CameraRecorder(directory: workDirectory)
+                camera.onStart = { start, size in
+                    Task { @MainActor in
+                        journal.update { $0.continuous.append(.init(source: "webcam", playlist: "channel-3-webcam-0", startUptime: start, width: Double(size.width), height: Double(size.height))) }
+                    }
+                }
                 try camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
                 self.camera = camera
             }
@@ -78,6 +104,8 @@ public final class ExternalDeviceRecorder {
             core = nil
             _ = await camera?.stop()
             camera = nil
+            journal?.close()
+            journal = nil
             phase = .idle
             throw error
         }
@@ -99,81 +127,47 @@ public final class ExternalDeviceRecorder {
 
     public func addMarker() {
         guard phase == .recording else { return }
-        markerUptimes.append(ProcessInfo.processInfo.systemUptime)
+        let now = ProcessInfo.processInfo.systemUptime
+        journal?.update { $0.markerUptimes.append(now) }
     }
 
     private func beginSegment() async throws {
-        guard let core, let workDirectory else { throw CaptureError.notRecording }
-        let url = workDirectory.appendingPathComponent("segment-\(segments.count).mov")
-        try? FileManager.default.removeItem(at: url)
-        let start = try await core.beginSegment(url: url, timeout: 5)
-        segments.append(Segment(url: url, startUptime: start))
+        guard let core, let journal else { throw CaptureError.notRecording }
+        let index = segments.count
+        journal.update { $0.sessions.append(.init(index: index, channels: core.channelNames(index: index).map { .init(source: $0.source, playlist: $0.playlist) })) }
+        let start = try await core.beginSegment(index: index, timeout: 5)
+        segments.append(Segment(startUptime: start))
+        journal.update { metadata in
+            if let s = metadata.sessions.firstIndex(where: { $0.index == index }) { metadata.sessions[s].startUptime = start }
+        }
     }
 
     private func endSegment() async throws {
         guard let core else { return }
-        let end = try await core.endSegment()
-        if !segments.isEmpty { segments[segments.count - 1].endUptime = end ?? ProcessInfo.processInfo.systemUptime }
+        let end = try await core.endSegment() ?? ProcessInfo.processInfo.systemUptime
+        guard !segments.isEmpty else { return }
+        segments[segments.count - 1].endUptime = end
+        let index = segments.count - 1
+        journal?.update { metadata in
+            if let s = metadata.sessions.firstIndex(where: { $0.index == index }) { metadata.sessions[s].endUptime = end }
+        }
     }
 
-    /// Stops and writes the joined movie to `outputURL`.
+    /// Stops and finalizes the folder; the movie ends up at `outputURL`.
     public func finish(to outputURL: URL) async throws -> CaptureResult {
-        guard phase == .recording || phase == .paused, let core else { throw CaptureError.notRecording }
+        guard phase == .recording || phase == .paused, let core, let workDirectory else { throw CaptureError.notRecording }
         let wasPaused = phase == .paused
         phase = .finishing
         defer { phase = .idle }
         if !wasPaused { try await endSegment() }
         await core.stopRunning()
-        let cameraRecording = await camera?.stop()
+        _ = await camera?.stop()
         camera = nil
         self.core = nil
-
-        var offsets: [(segment: Segment, offset: Double, duration: Double)] = []
-        var total = 0.0
-        for segment in segments {
-            let duration = try await AVURLAsset(url: segment.url).load(.duration).seconds
-            offsets.append((segment, total, duration))
-            total += duration
-        }
-        try await ScreenRecorder.concatenate(segments.map(\.url), to: outputURL)
-        segments.forEach { try? FileManager.default.removeItem(at: $0.url) }
-
-        func timelineMs(_ uptime: TimeInterval) -> Double? {
-            for entry in offsets {
-                let local = uptime - entry.segment.startUptime
-                if local >= 0 && local <= entry.duration + 0.05 { return (entry.offset + min(local, entry.duration)) * 1000 }
-            }
-            return nil
-        }
-
-        var cameraURL: URL?
-        if let cameraRecording {
-            let target = outputURL.deletingLastPathComponent().appendingPathComponent("camera.mov")
-            let ranges = offsets.map { (sourceStart: $0.segment.startUptime - cameraRecording.startUptime, duration: $0.duration, at: $0.offset) }
-            if (try? await ScreenRecorder.cut(cameraRecording.url, ranges: ranges, to: target)) != nil { cameraURL = target }
-            try? FileManager.default.removeItem(at: cameraRecording.url)
-        }
-        let size = core.initialSize
-        let changes = core.orientationChanges.compactMap { change -> DeviceOrientationChange? in
-            timelineMs(change.uptime).map { DeviceOrientationChange(timeMs: $0, contentRect: change.contentRect, videoRotationAngleForHorizontalLevel: change.angle, animation: change.animation) }
-        }
-        var result = CaptureResult(
-            videoURL: outputURL,
-            mouseEvents: [],
-            customCursors: [],
-            keystrokes: [],
-            audioSources: core.audioSources,
-            cameraURL: cameraURL,
-            cameraSize: cameraRecording.map { Size2(width: Double($0.size.width), height: Double($0.size.height)) },
-            markersMs: markerUptimes.compactMap(timelineMs),
-            videoSize: Size2(width: Double(size.width), height: Double(size.height)),
-            pointPixelScale: 1,
-            durationMs: total * 1000,
-            fps: 60
-        )
-        if let device {
-            result.externalDevice = ExternalDeviceInfo(deviceId: device.deviceId, name: device.name, modelId: device.modelId, modelMarketingName: device.modelMarketingName, orientationChanges: changes)
-        }
+        journal?.close()
+        journal = nil
+        var result = try await RecordingFinalizer.finalize(folder: workDirectory)
+        try ScreenRecorder.move(&result, to: outputURL)
         return result
     }
 
@@ -181,9 +175,11 @@ public final class ExternalDeviceRecorder {
         _ = try? await core?.endSegment()
         await core?.stopRunning()
         core = nil
-        if let recording = await camera?.stop() { try? FileManager.default.removeItem(at: recording.url) }
+        _ = await camera?.stop()
         camera = nil
-        segments.forEach { try? FileManager.default.removeItem(at: $0.url) }
+        journal?.close()
+        journal = nil
+        if let workDirectory { try? FileManager.default.removeItem(at: workDirectory) }
         segments = []
         phase = .idle
     }
@@ -214,12 +210,33 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     private var hasSystemAudio = false
 
     var onFailure: ((Error) -> Void)?
+    var onFirstFrame: (@Sendable (CGSize) -> Void)?
+    var onOrientationChange: (@Sendable (OrientationChange) -> Void)?
+    /// A session's channel got its first sample: session index, playlist name, host time.
+    var onChannelStart: (@Sendable (Int, String, Double) -> Void)?
+
+    private let directory: URL
+
+    init(directory: URL) {
+        self.directory = directory
+        super.init()
+    }
+
+    /// The channels a session writes (the device's picture, then each sound).
+    func channelNames(index: Int) -> [(source: String, playlist: String)] {
+        [("device", "channel-1-device-\(index)")] + audioSources.map { source in
+            switch source {
+            case .externalDevice: return (source.rawValue, "channel-5-external-device-\(index)")
+            case .systemAudio: return (source.rawValue, "channel-4-system-audio-\(index)")
+            case .microphone: return (source.rawValue, "channel-2-microphone-\(index)")
+            }
+        }
+    }
 
     // Queue state.
-    private var writer: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
-    private var audioInputs: [AudioSource: AVAssetWriterInput] = [:]
-    private var pendingSegment: (url: URL, continuation: CheckedContinuation<TimeInterval, Error>)?
+    private var videoWriter: SegmentedWriter?
+    private var audioWriters: [AudioSource: SegmentedWriter] = [:]
+    private var pendingSegment: (index: Int, continuation: CheckedContinuation<TimeInterval, Error>)?
     private var segmentStart: CMTime?
     private var lastVideoTime: CMTime?
     private var isRotated = false
@@ -302,38 +319,33 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
 
     /// Opens a segment at the next video frame and returns its uptime. Fails when no frame
     /// arrives in `timeout` seconds (a locked device sends none).
-    func beginSegment(url: URL, timeout: TimeInterval) async throws -> TimeInterval {
+    func beginSegment(index: Int, timeout: TimeInterval) async throws -> TimeInterval {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                self.pendingSegment = (url, continuation)
+                self.pendingSegment = (index, continuation)
             }
             queue.asyncAfter(deadline: .now() + timeout) {
-                guard let pending = self.pendingSegment, pending.url == url else { return }
+                guard let pending = self.pendingSegment, pending.index == index else { return }
                 self.pendingSegment = nil
                 pending.continuation.resume(throwing: CaptureError.failed(ExternalDeviceRecorder.noFramesMessage))
             }
         }
     }
 
-    /// Closes the current segment; returns the uptime of its last frame.
+    /// Closes the current session's channels; returns the uptime of its last frame.
     func endSegment() async throws -> TimeInterval? {
-        let (writer, inputs, end): (AVAssetWriter?, [AVAssetWriterInput], CMTime?) = await withCheckedContinuation { continuation in
+        let (writers, end): ([SegmentedWriter], CMTime?) = await withCheckedContinuation { continuation in
             queue.async {
-                let w = self.writer
-                let inputs = [self.videoInput].compactMap { $0 } + Array(self.audioInputs.values)
+                let writers = [self.videoWriter].compactMap { $0 } + Array(self.audioWriters.values)
                 let end = self.lastVideoTime
-                self.writer = nil
-                self.videoInput = nil
-                self.audioInputs = [:]
+                self.videoWriter = nil
+                self.audioWriters = [:]
                 self.segmentStart = nil
-                continuation.resume(returning: (w, inputs, end))
+                continuation.resume(returning: (writers, end))
             }
         }
-        guard let writer else { return nil }
-        inputs.forEach { $0.markAsFinished() }
-        if let end { writer.endSession(atSourceTime: end) }
-        await writer.finishWriting()
-        if writer.status == .failed { throw writer.error ?? CaptureError.failed("Could not save the device recording.") }
+        guard !writers.isEmpty else { return nil }
+        for writer in writers { await writer.finish() }
         return end?.seconds
     }
 
@@ -367,40 +379,43 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         guard let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let size = CGSize(width: CVPixelBufferGetWidth(image), height: CVPixelBufferGetHeight(image))
-        if initialSize == .zero { initialSize = size }
+        if initialSize == .zero {
+            initialSize = size
+            onFirstFrame?(size)
+        }
 
         // The device turned: the frame's sides are swapped against the first frame.
         let rotated = size != initialSize && size.width == initialSize.height && size.height == initialSize.width
         if rotated != isRotated {
             isRotated = rotated
-            orientationChanges.append(OrientationChange(
+            let change = OrientationChange(
                 uptime: time.seconds,
                 contentRect: Rect2(x: 0, y: 0, width: Double(initialSize.width), height: Double(initialSize.height)),
                 angle: rotated ? 90 : 0,
                 animation: rotated ? .clockwise : .counterClockwise
-            ))
+            )
+            orientationChanges.append(change)
+            onOrientationChange?(change)
         }
 
         if let pending = pendingSegment {
             pendingSegment = nil
             do {
-                try openWriter(url: pending.url, at: time)
+                try openWriters(index: pending.index, at: time)
                 pending.continuation.resume(returning: time.seconds)
             } catch {
                 pending.continuation.resume(throwing: error)
                 return
             }
         }
-        guard let videoInput, videoInput.isReadyForMoreMediaData else { return }
+        guard let videoWriter else { return }
         if size == initialSize {
-            videoInput.append(sampleBuffer)
-        } else if let buffer = rotate(image, to: initialSize), let adaptor = adaptor {
-            adaptor.append(buffer, withPresentationTime: time)
+            videoWriter.append(sampleBuffer)
+        } else if let buffer = rotate(image, to: initialSize) {
+            videoWriter.append(buffer, at: time)
         }
         lastVideoTime = time
     }
-
-    private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
 
     /// "Created rotated CMSampleBuffer": the frame turned a quarter back to the initial size.
     private func rotate(_ image: CVPixelBuffer, to size: CGSize) -> CVPixelBuffer? {
@@ -423,8 +438,8 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         return out
     }
 
-    private func openWriter(url: URL, at time: CMTime) throws {
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    /// A session's channels: the picture at the first frame's size, and one per sound.
+    private func openWriters(index: Int, at time: CMTime) throws {
         let width = Int(initialSize.width), height = Int(initialSize.height)
         var settings = AVOutputSettingsAssistant(preset: .preset3840x2160)?.videoSettings ?? [AVVideoCodecKey: AVVideoCodecType.h264]
         settings[AVVideoWidthKey] = width
@@ -433,36 +448,24 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
             compression[AVVideoAverageBitRateKey] = max(width * height * 8, 2_000_000)
             settings[AVVideoCompressionPropertiesKey] = compression
         }
-        let video = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-        video.expectsMediaDataInRealTime = true
-        writer.add(video)
-        adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: video, sourcePixelBufferAttributes: nil)
-        var inputs: [AudioSource: AVAssetWriterInput] = [:]
-        for source in audioSources {
-            var layout = AudioChannelLayout()
-            layout.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo
-            let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 192_000,
-                AVChannelLayoutKey: Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size),
-            ])
-            audio.expectsMediaDataInRealTime = true
-            writer.add(audio)
-            inputs[source] = audio
+        let names = channelNames(index: index)
+        let video = try SegmentedWriter(directory: directory, name: names[0].playlist, mediaType: .video, outputSettings: settings)
+        var audio: [AudioSource: SegmentedWriter] = [:]
+        for (source, name) in zip(audioSources, names.dropFirst().map(\.playlist)) {
+            audio[source] = try SegmentedWriter(directory: directory, name: name, mediaType: .audio, outputSettings: SegmentedWriter.audioSettings)
         }
-        guard writer.startWriting() else { throw writer.error ?? CaptureError.failed("Could not record the device.") }
-        writer.startSession(atSourceTime: time)
-        self.writer = writer
-        videoInput = video
-        audioInputs = inputs
+        for writer in [video] + Array(audio.values) {
+            let name = writer.name
+            writer.onStart = { [weak self] start in self?.onChannelStart?(index, name, start) }
+        }
+        videoWriter = video
+        audioWriters = audio
         segmentStart = time
     }
 
     private func append(_ sampleBuffer: CMSampleBuffer, source: AudioSource) {
-        guard let start = segmentStart, let input = audioInputs[source], input.isReadyForMoreMediaData,
+        guard let start = segmentStart, let writer = audioWriters[source],
               CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= start else { return }
-        input.append(sampleBuffer)
+        writer.append(sampleBuffer)
     }
 }

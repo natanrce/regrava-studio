@@ -30,6 +30,7 @@ let package = Package(
         .target(name: "RegravaCapture", dependencies: ["RegravaCore"]),
         .testTarget(name: "RegravaCoreTests", dependencies: ["RegravaCore"]),
         .testTarget(name: "RegravaRenderTests", dependencies: ["RegravaCore", "RegravaRender"]),
+        .testTarget(name: "RegravaCaptureTests", dependencies: ["RegravaCore", "RegravaCapture"]),
         .testTarget(name: "RegravaSpeechTests", dependencies: ["RegravaSpeech", .product(name: "MLX", package: "mlx-swift")], exclude: ["build-mlx-metallib.sh"]),
     ],
     swiftLanguageModes: [.v5]
