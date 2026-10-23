@@ -14,6 +14,9 @@ public enum CaptureSource: Hashable, Sendable {
 public struct CaptureOptions: Hashable, Sendable {
     public var fps: Int
     public var capturesSystemAudio: Bool
+    /// With `capturesSystemAudio`: only these apps' sound (`only-selected`), recorded in its
+    /// own stream; nil records every app.
+    public var systemAudioProcessIDs: [pid_t]?
     /// `AVCaptureDevice.uniqueID` of the microphone, or nil for none.
     public var microphoneID: String?
     public var hidesDesktopIcons: Bool
@@ -23,7 +26,8 @@ public struct CaptureOptions: Hashable, Sendable {
     /// "Max resolution" of the camera (`maximumWebcamHeight`).
     public var cameraMaxHeight: Int = 1080
 
-    public init(fps: Int = 60, capturesSystemAudio: Bool = false, microphoneID: String? = nil, hidesDesktopIcons: Bool = false, cameraID: String? = nil, cameraMaxHeight: Int = 1080) {
+    public init(fps: Int = 60, capturesSystemAudio: Bool = false, systemAudioProcessIDs: [pid_t]? = nil, microphoneID: String? = nil, hidesDesktopIcons: Bool = false, cameraID: String? = nil, cameraMaxHeight: Int = 1080) {
+        self.systemAudioProcessIDs = systemAudioProcessIDs
         self.cameraID = cameraID
         self.cameraMaxHeight = cameraMaxHeight
         self.fps = fps
@@ -99,6 +103,7 @@ public final class ScreenRecorder: NSObject {
     private var currentOutput: SCRecordingOutput?
     private let mouse = MouseTracker()
     private var camera: CameraRecorder?
+    private var systemAudio: SystemAudioRecorder?
     private var expectedAudioSources: [AudioSource] = []
     private let frameSink = FrameSink()
     private var segments: [Segment] = []
@@ -135,8 +140,10 @@ public final class ScreenRecorder: NSObject {
             segments = []
             markerUptimes = []
             fps = options.fps
-            // ScreenCaptureKit writes system audio before the microphone (separate tracks).
-            expectedAudioSources = (options.capturesSystemAudio ? [AudioSource.systemAudio] : []) + (options.microphoneID != nil ? [.microphone] : [])
+            // ScreenCaptureKit writes system audio before the microphone (separate tracks); the
+            // selected apps' sound is added after them when the movie is joined.
+            let inStreamAudio = options.capturesSystemAudio && options.systemAudioProcessIDs == nil
+            expectedAudioSources = (inStreamAudio ? [AudioSource.systemAudio] : []) + (options.microphoneID != nil ? [.microphone] : [])
 
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             let (filter, configuration) = try makeFilter(source: source, options: options, content: content)
@@ -150,6 +157,11 @@ public final class ScreenRecorder: NSObject {
                 try camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
                 self.camera = camera
             }
+            if options.capturesSystemAudio, let pids = options.systemAudioProcessIDs {
+                let recorder = SystemAudioRecorder(url: workDirectory.appendingPathComponent("system-audio-raw.mov"))
+                try await recorder.start(processIDs: pids, content: content)
+                systemAudio = recorder
+            }
             try await stream.startCapture()
             try await beginSegment()
             phase = .recording
@@ -157,6 +169,8 @@ public final class ScreenRecorder: NSObject {
             mouse.stop()
             _ = await camera?.stop()
             camera = nil
+            _ = await systemAudio?.stop()
+            systemAudio = nil
             try? await stream?.stopCapture()
             stream = nil
             phase = .idle
@@ -193,6 +207,8 @@ public final class ScreenRecorder: NSObject {
         let samples = mouse.stop()
         let cameraRecording = await camera?.stop()
         camera = nil
+        let systemAudioRecording = await systemAudio?.stop()
+        systemAudio = nil
         try? await stream?.stopCapture()
         stream = nil
 
@@ -240,7 +256,18 @@ public final class ScreenRecorder: NSObject {
             try? FileManager.default.removeItem(at: cameraRecording.url)
         }
         let audioTrackCount = (try? await AVURLAsset(url: outputURL).loadTracks(withMediaType: .audio).count) ?? 0
-        let audioSources = Array(expectedAudioSources.prefix(audioTrackCount))
+        var audioSources = Array(expectedAudioSources.prefix(audioTrackCount))
+        // The selected apps' sound, cut to the segments and added as one more track.
+        if let systemAudioRecording {
+            let cut = outputURL.deletingLastPathComponent().appendingPathComponent("system-audio.mov")
+            let ranges = offsets.map { (sourceStart: $0.segment.startUptime - systemAudioRecording.startUptime, duration: $0.duration, at: $0.offset) }
+            if (try? await Self.cut(systemAudioRecording.url, ranges: ranges, to: cut)) != nil,
+               (try? await Self.addAudioTrack(from: cut, to: outputURL)) != nil {
+                audioSources.append(.systemAudio)
+            }
+            try? FileManager.default.removeItem(at: cut)
+            try? FileManager.default.removeItem(at: systemAudioRecording.url)
+        }
         return CaptureResult(
             videoURL: outputURL,
             mouseEvents: events.sorted { $0.timeMs < $1.timeMs },
@@ -269,6 +296,8 @@ public final class ScreenRecorder: NSObject {
         mouse.stop()
         if let recording = await camera?.stop() { try? FileManager.default.removeItem(at: recording.url) }
         camera = nil
+        if let recording = await systemAudio?.stop() { try? FileManager.default.removeItem(at: recording.url) }
+        systemAudio = nil
         try? await stream?.stopCapture()
         stream = nil
         segments.forEach { try? FileManager.default.removeItem(at: $0.url) }
@@ -389,7 +418,7 @@ public final class ScreenRecorder: NSObject {
         configuration.showsCursor = false
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.fps))
         configuration.queueDepth = 6
-        configuration.capturesAudio = options.capturesSystemAudio
+        configuration.capturesAudio = options.capturesSystemAudio && options.systemAudioProcessIDs == nil
         configuration.excludesCurrentProcessAudio = true
         if let microphoneID = options.microphoneID {
             configuration.captureMicrophone = true
@@ -420,6 +449,29 @@ public final class ScreenRecorder: NSObject {
             throw CaptureError.failed("Could not save the camera recording.")
         }
         try await session.export(to: outputURL, as: .mov)
+    }
+
+    /// Rewrites `movie` with the first audio track of `audio` added after its own tracks.
+    static func addAudioTrack(from audio: URL, to movie: URL) async throws {
+        let base = AVURLAsset(url: movie)
+        let extra = AVURLAsset(url: audio)
+        let duration = try await base.load(.duration)
+        let composition = AVMutableComposition()
+        for track in try await base.load(.tracks) {
+            guard let target = composition.addMutableTrack(withMediaType: track.mediaType, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+            try target.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: .zero)
+        }
+        if let track = try await extra.loadTracks(withMediaType: .audio).first,
+           let target = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let length = min(try await extra.load(.duration), duration)
+            try target.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: track, at: .zero)
+        }
+        let joined = movie.deletingLastPathComponent().appendingPathComponent("joined-\(UUID().uuidString).mov")
+        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            throw CaptureError.failed("Could not join the recording segments.")
+        }
+        try await session.export(to: joined, as: .mov)
+        _ = try FileManager.default.replaceItemAt(movie, withItemAt: joined)
     }
 
     static func concatenate(_ urls: [URL], to outputURL: URL) async throws {

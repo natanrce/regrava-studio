@@ -63,7 +63,7 @@ public final class ExternalDeviceRecorder {
                 }
             }
             try core.configure(device: captureDevice, microphoneID: options.microphoneID)
-            if options.capturesSystemAudio { try await core.startSystemAudio() }
+            if options.capturesSystemAudio { try await core.startSystemAudio(processIDs: options.systemAudioProcessIDs) }
             self.core = core
             if let cameraID = options.cameraID {
                 let camera = CameraRecorder(url: workDirectory.appendingPathComponent("camera-raw.mov"))
@@ -261,16 +261,24 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     }
 
     /// System audio through ScreenCaptureKit, with a tiny video stream nobody reads.
-    func startSystemAudio() async throws {
+    /// Every app's sound, or only `processIDs`' (checked like `SystemAudioRecorder`).
+    func startSystemAudio(processIDs: [pid_t]? = nil) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else { return }
+        var filter = SCContentFilter(display: display, excludingWindows: [])
+        if let processIDs {
+            guard !processIDs.isEmpty else { throw CaptureError.failed("SystemAudio: includedProcessIds cannot be set to empty array") }
+            let apps = content.applications.filter { processIDs.contains($0.processID) }
+            guard !apps.isEmpty else { throw CaptureError.failed("SystemAudio: None of the includedProcessIds can be found, cannot record audio ") }
+            filter = SCContentFilter(display: display, including: apps, exceptingWindows: [])
+        }
         let configuration = SCStreamConfiguration()
         configuration.width = 2
         configuration.height = 2
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         configuration.capturesAudio = true
         configuration.excludesCurrentProcessAudio = true
-        let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: configuration, delegate: nil)
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(frameSink, type: .screen, sampleHandlerQueue: frameSink.queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try await stream.startCapture()
