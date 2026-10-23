@@ -30,12 +30,6 @@ struct EditorTimeline: View {
             let geo = TimelineGeometry(width: geometry.size.width, scrollOffsetMs: editor.scrollOffsetMs, pxPerMs: max(geometry.size.width - 40, 1) / editor.visibleDurationMs, resolver: editor.project.resolver)
             ZStack(alignment: .topLeading) {
                 GridLines(geometry: geo, duration: editor.durationMs).padding(.top, 32)
-                // Hover playhead, behind the tracks; it drops down to 18 px as it nears the playhead (`hideNear`).
-                if let hoverX, !editor.isPlaying, !editor.isSplitToolActive {
-                    Playhead(color: Playhead.secondaryColor, height: geometry.size.height, isPrimary: false)
-                        .offset(x: hoverX, y: Playhead.drop(distanceMs: abs(time(hoverX) - editor.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
-                        .allowsHitTesting(false)
-                }
                 VStack(alignment: .leading, spacing: 11.3) {
                     Ruler(geometry: geo, duration: editor.durationMs).frame(height: 20)
                     VStack(alignment: .leading, spacing: 12) {
@@ -58,6 +52,13 @@ struct EditorTimeline: View {
                 .padding(.top, 25 - 20)
                 .padding(.bottom, 15)
 
+                // Hover playhead over the tracks, under the playhead; it drops down to 18 px as it nears
+                // the playhead (`hideNear`).
+                if let hoverX, !editor.isPlaying, !editor.isSplitToolActive {
+                    Playhead(color: Playhead.secondaryColor, height: geometry.size.height, isPrimary: false)
+                        .offset(x: hoverX, y: Playhead.drop(distanceMs: abs(time(hoverX) - editor.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
+                        .allowsHitTesting(false)
+                }
                 if editor.isSplitToolActive, let hoverX {
                     SplitBeam(height: geometry.size.height).offset(x: hoverX).allowsHitTesting(false)
                 }
@@ -80,10 +81,11 @@ struct EditorTimeline: View {
                     editor.endScrub()
                 }
             }
-            .onTapGesture { location in
+            // A click anywhere, items included, also moves the playhead there.
+            .simultaneousGesture(SpatialTapGesture().onEnded { value in
                 guard !editor.isSplitToolActive else { return }
-                editor.seek(to: time(location.x))
-            }
+                editor.seek(to: time(value.location.x))
+            })
             .onChange(of: editor.isSplitToolActive) { _, active in
                 if isHovering { (active ? SplitCursor.cursor : NSCursor.arrow).set() }
             }
@@ -264,12 +266,21 @@ struct TrackItemBody: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 10)
-            .fill(LinearGradient(colors: [color, color.mix(with: .white, by: 0.15)], startPoint: .top, endPoint: .bottom))
+            .fill(LinearGradient(colors: [color, color.lightness(15)], startPoint: .top, endPoint: .bottom))
+            // Inner glow `inset 0 0 15px 3px`: C.darken(0.2)·0.8, C·0.5 under the playhead,
+            // C.darken(0.2)·0.5 when active (Kh).
+            .overlay(
+                // Solid from 10 px outside to 3 px inside (the spread), blurred by σ 7.5, kept inside.
+                RoundedRectangle(cornerRadius: 13)
+                    .strokeBorder(isPlayed ? color.opacity(0.5) : color.darken(0.2).opacity(isActive ? 0.5 : 0.8), lineWidth: 13)
+                    .padding(-10)
+                    .blur(radius: 7.5)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isActive ? Color.white : color.mix(with: .white, by: isPlayed ? 0.15 : 0.4), lineWidth: 1)
+                    .strokeBorder(isActive ? Color.white : color.lightness(isPlayed ? 15 : 40), lineWidth: 1)
             )
-            .shadow(color: color.opacity(isPlayed ? 0.5 : 0), radius: 6)
             .overlay(
                 RoundedRectangle(cornerRadius: 11)
                     .strokeBorder(isSelected ? color.mix(with: .white, by: 0.5).opacity(0.8) : .clear, lineWidth: 1)
@@ -1231,5 +1242,43 @@ enum SplitCursor {
             return true
         }
         return copy
+    }
+}
+
+extension Color {
+    /// `color(c).darken(r)`: HSL lightness scaled by 1 − r.
+    func darken(_ ratio: Double) -> Color {
+        let c = NSColor(self).usingColorSpace(.sRGB) ?? .black
+        let l = (max(c.redComponent, c.greenComponent, c.blueComponent) + min(c.redComponent, c.greenComponent, c.blueComponent)) / 2
+        return lightness(-Double(l) * ratio * 100)
+    }
+
+    /// `color(c).lightness(l + n)`: HSL lightness raised by `n` percentage points.
+    func lightness(_ n: Double) -> Color {
+        let c = NSColor(self).usingColorSpace(.sRGB) ?? .black
+        let r = Double(c.redComponent), g = Double(c.greenComponent), b = Double(c.blueComponent)
+        let maxV = max(r, g, b), minV = min(r, g, b)
+        var h = 0.0, sat = 0.0
+        let l = (maxV + minV) / 2
+        let d = maxV - minV
+        if d > 0 {
+            sat = d / (1 - abs(2 * l - 1))
+            if maxV == r { h = ((g - b) / d).truncatingRemainder(dividingBy: 6) } else if maxV == g { h = (b - r) / d + 2 } else { h = (r - g) / d + 4 }
+            h *= 60
+            if h < 0 { h += 360 }
+        }
+        let l2 = min(max(l + n / 100, 0), 1)
+        let chroma = (1 - abs(2 * l2 - 1)) * sat
+        let x = chroma * (1 - abs((h / 60).truncatingRemainder(dividingBy: 2) - 1))
+        let m = l2 - chroma / 2
+        let (r1, g1, b1): (Double, Double, Double) = switch h {
+        case ..<60: (chroma, x, 0)
+        case ..<120: (x, chroma, 0)
+        case ..<180: (0, chroma, x)
+        case ..<240: (0, x, chroma)
+        case ..<300: (x, 0, chroma)
+        default: (chroma, 0, x)
+        }
+        return Color(.sRGB, red: r1 + m, green: g1 + m, blue: b1 + m, opacity: Double(c.alphaComponent))
     }
 }
