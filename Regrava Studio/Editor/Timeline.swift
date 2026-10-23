@@ -12,7 +12,10 @@ enum TrackColors {
 
 /// Timeline: ruler, clip track, zoom track, playheads; scroll/zoom/scrub.
 struct EditorTimeline: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
+    @ObservedObject var viewport: TimelineViewport
     @State private var hoverX: CGFloat?
     @State private var width: CGFloat = 1
     @State private var wheelMonitor: Any?
@@ -404,6 +407,8 @@ private struct TimelineWordLabel: View {
 
 /// One clip: duration, speed and cursor chips; click opens the slice editor; edges trim.
 private struct SliceItem: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var slice: Slice
     var index: Int
@@ -778,6 +783,8 @@ private struct BobbingHint: View {
 }
 
 private struct ZoomItem: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var zoom: ZoomRange
     var geometry: TimelineGeometry
@@ -971,6 +978,8 @@ private struct MaskTrack: View {
 }
 
 private struct MaskItem: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var mask: MaskRange
     var geometry: TimelineGeometry
@@ -1133,6 +1142,8 @@ private struct LayoutTrack: View {
 }
 
 private struct LayoutItem: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var layout: CameraLayoutRange
     var geometry: TimelineGeometry

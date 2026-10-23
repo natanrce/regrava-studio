@@ -28,6 +28,15 @@ enum EditorLayoutType {
 
 /// State and actions of one project window.
 @MainActor
+final class PlaybackClock: ObservableObject {
+    @Published var currentTimeMs: Double = 0
+}
+
+final class TimelineViewport: ObservableObject {
+    @Published var visibleDurationMs: Double = 30_000
+    @Published var scrollOffsetMs: Double = 0
+}
+
 final class EditorModel: ObservableObject {
     private(set) var bundleURL: URL
     let player = AVPlayer()
@@ -40,7 +49,13 @@ final class EditorModel: ObservableObject {
     @Published private(set) var canRedo = false
 
     // Playback
-    @Published private(set) var currentTimeMs: Double = 0
+    /// The playhead, published on its own object: only views that show time redraw with it
+    /// (it changes every frame while playing).
+    let clock = PlaybackClock()
+    private(set) var currentTimeMs: Double {
+        get { clock.currentTimeMs }
+        set { clock.currentTimeMs = newValue }
+    }
     @Published private(set) var isPlaying = false {
         didSet { if oldValue != isPlaying { updateRenderQuality() } }
     }
@@ -78,10 +93,19 @@ final class EditorModel: ObservableObject {
     /// Last layout type chosen from the add tools (`addLayoutType`), used by ⌃L.
     @Published var addLayoutType: CameraLayoutType = .cameraOverlay
     @Published var isSplitToolActive = false
+    /// The timeline's scroll and zoom, published on their own object: only the timeline redraws
+    /// while they change (scroll and pinch fire for every trackpad event).
+    let viewport = TimelineViewport()
     /// Visible timeline duration (zoom level of the timeline).
-    @Published var visibleDurationMs: Double = 30_000
+    var visibleDurationMs: Double {
+        get { viewport.visibleDurationMs }
+        set { viewport.visibleDurationMs = newValue }
+    }
     /// Left edge of the visible timeline range.
-    @Published var scrollOffsetMs: Double = 0
+    var scrollOffsetMs: Double {
+        get { viewport.scrollOffsetMs }
+        set { viewport.scrollOffsetMs = newValue }
+    }
     /// "zooms" track is focused by default; nil = none.
     @Published var focusedTrack: String? = "zooms"
     @Published var errorMessage: String?
@@ -563,7 +587,30 @@ final class EditorModel: ObservableObject {
         let frame = 1000.0 / 60
         let clamped = clamp((timeMs / frame).rounded() * frame, 0, durationMs)
         if moveHead { currentTimeMs = clamped }
-        player.seek(to: CMTime(seconds: clamped / 1000, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        chaseSeek(to: CMTime(seconds: clamped / 1000, preferredTimescale: 600))
+    }
+
+    private var seekInFlight = false
+    private var pendingSeek: CMTime?
+
+    /// One exact seek at a time; while it runs only the latest target waits, so fast hover
+    /// scrubbing never queues up stale frames.
+    private func chaseSeek(to time: CMTime) {
+        guard !seekInFlight else {
+            pendingSeek = time
+            return
+        }
+        seekInFlight = true
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.seekInFlight = false
+                if let next = self.pendingSeek {
+                    self.pendingSeek = nil
+                    self.chaseSeek(to: next)
+                }
+            }
+        }
     }
 
     /// Hover scrubbing while paused (the head stays where it is).

@@ -74,6 +74,8 @@ struct TranscriptEditPanel: View {
 // MARK: - Editable body
 
 struct TranscriptTextEditor: NSViewRepresentable {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var showDeletedText: Bool
     var showHiddenText: Bool

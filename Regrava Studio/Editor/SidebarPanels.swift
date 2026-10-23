@@ -627,6 +627,8 @@ struct SliceInspector: View {
 // MARK: - Mask inspector
 
 struct MaskInspector: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var maskID: UUID
 
@@ -888,6 +890,8 @@ enum ClickSoundPreview {
 }
 
 struct ClickSoundField: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     @State private var isPreviewBusy = false
 

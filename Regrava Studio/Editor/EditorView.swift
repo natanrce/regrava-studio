@@ -14,6 +14,10 @@ struct EditorView: View {
     }
 
     var body: some View {
+        content.environmentObject(editor.clock)
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             Topbar(editor: editor, exports: exports)
             VStack(spacing: 0) {
@@ -39,7 +43,7 @@ struct EditorView: View {
                 // The preview row takes the remaining height; the timeline stays at the bottom.
                 .frame(maxHeight: .infinity)
                 if editor.layoutType.showsTimeline {
-                    EditorTimeline(editor: editor)
+                    EditorTimeline(editor: editor, viewport: editor.viewport)
                         .padding(.top, 4)
                 }
             }
@@ -435,15 +439,7 @@ private struct PlaybackBar: View {
                     Rectangle().fill(Theme.Colors.backgroundAccent).frame(width: 1, height: 24)
                     SpeedButton(editor: editor)
                     if editor.layoutType.showsTimeline {
-                        RSSlider(
-                            value: Binding(get: { editor.visibleDurationMs }, set: { editor.setVisibleDuration($0, anchorMs: editor.currentTimeMs) }),
-                            range: editor.minVisibleDurationMs...editor.maxVisibleDurationMs,
-                            step: 1,
-                            inverted: true,
-                            isSecondary: true
-                        )
-                        .frame(minWidth: 72, maxWidth: 140)
-                        .tooltip(Self.zoomTooltip(editor.visibleDurationMs))
+                        TimelineZoomSlider(editor: editor, viewport: editor.viewport)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -459,8 +455,28 @@ private struct PlaybackBar: View {
     }
 }
 
+/// The timeline zoom slider, the only toolbar part that follows the viewport.
+private struct TimelineZoomSlider: View {
+    let editor: EditorModel
+    @ObservedObject var viewport: TimelineViewport
+
+    var body: some View {
+        RSSlider(
+            value: Binding(get: { viewport.visibleDurationMs }, set: { editor.setVisibleDuration($0, anchorMs: editor.currentTimeMs) }),
+            range: editor.minVisibleDurationMs...editor.maxVisibleDurationMs,
+            step: 1,
+            inverted: true,
+            isSecondary: true
+        )
+        .frame(minWidth: 72, maxWidth: 140)
+        .tooltip(PlaybackBar.zoomTooltip(viewport.visibleDurationMs))
+    }
+}
+
 /// M:SS.FF / MM:SS.FF / HH:MM:SS.FF; click copies.
 private struct TimeLabel: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     let editor: EditorModel
     var ms: Double
     var duration: Double
@@ -537,6 +553,8 @@ private struct SpeedButton: View {
 // MARK: - Mask overlays
 
 private struct MaskOverlays: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var scale: CGFloat
     @State private var drawing: CGRect?

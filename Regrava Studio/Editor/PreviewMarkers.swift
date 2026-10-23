@@ -6,6 +6,8 @@ import SwiftUI
 /// lights the area with a sheen that follows the pointer and a rim; clicking opens its
 /// settings with a short toast.
 struct PreviewMarkers: View {
+    /// Redraws with the playhead (`EditorModel.clock`).
+    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var scale: CGFloat
 
