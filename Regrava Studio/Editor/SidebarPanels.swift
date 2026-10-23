@@ -709,9 +709,10 @@ struct AudioPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if recording.hasMicrophone {
-                SidebarSection {
-                    NamedField(name: "Microphone") {
-                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                // A titled section: the title in tertiary label type.
+                SidebarSection(title: "Microphone") {
+                    Group {
+                        VStack(alignment: .leading, spacing: Theme.gap(3)) {
                             ToggleRow(title: "Mute microphone", isOn: editor.binding(\.audio.muteMicrophone))
                             // Shown when not muted and more than one mode is supported.
                             let presets = EditorModel.supportedMicrophonePresets
@@ -747,9 +748,10 @@ struct AudioPanel: View {
                 }
             }
             if recording.hasSystemAudio {
-                SidebarSection {
-                    NamedField(name: "System audio") {
-                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                // A titled section: the title in tertiary label type.
+                SidebarSection(title: "System audio") {
+                    Group {
+                        VStack(alignment: .leading, spacing: Theme.gap(3)) {
                             ToggleRow(title: "Mute system audio", isOn: editor.binding(\.audio.muteSystemAudio))
                             if audio.muteSystemAudio {
                                 Callout(icon: "speaker.slash.fill", message: "System audio is muted.")
@@ -759,9 +761,10 @@ struct AudioPanel: View {
                 }
             }
             if recording.hasExternalDeviceAudio {
-                SidebarSection {
-                    NamedField(name: "External device audio") {
-                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                // A titled section: the title in tertiary label type.
+                SidebarSection(title: "External device audio") {
+                    Group {
+                        VStack(alignment: .leading, spacing: Theme.gap(3)) {
                             ToggleRow(title: "Mute external device audio", isOn: editor.binding(\.audio.muteExternalDeviceAudio))
                             if audio.muteExternalDeviceAudio {
                                 Callout(icon: "speaker.slash.fill", message: "External device audio is muted.")
@@ -770,8 +773,8 @@ struct AudioPanel: View {
                     }
                 }
             }
-            SidebarSection(showsDivider: false) {
-                NamedField(name: "Background audio") {
+            SidebarSection(title: "Background audio", showsDivider: false) {
+                Group {
                     VStack(alignment: .leading, spacing: Theme.gap(2)) {
                         SegmentedPicker(
                             options: BackgroundAudioCategory.allCases,
@@ -805,7 +808,8 @@ struct AudioPanel: View {
                             RSButton(
                                 title: (preview.isPlaying ? "Stop " : "Play ") + BackgroundAudioLibrary.displayName(name, maxLength: 20),
                                 icon: preview.isPlaying ? "stop.circle" : "play.circle",
-                                kind: .subtle
+                                kind: .subtle,
+                                isWide: true
                             ) { preview.toggle(url: assetURL(name), volume: audio.backgroundAudioVolume) }
                             ToggleRow(title: "Mute background audio", isOn: editor.binding(\.audio.muteBackgroundAudio))
                             if !audio.muteBackgroundAudio {
@@ -825,9 +829,9 @@ struct AudioPanel: View {
                                     resetValue: AudioConfig().backgroundAudioVolume
                                 )
                             }
-                            RSButton(title: "Remove background audio", icon: "hifispeaker.badge.minus", kind: .secondary) { remove(name) }
+                            RSButton(title: "Remove background audio", icon: "hifispeaker.badge.minus", kind: .secondary, isWide: true) { remove(name) }
                         } else {
-                            RSButton(title: "Add background audio", icon: "hifispeaker.badge.plus", kind: .subtle) { addFromFile() }
+                            RSButton(title: "Add background audio", icon: "hifispeaker.badge.plus", kind: .subtle, isWide: true) { addFromFile() }
                         }
                     }
                 }

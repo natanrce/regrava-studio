@@ -161,7 +161,8 @@ final class EditorModel: ObservableObject {
 
     /// Modes the picker offers: the speech-model ones only where those models run.
     static var supportedMicrophonePresets: [MicrophoneAudioPreset] {
-        [.channelFix, .voice, .loud] + (SpeechModels.isAvailable ? [.noiseReduction, .podcast] : [])
+        // The enum order: Standard, Loud, Noise reduction, Podcast, Off.
+        [.voice, .loud] + (SpeechModels.isAvailable ? [.noiseReduction, .podcast] : []) + [.channelFix]
     }
 
     /// Muted: every render pauses. Otherwise Standard always renders first (the fallback), then

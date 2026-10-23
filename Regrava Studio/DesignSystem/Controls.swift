@@ -303,11 +303,13 @@ private struct SegmentOption: View {
                 if let icon { Image(systemName: icon).font(.system(size: 14)) }
                 Text(title).font(Theme.Typo.controlCopy).lineLimit(1)
                 if let badge {
+                    // A `subtleBg` chip: primary text on a faint primary fill.
                     Text(badge)
-                        .font(Theme.Typo.label)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Theme.Colors.hover))
+                        .font(Theme.Typo.controlCopy)
+                        .foregroundStyle(Theme.Colors.primaryActiveText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.primary.opacity(0.18)))
                 }
             }
             // Lifted 2 px over the bar while there is one (`--progress-lift`).
@@ -315,21 +317,28 @@ private struct SegmentOption: View {
             .padding(.horizontal, 12)
             .frame(maxWidth: isWide ? .infinity : nil)
             .frame(height: height)
+            // `lighterBg.interactive`, the active one in its hover shade with a 1 px
+            // primary.activeText @ 0.33 outline.
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Theme.Colors.active : hovered ? Theme.Colors.hover : Theme.Colors.lighterBg)
+                    .fill(isSelected || hovered ? Theme.Colors.hover : Theme.Colors.lighterBg)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isSelected ? Color.white.opacity(0.25) : .clear, lineWidth: 1)
+                    .strokeBorder(isSelected ? Theme.Colors.primaryActiveText.opacity(0.33) : .clear, lineWidth: 1)
             )
             .overlay(alignment: .bottom) {
-                if let progress { ProgressStrip(progress: progress, isPaused: isPaused).padding(.horizontal, 8).padding(.bottom, 5) }
+                if let progress {
+                    ProgressStrip(progress: progress, isPaused: isPaused)
+                        .foregroundStyle(isSelected ? Theme.Colors.primaryActiveText.opacity(0.7) : Theme.Colors.tertiary)
+                        .padding(.horizontal, 8).padding(.bottom, 5)
+                }
             }
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Theme.Colors.text.opacity(isSelected ? 1 : Theme.secondaryOpacity))
+        // Readable text on the background: white for every option.
+        .foregroundStyle(Theme.Colors.text)
         .disabled(isDisabled)
         .opacity(isDisabled ? Theme.disabledOpacity : 1)
         .onHover { hovered = $0 }
@@ -345,9 +354,9 @@ private struct ProgressStrip: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(isPaused ? 0 : 0.15))
+                Capsule().fill(.foreground.opacity(isPaused ? 0 : 0.15))
                 Capsule()
-                    .fill(Color.primary)
+                    .fill(.foreground)
                     .frame(width: max(2, geometry.size.width * min(max(progress, 0), 1)))
                     .overlay {
                         if !isPaused {
