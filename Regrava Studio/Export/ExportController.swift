@@ -32,6 +32,13 @@ final class ExportController: ObservableObject {
             .appendingPathComponent("Clipboard Exports", isDirectory: true)
     }
 
+    /// "Show previous clipboard exports" / "Open recent Clipboard exports".
+    static func revealClipboardExports() {
+        let folder = clipboardExportsFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
+
     func openPicker() {
         guard !isExporting else { return }
         isPickerOpen = true

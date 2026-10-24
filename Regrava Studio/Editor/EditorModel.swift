@@ -1259,14 +1259,65 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// A recording opened right after it was made (`newRecording`), until it is saved.
+    var isNewRecording = false
+
     func saveNow() {
         do {
+            project.lastSavedAt = Date()
             try ProjectStore.save(project, to: bundleURL)
             isDirty = false
             writePreviewImage()
         } catch {
             errorMessage = "Could not save: \(error.localizedDescription)"
         }
+    }
+
+    /// "Save" ⌘S.
+    func saveFromMenu() {
+        saveNow()
+        showToast("Project saved", durationMs: 2000)
+    }
+
+    /// "Save as..." ⇧⌘S: copies the project there and keeps editing the copy.
+    func saveAs() {
+        let panel = NSSavePanel()
+        panel.title = "Save project as..."
+        panel.message = "Pick location to save project"
+        panel.nameFieldStringValue = "\(projectName).\(ProjectStore.fileExtension)"
+        panel.directoryURL = bundleURL.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let ext = ProjectStore.fileExtension
+        guard url.pathExtension == ext else {
+            Dialogs.info(title: "Invalid file name", message: "File extension must be .\(ext)")
+            return
+        }
+        guard url.lastPathComponent != ".\(ext)", !url.deletingPathExtension().lastPathComponent.isEmpty else {
+            Dialogs.info(title: "Invalid file name", message: "File name cannot be empty")
+            return
+        }
+        do {
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+            try FileManager.default.copyItem(at: bundleURL, to: url)
+            bundleURL = url
+            saveNow()
+            objectWillChange.send()
+            AppController.shared.editorRenamed(self)
+            showToast("Project saved", durationMs: 2000)
+            Task { await rebuildComposition() }
+        } catch {
+            Dialogs.error("Could not save the project: \(error.localizedDescription)")
+        }
+    }
+
+    /// "Close without saving".
+    func discardChanges() { isDirty = false }
+
+    /// "Delete and close": trashed without asking again.
+    func trashProject() {
+        pause()
+        isDirty = false
+        try? FileManager.default.trashItem(at: bundleURL, resultingItemURL: nil)
     }
 
     /// The styled frame at the playhead, for the Recent Projects cards (`previewImagePath`).
@@ -1323,16 +1374,46 @@ final class EditorModel: ObservableObject {
         exports.openPicker()
     }
 
-    /// "Copy current frame as image".
-    func copyCurrentFrame() {
-        guard let composition = player.currentItem?.videoComposition, let asset = player.currentItem?.asset else { return }
+    /// "Quick export to clipboard" ⌥⌘C / "Quick export to file..." ⌥⌘S, with the quick export settings.
+    func quickExport(_ target: ExportTarget) {
+        guard !exports.isExporting else { return }
+        pause()
+        exports.start(project: project, videoURL: videoURL, projectName: projectName, settings: preferences.widgetExportSettings.current, target: target)
+    }
+
+    /// "Export current frame as image...": the styled frame at 2160 px height as PNG,
+    /// "<name> - Frame <n>", then shown in Finder.
+    func exportCurrentFrame() {
+        let frame = Int((currentTimeMs / 1000 * 60).rounded(.down))
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "\(projectName) - Frame \(frame).png"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            guard let image = await frameImage(height: 2160) else { return }
+            let rep = NSBitmapImageRep(cgImage: image)
+            guard let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: url)) != nil else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    /// The styled frame at the playhead, rendered at `height` px.
+    private func frameImage(height: Double) async -> CGImage? {
+        guard let asset = player.currentItem?.asset else { return nil }
+        let canvas = project.canvasSize
+        let output = Size2(width: (height * canvas.aspectRatio / 2).rounded() * 2, height: height)
+        guard let configuration = try? await CompositionFactory.configuration(asset: asset, state: renderState, canvas: canvas, outputSize: output) else { return nil }
         let generator = AVAssetImageGenerator(asset: asset)
-        generator.videoComposition = composition
+        generator.videoComposition = AVVideoComposition(configuration: configuration)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        let time = CMTime(seconds: currentTimeMs / 1000, preferredTimescale: 600)
+        return try? await generator.image(at: CMTime(seconds: currentTimeMs / 1000, preferredTimescale: 600)).image
+    }
+
+    /// "Copy current frame as image", also at 2160 px.
+    func copyCurrentFrame() {
         Task {
-            guard let image = try? await generator.image(at: time).image else { return }
+            guard let image = await frameImage(height: 2160) else { return }
             let nsImage = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects([nsImage])

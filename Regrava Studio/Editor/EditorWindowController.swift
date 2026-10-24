@@ -79,19 +79,22 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// Unsaved changes with autosave off: "Save and close" / "Cancel" / "Close without saving".
+    /// `closeConfirmation`: a new recording never saved asks to save or delete it; unsaved
+    /// changes ask to save or close without saving, whatever autosave does.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard model.isDirty, !Preferences.shared.autoSaveProject else { return true }
+        let isNew = model.isNewRecording && model.project.lastSavedAt == nil
+        guard isNew || model.isDirty else { return true }
         let alert = NSAlert()
-        alert.messageText = "Your project has unsaved changes. Are you sure you want to close?"
+        alert.messageText = isNew ? "Do you want to save your project before closing or delete it?" : "Your project has unsaved changes. Are you sure you want to close?"
         alert.addButton(withTitle: "Save and close")
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Close without saving")
+        alert.addButton(withTitle: isNew ? "Delete and close" : "Close without saving")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             model.saveNow()
             return true
         case .alertThirdButtonReturn:
+            if isNew { model.trashProject() } else { model.discardChanges() }
             return true
         default:
             return false
@@ -99,7 +102,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if model.isDirty && Preferences.shared.autoSaveProject { model.saveNow() } else { model.writePreviewImage() }
+        model.writePreviewImage()
         model.tearDown()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
@@ -164,6 +167,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         default:
             switch (key, flags) {
             case ("k", [.command]): editor.isCommandMenuOpen.toggle()
+            case (let digit, [.command]) where digit.count == 1 && "1234567890".contains(digit):
+                // Sidebar panels ⌘1…⌘0, when enabled.
+                guard let entry = editor.railEntries.first(where: { String($0.key.character) == digit }), entry.disabledTooltip == nil else { return false }
+                editor.openSidebar(entry.root)
             case ("h", []):
                 // Registered by the Camera Layout panel while it is shown.
                 guard editor.sidebarRoot == .cameraLayout, editor.sidebarItem == nil, editor.layoutType.showsSidebar,

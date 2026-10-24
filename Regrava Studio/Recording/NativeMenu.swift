@@ -164,6 +164,8 @@ final class ClosureMenuItem: NSMenuItem {
 
     /// With auto-enabling menus: whether the item can run now.
     var isAvailable: (() -> Bool)?
+    /// Hidden, not greyed out, while unavailable.
+    var hidesWhenUnavailable = false
 }
 
 extension ClosureMenuItem: NSMenuItemValidation {

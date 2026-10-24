@@ -281,6 +281,8 @@ public struct Project: Codable, Hashable, Sendable {
     /// Start times of "Speed up typing" suggestions that were applied or removed
     /// (`resolved-typing-speed-increase-suggestions-v2`).
     public var resolvedTypingSuggestionsMs: [Double] = []
+    /// Set on every save (`lastSavedAt`); a new recording never saved has none.
+    public var lastSavedAt: Date?
 
     public init(
         recording: RecordingInfo,
@@ -326,6 +328,7 @@ public struct Project: Codable, Hashable, Sendable {
         audio = c.value(.audio, default: AudioConfig())
         device = c.value(.device, default: DeviceConfig())
         crop = c.value(.crop, default: ScreenCropConfig())
+        lastSavedAt = c.value(.lastSavedAt, default: nil)
         camera = c.value(.camera, default: CameraConfig())
         captions = c.value(.captions, default: CaptionsConfig())
         defaultLayout = c.value(.defaultLayout, default: DefaultCameraLayout())

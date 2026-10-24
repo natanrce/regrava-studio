@@ -53,16 +53,22 @@ final class AppController {
 
     // MARK: Projects
 
+    /// The editor whose window is in front, for the menu bar (none when another window is).
+    var focusedEditor: EditorWindowController? {
+        editors.first { $0.window?.isKeyWindow == true || $0.window?.isMainWindow == true }
+    }
+
     var keyEditor: EditorWindowController? {
         editors.first { $0.window?.isKeyWindow == true } ?? editors.last
     }
 
-    func openProject(bundle: URL, project: Project, afterRecording action: AfterRecordingAction? = nil) {
+    func openProject(bundle: URL, project: Project, afterRecording action: AfterRecordingAction? = nil, isNewRecording: Bool = false) {
         if let existing = editors.first(where: { $0.model.bundleURL == bundle }) {
             existing.showWindow(nil)
             return
         }
         let editor = EditorWindowController(bundleURL: bundle, project: project)
+        editor.model.isNewRecording = isNewRecording
         editors.append(editor)
         rememberRecent(bundle)
         editor.showWindow(nil)

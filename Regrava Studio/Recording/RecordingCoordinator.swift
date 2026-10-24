@@ -590,9 +590,9 @@ final class RecordingCoordinator: ObservableObject {
         }
         if problem != nil {
             Dialogs.info(title: "Recording successfully recovered after error", message: "The capture hit an error mid-recording, but your footage was recovered and will open now.")
-            AppController.shared.openProject(bundle: made.bundle, project: made.project)
+            AppController.shared.openProject(bundle: made.bundle, project: made.project, isNewRecording: true)
         } else {
-            AppController.shared.openProject(bundle: made.bundle, project: made.project, afterRecording: preferences.actionAfterRecording)
+            AppController.shared.openProject(bundle: made.bundle, project: made.project, afterRecording: preferences.actionAfterRecording, isNewRecording: true)
         }
     }
 
