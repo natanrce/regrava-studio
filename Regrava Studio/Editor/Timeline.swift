@@ -529,7 +529,11 @@ private struct SliceItem: View {
         .frame(width: width, height: 48)
         .opacity(editor.openSliceID != nil && !isOpen ? 0.6 : 1)
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .onHover { hovered = $0 }
+        .onHover { inside in
+            hovered = inside
+            // The hovered clip is a shortcut target.
+            if inside { editor.hoveredSliceID = slice.id } else if editor.hoveredSliceID == slice.id { editor.hoveredSliceID = nil }
+        }
         .onTapGesture {
             if editor.isSplitToolActive, let hoverPlaybackMs = hoverPlaybackMs() {
                 editor.splitSlice(atPlayback: hoverPlaybackMs)

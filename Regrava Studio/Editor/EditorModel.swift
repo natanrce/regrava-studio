@@ -84,6 +84,10 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomIDs: Set<UUID> = []
     /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
     var itemClipboard: ItemClipboard?
+    /// The clip under the pointer (not published: only shortcuts read it).
+    var hoveredSliceID: UUID?
+    /// The clip a shortcut acts on: the open one, else the hovered one.
+    var sliceTarget: UUID? { openSliceID ?? hoveredSliceID }
     /// Microphone renders under way, 0…1 (`media.audioRenderState` partial).
     @Published var microphoneRenderProgress: [MicrophoneAudioPreset: Double] = [:]
     /// Renders paused by re-clicking their option.
@@ -1136,8 +1140,32 @@ final class EditorModel: ObservableObject {
         change { $0.mergeSlice(id, with: neighbour) }
     }
 
+    /// Removes a clip and the items it left entirely cut out; the playhead stays on the same
+    /// recording frame (`stickyAction`).
     func removeSlice(_ id: UUID) {
-        change { $0.removeSlice(id) }
+        stickyPlayhead {
+            change {
+                $0.removeSlice(id)
+                $0.removeNonPresentTimelineItems()
+            }
+        }
+    }
+
+    /// X "Remove slice till previous cut": the clip before the one under the playhead. False
+    /// when there is none.
+    @discardableResult
+    func rippleRemoveSlice() -> Bool {
+        guard project.slices.count > 1, let index = project.sliceIndex(atSource: currentSourceTimeMs), index > 0 else { return false }
+        removeSlice(project.slices[index - 1].id)
+        return true
+    }
+
+    /// `playback.stickyAction()`: keeps the playhead on its recording moment across a
+    /// change of the timing.
+    func stickyPlayhead(_ body: () -> Void) {
+        let source = project.resolver.playbackToSource(currentTimeMs) + 0.0001
+        body()
+        seek(to: project.resolver.sourceToPlayback(source))
     }
 
     func removeSliceTrim(_ id: UUID, edge: Project.SliceEdge? = nil) {

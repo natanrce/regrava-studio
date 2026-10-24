@@ -204,6 +204,28 @@ public extension Project {
     /// Removes a slice (never the last one). With `closeGap`, the previous slice is extended up
     /// to the next one (`remove(true)`).
     @discardableResult
+    /// Zooms, layouts and masks entirely cut out are removed.
+    mutating func removeNonPresentTimelineItems() {
+        let resolver = self.resolver
+        func gone(_ start: Double, _ end: Double) -> Bool { !resolver.isSourceTimePresent(start) && !resolver.isSourceTimePresent(end) }
+        zooms.removeAll { gone($0.startMs, $0.endMs) }
+        cameraLayouts.removeAll { gone($0.startMs, $0.endMs) }
+        masks.removeAll { gone($0.startMs, $0.endMs) }
+    }
+
+    /// `slices.findAt(sourceMs)`: the inclusive binary search, so a time on a shared edge finds
+    /// the same slice.
+    func sliceIndex(atSource sourceMs: Double) -> Int? {
+        var low = 0, high = slices.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            if sourceMs < slices[mid].sourceStartMs { high = mid - 1 }
+            else if sourceMs <= slices[mid].sourceEndMs { return mid }
+            else { low = mid + 1 }
+        }
+        return nil
+    }
+
     mutating func removeSlice(_ id: UUID, closeGap: Bool = false) -> Bool {
         guard slices.count > 1, let i = slices.firstIndex(where: { $0.id == id }) else { return false }
         let previous = i > 0 ? slices[i - 1].id : nil

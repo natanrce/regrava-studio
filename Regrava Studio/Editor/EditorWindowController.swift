@@ -190,6 +190,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                     editor.playToward(1)
                 }
             case ("j", []): editor.playToward(-1) // "Play backward or increase speed"
+            case ("x", []): return editor.rippleRemoveSlice() // "Remove slice till previous cut"
             case ("k", []): editor.togglePlay() // "Pause" / "Play", resets the speed
             case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil,
                  ("3", []) where editor.openLayoutID != nil, ("4", []) where editor.openLayoutID != nil:
@@ -204,9 +205,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 else if let zoom = editor.selectedZoomIDs.first ?? openZoom { editor.copyZoom(zoom) }
                 else if let layout = editor.openLayoutID { editor.copyLayout(layout) }
                 else if let mask = editor.openMaskID { editor.copyMask(mask) }
+                else if let slice = editor.sliceTarget { editor.copySlice(slice) }
                 else { editor.copyCurrentFrame() }
             case ("x", [.command]):
-                // …and Cut does nothing.
+                // A clip is checked first and cannot be cut; several zooms neither.
+                if editor.sliceTarget != nil { editor.showToast("Slice cannot be cut"); return true }
                 if editor.selectedZoomIDs.count > 1 { return true }
                 else if let zoom = editor.selectedZoomIDs.first ?? openZoom { editor.cutZoom(zoom) }
                 else if let layout = editor.openLayoutID { editor.cutLayout(layout) }

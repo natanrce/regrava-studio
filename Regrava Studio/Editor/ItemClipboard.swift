@@ -7,6 +7,8 @@ enum ItemClipboard {
     case zoom(ZoomRange)
     case layout(CameraLayoutRange)
     case mask(MaskRange)
+    /// A clip's speed and microphone volume (pasted onto the clip under the playhead).
+    case slice(id: UUID, timeScale: Double, volume: Double)
 }
 
 extension EditorModel {
@@ -26,6 +28,12 @@ extension EditorModel {
         guard let mask = project.masks.first(where: { $0.id == id }) else { return }
         itemClipboard = .mask(mask)
         showToast("Mask copied")
+    }
+
+    func copySlice(_ id: UUID) {
+        guard let slice = project.slices.first(where: { $0.id == id }) else { return }
+        itemClipboard = .slice(id: id, timeScale: slice.timeScale, volume: slice.volume)
+        showToast("Slice settings copied")
     }
 
     /// "Cut to clipboard": copies, then removes, with no toast.
@@ -53,6 +61,17 @@ extension EditorModel {
         guard let clipboard = itemClipboard else { return false }
         let start = currentSourceTimeMs
         switch clipboard {
+        case .slice(let id, let timeScale, let volume):
+            // The live clip when it still exists, onto the clip under the playhead unless
+            // it is that same clip.
+            let live = project.slices.first { $0.id == id }
+            guard let index = project.sliceIndex(atSource: start), project.slices[index].id != id else { return true }
+            let speed = live?.timeScale ?? timeScale, micVolume = live?.volume ?? volume
+            change {
+                $0.slices[index].timeScale = speed
+                $0.slices[index].volume = micVolume
+            }
+            showToast("Slice settings pasted")
         case .zoom(let copied):
             if let target = openZoomID {
                 updateZoom(target) {

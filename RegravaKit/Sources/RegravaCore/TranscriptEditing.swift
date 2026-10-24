@@ -278,11 +278,7 @@ public enum TranscriptEditing {
 
     /// `removeNonPresentTimelineItmes`: zooms, layouts and masks entirely cut out are removed.
     static func removeNonPresentItems(_ project: inout Project) {
-        let resolver = project.resolver
-        func gone(_ start: Double, _ end: Double) -> Bool { !resolver.isSourceTimePresent(start) && !resolver.isSourceTimePresent(end) }
-        project.zooms.removeAll { gone($0.startMs, $0.endMs) }
-        project.cameraLayouts.removeAll { gone($0.startMs, $0.endMs) }
-        project.masks.removeAll { gone($0.startMs, $0.endMs) }
+        project.removeNonPresentTimelineItems()
     }
 
     public enum DeleteResult: Equatable { case nothing, wouldRemoveAll, removed(Double) }
