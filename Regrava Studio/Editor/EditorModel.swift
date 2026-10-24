@@ -1085,6 +1085,23 @@ final class EditorModel: ObservableObject {
         toast = "Highlight mask opacity applied to all masks"
     }
 
+    /// Split-tool click: the length check uses the pointer's time, the cut the beam's, which snaps
+    /// to the playhead within 100 ms. Nil after the "too short" toast.
+    func beamSplitSource(startMs: Double, endMs: Double, minimumMs: Double, hoverPlaybackMs: Double) -> Double? {
+        let resolver = project.resolver
+        let source = resolver.playbackToSource(hoverPlaybackMs)
+        guard min(abs(startMs - source), abs(endMs - source)) >= minimumMs else {
+            showToast("Can't cut item shorter than \(String(format: "%.1f", minimumMs / 1000))s", durationMs: 1000)
+            return nil
+        }
+        return resolver.playbackToSource(beamPlaybackMs(hoverPlaybackMs))
+    }
+
+    /// Where the split beam is drawn: the playhead when the pointer is within 100 ms of it.
+    func beamPlaybackMs(_ hoverPlaybackMs: Double) -> Double {
+        abs(hoverPlaybackMs - currentTimeMs) < 100 ? currentTimeMs : hoverPlaybackMs
+    }
+
     /// Recording time at the playhead.
     var currentSourceTimeMs: Double { project.resolver.playbackToSource(currentTimeMs) }
 

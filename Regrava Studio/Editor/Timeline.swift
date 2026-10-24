@@ -49,14 +49,18 @@ struct EditorTimeline: View {
                     Ruler(geometry: geo, duration: editor.durationMs).frame(height: 20)
                     VStack(alignment: .leading, spacing: 12) {
                         ClipTrack(editor: editor, waveforms: editor.waveforms, geometry: geo, hover: hover)
+                            .modifier(SplitWiggle(active: editor.isSplitToolActive))
                         ZoomTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
+                            .modifier(SplitWiggle(active: editor.isSplitToolActive))
                         // Camera layouts track, only once a layout exists.
                         if !editor.project.cameraLayouts.isEmpty {
                             LayoutTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
+                            .modifier(SplitWiggle(active: editor.isSplitToolActive))
                         }
                         // Masks track, only once a mask exists.
                         if !editor.project.masks.isEmpty {
                             MaskTrack(editor: editor, geometry: geo, hoverTimeMs: { [hover] in hover.x.map { geo.sourceTime($0) } })
+                            .modifier(SplitWiggle(active: editor.isSplitToolActive))
                         }
                         // Shortcuts track, last, while the Keyboard Shortcuts panel is open.
                         if editor.showsShortcutsTrack {
@@ -139,6 +143,19 @@ struct EditorTimeline: View {
                 editor.clampScroll()
             }
             return nil
+        }
+    }
+}
+
+/// While the split tool is on, each track bobs ±1 px, 0.7 s ease-in-out, repeating.
+private struct SplitWiggle: ViewModifier {
+    var active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.phaseAnimator([-1.0, 1.0]) { view, y in view.offset(y: y) } animation: { _ in .easeInOut(duration: 0.35) }
+        } else {
+            content
         }
     }
 }
@@ -379,7 +396,7 @@ private struct HoverNeedle: View {
     var body: some View {
         if let x = hover.x {
             if editor.isSplitToolActive {
-                SplitBeam(height: height).offset(x: x).allowsHitTesting(false)
+                SplitBeam(height: height).offset(x: geometry.x(editor.beamPlaybackMs(geometry.time(x)))).allowsHitTesting(false)
             } else if !editor.isPlaying {
                 Playhead(color: Playhead.secondaryColor, height: height, isPrimary: false)
                     .offset(x: x, y: Playhead.drop(distanceMs: abs(geometry.time(x) - clock.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
@@ -536,7 +553,9 @@ private struct SliceItem: View {
         }
         .onTapGesture {
             if editor.isSplitToolActive, let hoverPlaybackMs = hoverPlaybackMs() {
-                editor.splitSlice(atPlayback: hoverPlaybackMs)
+                if let source = editor.beamSplitSource(startMs: slice.sourceStartMs, endMs: slice.sourceEndMs, minimumMs: Slice.minimumDurationMs, hoverPlaybackMs: hoverPlaybackMs) {
+                    editor.splitSlice(atPlayback: editor.project.resolver.sourceToPlayback(source))
+                }
             } else {
                 editor.openSlice(slice.id)
             }
@@ -934,7 +953,7 @@ private struct ZoomItem: View {
 
     private func tap() {
         if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
-            editor.splitZoom(zoom.id, at: hoverTimeMs)
+            if let source = editor.beamSplitSource(startMs: zoom.startMs, endMs: zoom.endMs, minimumMs: ZoomRange.minimumDurationMs, hoverPlaybackMs: editor.project.resolver.sourceToPlayback(hoverTimeMs)) { editor.splitZoom(zoom.id, at: source) }
             return
         }
         if NSEvent.modifierFlags.contains(.command) {
@@ -1116,7 +1135,7 @@ private struct MaskItem: View {
             )
             .simultaneousGesture(TapGesture().onEnded {
                 if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
-                    editor.splitMask(mask.id, at: hoverTimeMs)
+                    if let source = editor.beamSplitSource(startMs: mask.startMs, endMs: mask.endMs, minimumMs: MaskRange.minimumDurationMs, hoverPlaybackMs: editor.project.resolver.sourceToPlayback(hoverTimeMs)) { editor.splitMask(mask.id, at: source) }
                 } else {
                     editor.openMask(mask.id)
                 }
@@ -1292,7 +1311,7 @@ private struct LayoutItem: View {
             )
             .simultaneousGesture(TapGesture().onEnded {
                 if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
-                    editor.splitLayout(layout.id, at: hoverTimeMs)
+                    if let source = editor.beamSplitSource(startMs: layout.startMs, endMs: layout.endMs, minimumMs: CameraLayoutRange.minimumDurationMs, hoverPlaybackMs: editor.project.resolver.sourceToPlayback(hoverTimeMs)) { editor.splitLayout(layout.id, at: source) }
                 } else {
                     editor.openLayout(layout.id)
                 }
