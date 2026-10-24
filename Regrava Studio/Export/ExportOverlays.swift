@@ -148,7 +148,7 @@ struct ExportStatusOverlay: View {
             VStack(spacing: Theme.gap(4)) {
                 VStack(spacing: Theme.gap(1)) {
                     HStack(spacing: 6) {
-                        Text("Exporting video • \(Self.percent(job.progress, elapsed: elapsed))")
+                        Text("\(job.error != nil ? "Export failed" : "Exporting video") • \(Self.percent(job.progress, elapsed: elapsed))")
                             .font(Theme.Typo.title)
                             .monospacedDigit()
                         if let path = job.outputPath {

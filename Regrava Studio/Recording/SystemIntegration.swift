@@ -52,7 +52,7 @@ final class GlobalHotKeys {
 /// the recording. The icon is an SF Symbol.
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private weak var coordinator: RecordingCoordinator?
 
     init(coordinator: RecordingCoordinator) {
@@ -73,6 +73,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.delegate = self
             item.menu = menu
         }
+    }
+
+    /// Text after the icon (the export progress), nil for none.
+    func setTitle(_ title: String?) {
+        item.button?.title = title ?? ""
+        item.button?.imagePosition = title == nil ? .imageOnly : .imageLeading
     }
 
     @objc private func clicked() {

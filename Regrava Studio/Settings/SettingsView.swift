@@ -213,7 +213,7 @@ private struct EditingSettings: View {
             )
             FolderRow(
                 title: "Save presets in",
-                path: preferences.presetsFolderPath ?? "Not set",
+                path: preferences.presetsFolderPath ?? PresetStore.defaultFolder.path,
                 message: "Select a folder to save your presets"
             ) { preferences.presetsFolderPath = $0 }
         }

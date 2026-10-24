@@ -92,18 +92,31 @@ final class ExportController: ObservableObject {
         }
     }
 
+    /// The editor's toast (errors before the export starts).
+    var onToast: ((String) -> Void)?
+
     private func update(progress: Double) {
         guard job != nil else { return }
         job?.progress = progress
         dockProgress.show(progress)
+        // " NN%" beside the menu bar item while exporting.
+        AppController.shared.statusItem?.setTitle(" \(Int((progress * 100).rounded(.down)))%")
     }
 
+    /// A failure before any frame is an initialization error (a toast); later ones keep the
+    /// progress screen as "Export failed" until it is stopped.
     private func finish(error: String?) {
         dockProgress.hide()
+        AppController.shared.statusItem?.setTitle(nil)
         task = nil
         if let error {
-            job?.error = error
-            Dialogs.error("Something went wrong when exporting (\(error))")
+            if (job?.progress ?? 0) <= 0 {
+                job = nil
+                onToast?("Something went wrong when initializing export (\(error))")
+            } else {
+                job?.error = error
+            }
+            return
         }
         job = nil
     }
@@ -111,6 +124,10 @@ final class ExportController: ObservableObject {
     /// "Stop export" with the confirmation.
     func requestStop() {
         guard isExporting else { return }
+        if job?.error != nil {
+            job = nil
+            return
+        }
         if Dialogs.confirm(
             title: "Stop export",
             message: "Are you sure you want to stop current export?",

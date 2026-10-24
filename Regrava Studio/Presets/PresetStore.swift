@@ -19,12 +19,25 @@ final class PresetStore: ObservableObject {
 
     static let configFileName = "preset.json"
 
-    var folder: URL {
+    /// Where presets live when "Save presets in" is not set.
+    static var defaultFolder: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Regrava Studio/Presets", isDirectory: true)
     }
 
-    private init() { reload() }
+    /// "Save presets in" (`presetsFolderPath`), else the default folder.
+    var folder: URL {
+        Preferences.shared.presetsFolderPath.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? Self.defaultFolder
+    }
+
+    private var folderObserver: AnyCancellable?
+
+    private init() {
+        reload()
+        folderObserver = Preferences.shared.$presetsFolderPath.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.reload() }
+        }
+    }
 
     func reload() {
         do {

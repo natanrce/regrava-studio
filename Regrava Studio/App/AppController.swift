@@ -11,7 +11,7 @@ final class AppController {
 
     let recording = RecordingCoordinator()
     private(set) var editors: [EditorWindowController] = []
-    private var statusItem: StatusItemController?
+    private(set) var statusItem: StatusItemController?
     private var cancellables: Set<AnyCancellable> = []
     private let preferences = Preferences.shared
 

@@ -155,6 +155,7 @@ final class EditorModel: ObservableObject {
     init(bundleURL: URL, project: Project) {
         self.bundleURL = bundleURL
         self.project = project
+        exports.onToast = { [weak self] in self?.showToast($0) }
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
         renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
         transcript = SessionTranscript.load(bundle: bundleURL)
