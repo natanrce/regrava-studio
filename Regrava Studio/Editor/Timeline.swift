@@ -450,6 +450,15 @@ private struct ClipTrack: View {
             ForEach(editor.project.pendingTypingSuggestions, id: \.startMs) { range in
                 TypingSuggestionChip(editor: editor, range: range, geometry: geometry)
             }
+            // Resume points: where each session after a pause starts, under the flags.
+            ForEach(editor.project.recording.sessionStartsMs.filter { geometry.resolver.isSourceTimePresent($0) }, id: \.self) { start in
+                Image(systemName: "pause.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0x88 / 255), radius: 2)
+                    .offset(x: geometry.sx(start) - 5, y: -14)
+                    .allowsHitTesting(false)
+            }
             ForEach(editor.project.markersMs.filter { geometry.resolver.isSourceTimePresent($0) }, id: \.self) { marker in
                 Image(systemName: "flag.fill")
                     .font(.system(size: 10))

@@ -121,6 +121,7 @@ enum RecordingFolders {
             markersMs: result.markersMs,
             keystrokes: result.keystrokes
         )
+        project.recording.sessionStartsMs = result.sessionStartsMs
         // New projects start from the default preset, or the last edited settings.
         if let preset = PresetStore.shared.defaultPreset {
             PresetStore.shared.copyAssets(of: preset, into: bundle)

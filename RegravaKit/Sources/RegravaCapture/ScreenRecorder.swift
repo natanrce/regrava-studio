@@ -57,6 +57,8 @@ public struct CaptureResult: Sendable {
     public var externalDevice: ExternalDeviceInfo?
     /// `recordingFlags`: "ScreenContinuity" for iPhone Mirroring windows.
     public var flags: [String] = []
+    /// Starts of the sessions after the first, on the joined timeline.
+    public var sessionStartsMs: [Double] = []
 }
 
 public enum CaptureError: LocalizedError {

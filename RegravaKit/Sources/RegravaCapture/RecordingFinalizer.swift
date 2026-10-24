@@ -158,7 +158,8 @@ public enum RecordingFinalizer {
             pointPixelScale: scale,
             durationMs: cursor * 1000,
             fps: metadata.fps,
-            flags: metadata.flags
+            flags: metadata.flags,
+            sessionStartsMs: offsets.dropFirst().map { $0.offset * 1000 }
         )
         if var device = metadata.device {
             device.orientationChanges = metadata.orientationChanges.compactMap { change in

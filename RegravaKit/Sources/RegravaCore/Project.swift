@@ -190,6 +190,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
     public var externalDevice: ExternalDeviceInfo?
     /// `recordingFlags` ("ScreenContinuity" for iPhone Mirroring windows).
     public var flags: [String]
+    /// Where each recording session after the first starts (a resume after a pause), recording ms.
+    public var sessionStartsMs: [Double] = []
 
     public init(
         videoFileName: String = "recording.mov",
@@ -246,6 +248,7 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
         mode = c.value(.mode, default: .display)
         externalDevice = c.value(.externalDevice, default: nil)
         flags = c.value(.flags, default: [])
+        sessionStartsMs = c.value(.sessionStartsMs, default: [])
     }
 }
 
