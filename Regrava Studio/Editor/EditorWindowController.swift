@@ -59,7 +59,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) { positionTrafficLights() }
-    func windowDidBecomeKey(_ notification: Notification) { positionTrafficLights() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        positionTrafficLights()
+        // The front editor gets the media keys.
+        model.registerMediaKeys()
+    }
     func windowDidEndLiveResize(_ notification: Notification) { positionTrafficLights() }
 
     /// Traffic lights at {x: 23, y: 22} in the 60 px topbar (`trafficLightPosition`): the
@@ -178,10 +182,15 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 editor.change { $0.camera.hide.toggle() }
             case ("l", [.control]): editor.toggleAddLayoutTool()
             case ("l", []):
-                // "Toggle zoom loupe mode".
+                // "Toggle zoom loupe mode" on a zoom, else "Play or increase speed".
                 let source = editor.currentSourceTimeMs
-                guard let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id else { return false }
-                editor.updateZoom(target) { $0.presentation = $0.presentation == .loupe ? .screen : .loupe }
+                if let target = openZoom ?? editor.project.zooms.first(where: { $0.contains(source) })?.id {
+                    editor.updateZoom(target) { $0.presentation = $0.presentation == .loupe ? .screen : .loupe }
+                } else {
+                    editor.playToward(1)
+                }
+            case ("j", []): editor.playToward(-1) // "Play backward or increase speed"
+            case ("k", []): editor.togglePlay() // "Pause" / "Play", resets the speed
             case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil,
                  ("3", []) where editor.openLayoutID != nil, ("4", []) where editor.openLayoutID != nil:
                 // Layout mode: Overlay / Fullscreen / Hide camera / Cutout.

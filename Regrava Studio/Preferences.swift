@@ -138,6 +138,9 @@ final class Preferences: ObservableObject {
     @Published var showSpeakerNotes: Bool
     /// Timeline waveform.
     @Published var hideAudioWaveform: Bool
+    /// `playbackLoop` and `alwaysShowTimelineScrollbar`.
+    @Published var playbackLoop: Bool
+    @Published var alwaysShowTimelineScrollbar: Bool
     @Published var enableSmoothWaveform: Bool
     /// Options ▸ Advanced ▸ Recording Engine: "auto" (Use Modern Engine If Available) or "modern".
     @Published var recordingEngine: String
@@ -199,6 +202,8 @@ final class Preferences: ObservableObject {
         webcamPreviewType = store.string(forKey: "webcamPreviewType") ?? "square"
         showSpeakerNotes = bool("showSpeakerNotes", false)
         hideAudioWaveform = bool("hideAudioWaveform", false)
+        playbackLoop = bool("playbackLoop", false)
+        alwaysShowTimelineScrollbar = bool("alwaysShowTimelineScrollbar", false)
         enableSmoothWaveform = bool("enableSmoothWaveform", true)
         recordingEngine = store.string(forKey: "recordingUseScreenCaptureKit") ?? "auto"
         recordingAreaCropPresets = decode("recordingAreaCropPresets") ?? []
@@ -253,6 +258,8 @@ final class Preferences: ObservableObject {
         set("webcamPreviewType", webcamPreviewType)
         set("showSpeakerNotes", showSpeakerNotes)
         set("hideAudioWaveform", hideAudioWaveform)
+        set("playbackLoop", playbackLoop)
+        set("alwaysShowTimelineScrollbar", alwaysShowTimelineScrollbar)
         set("enableSmoothWaveform", enableSmoothWaveform)
         set("recordingUseScreenCaptureKit", recordingEngine)
         encode("recordingAreaCropPresets", recordingAreaCropPresets)
@@ -295,6 +302,8 @@ final class Preferences: ObservableObject {
         webcamPreviewType = "square"
         showSpeakerNotes = false
         hideAudioWaveform = false
+        playbackLoop = false
+        alwaysShowTimelineScrollbar = false
         enableSmoothWaveform = true
         recordingEngine = "auto"
         recordingAreaCropPresets = []

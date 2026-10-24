@@ -28,6 +28,10 @@ extension EditorModel {
         let finder: () -> Void = { [bundleURL] in NSWorkspace.shared.activateFileViewerSelecting([bundleURL]) }
         return [
             EditorAction(name: isPlaying ? "Pause" : "Play", group: "Playback", icon: isPlaying ? "pause.circle" : "play.circle", shortcut: "Space") { [weak self] in self?.togglePlay() },
+            EditorAction(name: "Play or increase speed", group: "Playback", icon: "forward", shortcut: "L") { [weak self] in self?.playToward(1) },
+            EditorAction(name: "Play backward or increase speed", group: "Playback", icon: "backward", shortcut: "J") { [weak self] in self?.playToward(-1) },
+            EditorAction(name: Preferences.shared.playbackLoop ? "Disable loop playback" : "Enable loop playback", group: "Playback", icon: "repeat") { Preferences.shared.playbackLoop.toggle() },
+            EditorAction(name: Preferences.shared.alwaysShowTimelineScrollbar ? "Hide timeline scrollbar" : "Always show timeline scrollbar", group: "View", icon: "chevron.up.chevron.down") { Preferences.shared.alwaysShowTimelineScrollbar.toggle() },
             EditorAction(name: "Go to first frame", group: "Playback", icon: "backward.end", shortcut: "⌘ ←") { [weak self] in self?.seek(to: 0) },
             EditorAction(name: "Go to last frame", group: "Playback", icon: "forward.end", shortcut: "⌘ →") { [weak self] in self.map { $0.seek(to: $0.durationMs) } },
             EditorAction(name: "Move backwards", group: "Playback", icon: "arrow.turn.up.left", shortcut: "←") { [weak self] in self?.step(frames: -1) },

@@ -27,6 +27,11 @@ struct EditorTimeline: View {
     @State private var width: CGFloat = 1
     @State private var wheelMonitor: Any?
     @State private var isHovering = false
+    @ObservedObject private var preferences = Preferences.shared
+    @State private var scrollerStyle = NSScroller.preferredScrollerStyle
+
+    /// Shown when asked for, or when macOS always shows scroll bars.
+    private var showsScrollbar: Bool { preferences.alwaysShowTimelineScrollbar || scrollerStyle == .legacy }
 
     static let horizontalPadding: CGFloat = 20
 
@@ -100,6 +105,12 @@ struct EditorTimeline: View {
             + (editor.project.cameraLayouts.isEmpty ? 0 : 12 + trackHeight("camera-mode"))
             + (editor.project.masks.isEmpty ? 0 : 12 + trackHeight("masks"))
             + (editor.showsShortcutsTrack ? 12 + trackHeight("shortcuts") : 0))
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if showsScrollbar { TimelineScrollbar(editor: editor, viewport: viewport) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+            scrollerStyle = NSScroller.preferredScrollerStyle
+        }
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: editor.focusedTrack)
     }
 
@@ -113,6 +124,8 @@ struct EditorTimeline: View {
         guard wheelMonitor == nil else { return }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { event in
             guard isHovering else { return event }
+            // Scrolling during playback stops following the playhead.
+            if editor.isPlaying { editor.followSuspended = true }
             let anchor = hover.x.map { time($0) }
             if event.type == .magnify {
                 editor.setVisibleDuration(editor.visibleDurationMs * (1 - event.magnification), anchorMs: anchor)
@@ -127,6 +140,38 @@ struct EditorTimeline: View {
             }
             return nil
         }
+    }
+}
+
+/// The timeline's scroll bar: 14 px, a grey 6 px thumb (107 → 140 on hover → 160 while
+/// dragged) that pans the view.
+private struct TimelineScrollbar: View {
+    @ObservedObject var editor: EditorModel
+    @ObservedObject var viewport: TimelineViewport
+    @State private var hovered = false
+    @State private var dragStart: Double?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let total = max(editor.durationMs, 1)
+            let width = geometry.size.width
+            let thumbWidth = max(width * min(viewport.visibleDurationMs / total, 1), 20)
+            let x = (width - thumbWidth) * min(max(viewport.scrollOffsetMs / max(total - viewport.visibleDurationMs, 1), 0), 1)
+            let grey = dragStart != nil ? 160.0 : hovered ? 140 : 107
+            Capsule()
+                .fill(Color(red: grey / 255, green: grey / 255, blue: grey / 255))
+                .frame(width: thumbWidth, height: 6)
+                .offset(x: x, y: 4)
+                .onHover { hovered = $0 }
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    if dragStart == nil { dragStart = viewport.scrollOffsetMs }
+                    let msPerPx = (total - viewport.visibleDurationMs) / max(width - thumbWidth, 1)
+                    editor.scrollOffsetMs = (dragStart ?? 0) + Double(value.translation.width) * msPerPx
+                    editor.clampScroll()
+                }.onEnded { _ in dragStart = nil })
+        }
+        .frame(height: 14)
+        .padding(.horizontal, EditorTimeline.horizontalPadding)
     }
 }
 

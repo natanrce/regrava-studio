@@ -308,6 +308,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     item.keyEquivalentModifierMask = .command
                 }
             }
+            // "editor" group.
+            if let editor = AppController.shared.focusedEditor?.model {
+                builder.group("editor")
+                builder.item("Show editor sidebar", icon: "sidebar.right", checked: editor.layoutType.showsSidebar) { editor.toggleSidebarShown() }
+                builder.item("Loop playback", icon: "repeat", checked: preferences.playbackLoop) { preferences.playbackLoop.toggle() }
+                builder.item("Show editor timeline", icon: "timeline.selection", checked: editor.layoutType.showsTimeline) { editor.toggleTimelineShown() }
+                builder.item("Always show timeline scrollbar", icon: "chevron.up.chevron.down", checked: preferences.alwaysShowTimelineScrollbar) { preferences.alwaysShowTimelineScrollbar.toggle() }
+            }
             // Only while an editor is open (no `showIfDisabled`).
             if AppController.shared.keyEditor != nil {
                 builder.group("editor-waveform")

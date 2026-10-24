@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import MediaPlayer
 import AppKit
 import Combine
 import Foundation
@@ -57,10 +58,24 @@ final class EditorModel: ObservableObject {
         set { clock.currentTimeMs = newValue }
     }
     @Published private(set) var isPlaying = false {
-        didSet { if oldValue != isPlaying { updateRenderQuality() } }
+        didSet {
+            guard oldValue != isPlaying else { return }
+            followSuspended = false
+            updateRenderQuality()
+        }
     }
     /// `playback.defaultRate`: 0.25…8.
     @Published var playbackRate: Double = 1
+    /// J/L speed (`shuttleRate`), cleared by any pause.
+    @Published private(set) var shuttleRate: Double?
+    var effectiveRate: Double { shuttleRate ?? playbackRate }
+    /// A wheel scroll during playback stops following the playhead until playback stops.
+    var followSuspended = false
+    /// Rates the player cannot play itself (reverse, fast) run on a timer of seeks, like a
+    /// clock that moves `deltaMs * rate` each frame.
+    private var manualTimer: Timer?
+    private var manualLast: CFTimeInterval = 0
+    private var manualRate: Double = 0
 
     // View state
     @Published var layoutType: EditorLayoutType = .edit
@@ -179,10 +194,12 @@ final class EditorModel: ObservableObject {
         updateHoverDetection()
         player.actionAtItemEnd = .pause
         exports.onToast = { [weak self] in self?.showToast($0) }
+        registerMediaKeys()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.isPlaying = self.player.rate != 0
+                guard let self, self.manualTimer == nil else { return }
+                // The player stopped by itself: the end (or the start in reverse).
+                if self.isPlaying && self.player.rate == 0 { self.reachedEnd() }
                 if !self.isScrubbing || self.isPlaying {
                     self.currentTimeMs = time.seconds * 1000
                     if self.isPlaying { self.followPlayhead() }
@@ -592,19 +609,103 @@ final class EditorModel: ObservableObject {
     }
 
     func togglePlay() {
-        if isPlaying {
-            player.pause()
-        } else {
-            isScrubbing = false
-            if currentTimeMs >= durationMs - 30 { seek(to: 0) }
-            player.rate = Float(playbackRate)
-        }
-        isPlaying = player.rate != 0
+        isPlaying ? pause() : play(rate: effectiveRate)
     }
 
     func pause() {
         player.pause()
+        stopManualPlayback()
+        shuttleRate = nil
         isPlaying = false
+    }
+
+    /// `playToward(dir)` for L (+1) and J (−1): the same direction doubles the speed up to
+    /// 16×, the other one starts at the default speed.
+    func playToward(_ direction: Double) {
+        let same = isPlaying && (effectiveRate > 0) == (direction > 0)
+        shuttleRate = same ? clamp(effectiveRate * 2, -16, 16) : direction * playbackRate
+        play(rate: effectiveRate)
+    }
+
+    /// Plays at `rate`, wrapping from the end (or the start in reverse) first.
+    private func play(rate: Double) {
+        isScrubbing = false
+        if rate > 0, currentTimeMs >= durationMs - 30 { seek(to: 0) }
+        if rate < 0, currentTimeMs <= 30 { seek(to: durationMs) }
+        let item = player.currentItem
+        let native = rate > 0 && (rate <= 2 || item?.canPlayFastForward == true)
+            || rate < 0 && (rate >= -1 ? item?.canPlayReverse == true : item?.canPlayFastReverse == true)
+        if native {
+            stopManualPlayback()
+            player.rate = Float(rate)
+        } else {
+            player.pause()
+            startManualPlayback(rate: rate)
+        }
+        isPlaying = true
+    }
+
+    /// "Show editor sidebar" / "Show editor timeline".
+    func toggleSidebarShown() {
+        switch layoutType {
+        case .edit: layoutType = .hideSidebar
+        case .hideTimeline: layoutType = .preview
+        case .hideSidebar: layoutType = .edit
+        case .preview: layoutType = .hideTimeline
+        }
+    }
+
+    func toggleTimelineShown() {
+        switch layoutType {
+        case .edit: layoutType = .hideTimeline
+        case .hideSidebar: layoutType = .preview
+        case .hideTimeline: layoutType = .edit
+        case .preview: layoutType = .hideSidebar
+        }
+    }
+
+    /// `playbackLoop`, or the cursor's "Loop cursor position".
+    var shouldLoop: Bool { preferences.playbackLoop || project.cursor.loopPositionBeforeEndMs != nil }
+
+    /// At the end: loop back and keep the speed, else stop.
+    private func reachedEnd() {
+        let rate = manualTimer != nil ? manualRate : effectiveRate
+        guard shouldLoop else {
+            pause()
+            return
+        }
+        seek(to: rate > 0 ? 0 : durationMs)
+        play(rate: rate)
+    }
+
+    private func startManualPlayback(rate: Double) {
+        stopManualPlayback()
+        manualRate = rate
+        manualLast = CACurrentMediaTime()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.manualTick() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        manualTimer = timer
+    }
+
+    private func stopManualPlayback() {
+        manualTimer?.invalidate()
+        manualTimer = nil
+    }
+
+    private func manualTick() {
+        let now = CACurrentMediaTime()
+        let next = currentTimeMs + (now - manualLast) * 1000 * manualRate
+        manualLast = now
+        if next < 0 || next > durationMs {
+            currentTimeMs = clamp(next, 0, durationMs)
+            reachedEnd()
+            return
+        }
+        currentTimeMs = next
+        chaseSeek(to: CMTime(seconds: next / 1000, preferredTimescale: 600))
+        followPlayhead()
     }
 
     /// Moves the playhead (click on the timeline, buttons, shortcuts). Times round to 60 fps.
@@ -685,7 +786,7 @@ final class EditorModel: ObservableObject {
 
     func setPlaybackRate(_ rate: Double) {
         playbackRate = rate
-        if isPlaying { player.rate = Float(rate) }
+        if isPlaying && shuttleRate == nil { play(rate: rate) }
     }
 
     // MARK: Timeline view
@@ -717,9 +818,15 @@ final class EditorModel: ObservableObject {
         scrollOffsetMs = clamp(scrollOffsetMs, 0, max(durationMs + 5000 - visibleDurationMs, 0))
     }
 
+    /// `keepPlayheadVisible`: a playhead leaving the view pages it to the left edge (the right
+    /// edge in reverse), unless the user scrolled during this playback.
     private func followPlayhead() {
-        if currentTimeMs > scrollOffsetMs + visibleDurationMs * 0.95 || currentTimeMs < scrollOffsetMs {
-            scrollOffsetMs = currentTimeMs - visibleDurationMs * 0.1
+        guard !followSuspended else { return }
+        if currentTimeMs > scrollOffsetMs + visibleDurationMs {
+            scrollOffsetMs = currentTimeMs
+            clampScroll()
+        } else if currentTimeMs < scrollOffsetMs {
+            scrollOffsetMs = currentTimeMs - visibleDurationMs
             clampScroll()
         }
     }
@@ -1421,7 +1528,45 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    // MARK: Media keys
+
+    private var mediaKeyTargets: [(MPRemoteCommand, Any)] = []
+
+    /// The OS media controls drive the preview, titled "Regrava Studio Preview".
+    func registerMediaKeys() {
+        unregisterMediaKeys()
+        let center = MPRemoteCommandCenter.shared()
+        func on(_ command: MPRemoteCommand, _ action: @escaping @MainActor (MPRemoteCommandEvent) -> Void) {
+            let target = command.addTarget { event in
+                MainActor.assumeIsolated { action(event) }
+                return .success
+            }
+            mediaKeyTargets.append((command, target))
+        }
+        on(center.playCommand) { [weak self] _ in if self?.isPlaying == false { self?.togglePlay() } }
+        on(center.pauseCommand) { [weak self] _ in self?.pause() }
+        on(center.togglePlayPauseCommand) { [weak self] _ in self?.togglePlay() }
+        center.skipBackwardCommand.preferredIntervals = [1]
+        center.skipForwardCommand.preferredIntervals = [1]
+        on(center.skipBackwardCommand) { [weak self] _ in self?.step(milliseconds: -1000) }
+        on(center.skipForwardCommand) { [weak self] _ in self?.step(milliseconds: 1000) }
+        on(center.changePlaybackPositionCommand) { [weak self] event in
+            if let event = event as? MPChangePlaybackPositionCommandEvent { self?.seek(to: event.positionTime * 1000) }
+        }
+        on(center.previousTrackCommand) { [weak self] _ in self?.pause(); self?.seek(to: 0) }
+        on(center.nextTrackCommand) { [weak self] _ in self.map { $0.pause(); $0.seek(to: $0.durationMs) } }
+        on(center.stopCommand) { [weak self] _ in self?.pause(); self?.seek(to: 0) }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: "Regrava Studio Preview", MPMediaItemPropertyArtist: "Regrava Studio"]
+    }
+
+    private func unregisterMediaKeys() {
+        for (command, target) in mediaKeyTargets { command.removeTarget(target) }
+        mediaKeyTargets = []
+    }
+
     func tearDown() {
+        unregisterMediaKeys()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         scrubPreview?.close()
         scrubPreview = nil
         // A pending transcript edit is written right away.
