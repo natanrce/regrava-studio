@@ -155,7 +155,6 @@ final class EditorModel: ObservableObject {
     init(bundleURL: URL, project: Project) {
         self.bundleURL = bundleURL
         self.project = project
-        exports.onToast = { [weak self] in self?.showToast($0) }
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
         renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
         transcript = SessionTranscript.load(bundle: bundleURL)
@@ -179,6 +178,7 @@ final class EditorModel: ObservableObject {
         syncMicrophoneRenders()
         updateHoverDetection()
         player.actionAtItemEnd = .pause
+        exports.onToast = { [weak self] in self?.showToast($0) }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
