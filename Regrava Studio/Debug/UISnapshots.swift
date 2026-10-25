@@ -217,6 +217,7 @@ enum UISnapshots {
             }
         }
         controller.model.isCommandMenuOpen = false
+        write(PresetsPopover(editor: controller.model).background(Color(hex: 0x1E1E1E)), width: 420, height: 300, to: directory.appendingPathComponent("presets-popover.png"))
         write(ColorPresetStudioView(model: ColorPresetStudioModel(editor: controller.model), close: {}, onCreated: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("color-preset-studio.png"))
         controller.model.change { $0.camera.hideDuringSilenceMs = 5000 }
         write(CameraLayoutPanel(editor: controller.model).padding(24).background(Theme.Colors.backgroundAccent), width: 360, height: nil, to: directory.appendingPathComponent("panel-camera-layout.png"))

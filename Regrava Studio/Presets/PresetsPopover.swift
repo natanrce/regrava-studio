@@ -21,6 +21,7 @@ struct PresetsPopover: View {
                 Text("Presets will help you re-use the same project settings across projects")
                     .font(Theme.Typo.label)
                     .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                    .padding(EdgeInsets(top: 14, leading: 14, bottom: 8, trailing: 14))
             } else {
                 ScrollView {
                     VStack(spacing: 2) {
@@ -32,17 +33,19 @@ struct PresetsPopover: View {
                 .frame(maxHeight: 350)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: Theme.gap(1)) {
-                TextField("New preset name...", text: $newName)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($nameFocused)
-                    .onSubmit(create)
-                RSButton(title: "Create new preset", kind: .primary, action: create)
-            }
+            // The note, then the new preset row.
             if !store.presets.isEmpty {
                 Text("Presets are not auto-updated. If you apply preset and then modify project settings - remember to update presets to reflect those changes.")
                     .font(Theme.Typo.label)
                     .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: Theme.gap(1)) {
+                RSTextField(placeholder: "New preset name...", text: $newName)
+                    .focused($nameFocused)
+                    .onSubmit(create)
+                RSButton(title: "Create new preset", kind: .primary, action: create)
+                    .fixedSize()
             }
         }
         .padding(EdgeInsets(top: 12, leading: 20, bottom: 20, trailing: 20))
@@ -90,15 +93,11 @@ private struct PresetRow: View {
             if matches { badge("Matches project") }
             if store.isDefault(entry) { badge("Default") }
             Spacer(minLength: 0)
-            Menu { menu } label: { Image(systemName: "gearshape") }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .tooltip("Preset options...")
+            RSIconButton(icon: "gear", kind: .transparent, size: .toolbar, tooltip: "Preset options...") { showMenu() }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
-        .background(RoundedRectangle(cornerRadius: 6).fill(hovered ? Theme.Colors.hover : .clear))
+        .background(RoundedRectangle(cornerRadius: 6).fill(RSButtonKind.transparent.background(hovered: hovered, pressed: false)))
         .contentShape(Rectangle())
         .onHover { inside in
             hovered = inside
@@ -106,7 +105,36 @@ private struct PresetRow: View {
         }
         .onTapGesture { if !isRenaming { editor.applyPreset(entry) } }
         .tooltip("Click to apply")
-        .contextMenu { menu }
+        .nativeContextMenu { menuRows() }
+    }
+
+    private func showMenu() {
+        let menu = NativeContextMenu.build(menuRows())
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    /// Menu: Rename... and Update… ("edit"), the default toggle, Show in Finder, then Remove....
+    private func menuRows() -> [[MenuRow]] {
+        var edit: [MenuRow] = [.command(.init(title: "Rename...") {
+            draft = entry.preset.name
+            isRenaming = true
+        })]
+        if !matches {
+            edit.append(.command(.init(title: "Update to match currently edited project") {
+                store.sync(entry, with: editor.project, bundle: editor.bundleURL)
+                editor.toast = "Preset updated to match"
+            }))
+        }
+        return [
+            edit,
+            [.command(.init(title: "Use as default for new projects", isChecked: store.isDefault(entry)) { store.toggleDefault(entry) })],
+            [.command(.init(title: "Show in Finder") { store.reveal(entry) })],
+            [.command(.init(title: "Remove...", isDestructive: true) {
+                if Dialogs.confirm(title: "Remove preset", message: "Are you sure you want to remove this preset?", confirm: "Remove", destructive: true) {
+                    store.remove(entry)
+                }
+            })],
+        ]
     }
 
     private func badge(_ text: String) -> some View {
@@ -116,31 +144,5 @@ private struct PresetRow: View {
             .padding(.horizontal, 8)
             .frame(height: 22)
             .background(Capsule().fill(Color.white.opacity(0.08)))
-    }
-
-    @ViewBuilder
-    private var menu: some View {
-        Button("Rename...") {
-            draft = entry.preset.name
-            isRenaming = true
-        }
-        Toggle("Use as default for new projects", isOn: Binding(get: { store.isDefault(entry) }, set: { _ in store.toggleDefault(entry) }))
-        if !matches {
-            Button("Update to match currently edited project") {
-                store.sync(entry, with: editor.project, bundle: editor.bundleURL)
-                editor.toast = "Preset updated to match"
-            }
-        }
-        Button("Show in Finder") { store.reveal(entry) }
-        Divider()
-        Button("Remove...", role: .destructive) {
-            let alert = NSAlert()
-            alert.messageText = "Remove preset"
-            alert.informativeText = "Are you sure you want to remove this preset?"
-            alert.addButton(withTitle: "Remove")
-            alert.addButton(withTitle: "Cancel")
-            alert.buttons.first?.hasDestructiveAction = true
-            if alert.runModal() == .alertFirstButtonReturn { store.remove(entry) }
-        }
     }
 }
