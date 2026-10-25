@@ -27,11 +27,20 @@ public final class FrameCompositor: @unchecked Sendable {
     private let deviceFrame: ResolvedDeviceFrame?
     /// The recorded area kept (`cropWindow01`), 0…1 top-left.
     private let screenCrop01: Rect2
+    /// Hide sensitive data / Hide faces: the scan's detections, drawn by source time.
+    private let processing: ProcessingConfig
+    private let sensitiveData: [SensitiveDataDetection]
+    private let resolver: TimeResolver
+    private let videoSize: Size2
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
 
     /// `assetsDirectory` is the project folder (for background images).
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = []) {
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = []) {
+        processing = project.processing
+        self.sensitiveData = project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : []
+        resolver = project.resolver
+        videoSize = project.recording.videoSize
         self.layout = layout
         style = project.style
         cursorConfig = project.cursor
@@ -78,7 +87,12 @@ public final class FrameCompositor: @unchecked Sendable {
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
         // Masks act on the recording itself, so they follow zoom and motion blur.
-        let src = MaskRenderer.apply(frame.mask, to: cropped(source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))))
+        var src = MaskRenderer.apply(frame.mask, to: cropped(source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))))
+        // Auto masks after the manual one, never on the timeline.
+        if !sensitiveData.isEmpty {
+            let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), detections: sensitiveData, config: processing, videoSize: videoSize)
+            src = AutoMaskRenderer.apply(covers, to: src, crop01: screenCrop01, videoSize: videoSize)
+        }
         var output = session(over: background, source: src, camera: cameraImage, frame: frame, quality: quality)
         // The glass loupe over the whole session, camera and cursor included.
         if let lens = frame.loupe {

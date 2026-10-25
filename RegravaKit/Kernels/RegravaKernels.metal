@@ -575,5 +575,96 @@ float4 antiBandingDither(sample_t c, destination dest) {
     return ditherColor(c, dest.coord());
 }
 
+// MARK: - Privacy auto-masks
+
+/// One colour per quadrant of each text cover (64×2: slot·2 + column, row; row 0 is the
+/// bottom half): a robust mean of a ring just outside the corner's two half-edges
+/// (16 samples each, at 1 and 2 ring distances), mixed 30 % with a 4×4 grid inside.
+float4 autoMaskColors(sampler src, sampler boxes, float count, destination dest) {
+    float2 d = dest.coord();
+    float slot = floor(d.x / 2.0);
+    if (slot >= count) return float4(0.0);
+    float qx = fmod(floor(d.x), 2.0);
+    float qy = floor(d.y);
+    float4 box = boxes.sample(boxes.transform(float2(slot + 0.5, 0.5)));
+    float2 origin = box.xy;
+    float2 size = box.zw;
+    float ring = clamp(size.y * 0.12, 1.5, 5.0);
+    // The quadrant's corner, and the half-edges leaving it.
+    float2 corner = origin + float2(qx, qy) * size;
+    float2 alongX = float2(qx > 0.5 ? -1.0 : 1.0, 0.0) * size.x * 0.5;
+    float2 alongY = float2(0.0, qy > 0.5 ? -1.0 : 1.0) * size.y * 0.5;
+    float2 outX = float2(qx > 0.5 ? 1.0 : -1.0, 0.0);
+    float2 outY = float2(0.0, qy > 0.5 ? 1.0 : -1.0);
+    float3 samples[64];
+    float3 mean = float3(0.0);
+    int n = 0;
+    for (int depth = 1; depth <= 2; depth++) {
+        for (int i = 0; i < 16; i++) {
+            float t = (float(i) + 0.5) / 16.0;
+            float2 a = corner + alongX * t + outY * ring * float(depth);
+            float2 b = corner + alongY * t + outX * ring * float(depth);
+            samples[n] = src.sample(src.transform(a)).rgb; mean += samples[n]; n++;
+            samples[n] = src.sample(src.transform(b)).rgb; mean += samples[n]; n++;
+        }
+    }
+    mean /= 64.0;
+    float3 weighted = float3(0.0);
+    float total = 0.0;
+    for (int i = 0; i < 64; i++) {
+        float3 c = samples[i] - mean;
+        float w = exp(-dot(c, c) / (0.12 * 0.12));
+        weighted += samples[i] * w;
+        total += w;
+    }
+    float3 ringColor = total > 0.0 ? weighted / total : mean;
+    float3 inside = float3(0.0);
+    float2 quadOrigin = origin + float2(qx, qy) * size * 0.5;
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            float2 p = quadOrigin + (float2(x, y) + 0.5) / 4.0 * size * 0.5;
+            inside += src.sample(src.transform(p)).rgb;
+        }
+    }
+    inside /= 16.0;
+    return float4(mix(ringColor, inside, 0.3), 1.0);
+}
+
+/// Text covers (rounded rects, radius min(w,h)/4, filled with their quadrant colours, a 5 %
+/// inner shadow) then face covers (circles of radius 0.65·max(w,h) over the blurred footage).
+/// …31 text, 32…47 faces, each (x, y, w, h) in pixels, bottom-left origin.
+float4 autoMaskApply(sampler src, sampler blurred, sampler boxes, sampler colors, float textCount, float faceCount, destination dest) {
+    float2 p = dest.coord();
+    float4 out = src.sample(src.transform(p));
+    float aa = 0.75;
+    for (int i = 0; i < 32; i++) {
+        if (float(i) >= textCount) break;
+        float4 box = boxes.sample(boxes.transform(float2(float(i) + 0.5, 0.5)));
+        float2 halfSize = box.zw * 0.5;
+        float2 c = box.xy + halfSize;
+        float r = min(halfSize.x, halfSize.y) * 0.5;
+        float2 q = abs(p - c) - (halfSize - r);
+        float sd = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+        float coverage = 1.0 - smoothstep(-aa, aa, sd);
+        if (coverage <= 0.0) continue;
+        float2 uv = clamp((p - box.xy) / max(box.zw, float2(1.0)), 0.0, 1.0);
+        float4 fill = colors.sample(colors.transform(float2(float(i) * 2.0 + 0.5 + uv.x, 0.5 + uv.y)));
+        float reach = max(min(box.z, box.w) * 0.5, 1.0);
+        float shade = 0.05 * (1.0 - smoothstep(0.0, 1.0, clamp(-sd / reach, 0.0, 1.0)));
+        fill.rgb -= shade * fill.rgb;
+        out = mix(out, float4(fill.rgb, 1.0), coverage);
+    }
+    for (int i = 0; i < 16; i++) {
+        if (float(i) >= faceCount) break;
+        float4 box = boxes.sample(boxes.transform(float2(32.0 + float(i) + 0.5, 0.5)));
+        float2 c = box.xy + box.zw * 0.5;
+        float r = max(box.z, box.w) * 0.65;
+        float coverage = 1.0 - smoothstep(-aa, aa, length(p - c) - r);
+        if (coverage <= 0.0) continue;
+        out = mix(out, blurred.sample(blurred.transform(p)), coverage);
+    }
+    return out;
+}
+
 }
 }

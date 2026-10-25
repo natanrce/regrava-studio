@@ -27,7 +27,9 @@ public final class RenderState: @unchecked Sendable {
         // Captions read the transcript stored beside the project (source time, onset-adjusted).
         let transcript = assetsDirectory.flatMap { SessionTranscript.load(bundle: $0) }
             .map { TranscriptTiming.clientTranscript([(0, $0.transcript)]) } ?? []
-        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript)
+        // Hide sensitive data / Hide faces: the detections the scan has so far.
+        let sensitiveData = project.processing.isAutoMasking ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.detections ?? []) : []
+        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData)
         return Snapshot(track: track, compositor: compositor)
     }
 
