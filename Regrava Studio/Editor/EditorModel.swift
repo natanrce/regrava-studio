@@ -671,7 +671,9 @@ final class EditorModel: ObservableObject {
     }
 
     /// `playbackLoop`, or the cursor's "Loop cursor position".
-    var shouldLoop: Bool { preferences.playbackLoop || project.cursor.loopPositionBeforeEndMs != nil }
+    var shouldLoop: Bool { forcesLoop || preferences.playbackLoop || project.cursor.loopPositionBeforeEndMs != nil }
+    /// The quick export widget's preview always loops (`loop: true`).
+    var forcesLoop = false
 
     /// At the end: loop back and keep the speed, else stop.
     private func reachedEnd() {

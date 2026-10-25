@@ -173,6 +173,8 @@ final class Preferences: ObservableObject {
     @Published var microphoneAudioPreset: MicrophoneAudioPreset
     // Quick export
     @Published var showQuickExportWidget: Bool
+    /// Mutes only the quick export widget's preview.
+    @Published var muteQuickExportWidgetPreview: Bool
     @Published var alwaysSaveProjectWhenUsingQuickExportWidget: Bool
     @Published var editProjectTitleWhenUsingQuickExportWidget: Bool
     @Published var exportSettings: ExportSettingsStore
@@ -221,6 +223,7 @@ final class Preferences: ObservableObject {
         defaultZoomLevel = store.object(forKey: "defaultZoomLevel") as? Double
         microphoneAudioPreset = (store.string(forKey: "microphoneAudioPreset")).flatMap(MicrophoneAudioPreset.init(rawValue:)) ?? .voice
         showQuickExportWidget = bool("showQuickExportWidget", true)
+        muteQuickExportWidgetPreview = bool("muteQuickExportWidgetPreview", false)
         alwaysSaveProjectWhenUsingQuickExportWidget = bool("alwaysSaveProjectWhenUsingQuickExportWidget", false)
         editProjectTitleWhenUsingQuickExportWidget = bool("editProjectTitleWhenUsingQuickExportWidget", false)
         exportSettings = decode("export-settings") ?? ExportSettingsStore()
@@ -276,6 +279,7 @@ final class Preferences: ObservableObject {
         set("defaultZoomLevel", defaultZoomLevel)
         set("microphoneAudioPreset", microphoneAudioPreset.rawValue)
         set("showQuickExportWidget", showQuickExportWidget)
+        set("muteQuickExportWidgetPreview", muteQuickExportWidgetPreview)
         set("alwaysSaveProjectWhenUsingQuickExportWidget", alwaysSaveProjectWhenUsingQuickExportWidget)
         set("editProjectTitleWhenUsingQuickExportWidget", editProjectTitleWhenUsingQuickExportWidget)
         encode("export-settings", exportSettings)
@@ -320,6 +324,7 @@ final class Preferences: ObservableObject {
         defaultZoomLevel = nil
         microphoneAudioPreset = .voice
         showQuickExportWidget = true
+        muteQuickExportWidgetPreview = false
         alwaysSaveProjectWhenUsingQuickExportWidget = false
         editProjectTitleWhenUsingQuickExportWidget = false
         exportSettings = ExportSettingsStore()

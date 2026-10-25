@@ -81,16 +81,24 @@ final class ExportController: ObservableObject {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.writeObjects(files.map { $0 as NSURL })
                 }
+                lastOutcome = .completed
                 finish(error: nil)
             } catch is CancellationError {
+                lastOutcome = .cancelled
                 finish(error: nil)
             } catch ExportError.cancelled {
+                lastOutcome = .cancelled
                 finish(error: nil)
             } catch {
+                lastOutcome = .failed
                 finish(error: error.localizedDescription)
             }
         }
     }
+
+    enum Outcome { case completed, cancelled, failed }
+    /// How the last export ended (`exports.lastOutcome`).
+    @Published private(set) var lastOutcome: Outcome?
 
     /// The editor's toast (errors before the export starts).
     var onToast: ((String) -> Void)?

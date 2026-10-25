@@ -62,29 +62,45 @@ final class AppController {
         editors.first { $0.window?.isKeyWindow == true } ?? editors.last
     }
 
-    func openProject(bundle: URL, project: Project, afterRecording action: AfterRecordingAction? = nil, isNewRecording: Bool = false) {
+    /// Quick export widgets open now.
+    private(set) var widgets: [QuickExportWidgetController] = []
+
+    /// Opens a project. A normal recording finish (`afterRecording` set) shows the quick export
+    /// widget when it is on, which runs the after-recording export; without the widget the editor
+    /// opens and no export runs.
+    func openProject(bundle: URL, project: Project, afterRecording action: AfterRecordingAction? = nil, isNewRecording: Bool = false, autoplay: Bool = false) {
         if let existing = editors.first(where: { $0.model.bundleURL == bundle }) {
             existing.showWindow(nil)
             return
         }
+        if action != nil, preferences.showQuickExportWidget, !widgets.contains(where: { $0.model.bundleURL == bundle }) {
+            let widget = QuickExportWidgetController(bundleURL: bundle, project: project, autoAction: action)
+            widgets.append(widget)
+            rememberRecent(bundle)
+            widget.present()
+            applyDockIconPolicy()
+            return
+        }
         let editor = EditorWindowController(bundleURL: bundle, project: project)
-        editor.model.isNewRecording = isNewRecording
+        editor.model.isNewRecording = isNewRecording || action != nil
         editors.append(editor)
         rememberRecent(bundle)
         editor.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         applyDockIconPolicy()
-
-        // After-recording action with the quick export settings.
-        let settings = preferences.widgetExportSettings.current
-        switch action {
-        case .exportAndCopyToClipboard:
-            editor.model.exports.start(project: project, videoURL: editor.model.videoURL, projectName: editor.model.projectName, settings: settings, target: .clipboard)
-        case .exportAndSaveToFile:
-            editor.model.exports.start(project: project, videoURL: editor.model.videoURL, projectName: editor.model.projectName, settings: settings, target: .file)
-        default:
-            break
+        // A new recording autoplays in the editor.
+        if autoplay || action != nil {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if !editor.model.isPlaying { editor.model.togglePlay() }
+            }
         }
+    }
+
+    func widgetClosed(_ widget: QuickExportWidgetController) {
+        widgets.removeAll { $0 === widget }
+        applyDockIconPolicy()
+        if editors.isEmpty && widgets.isEmpty && !recording.isRecording { recording.openPicker() }
     }
 
     func openProject(at bundle: URL) {
@@ -125,7 +141,7 @@ final class AppController {
         editors.removeAll { $0 === editor }
         applyDockIconPolicy()
         // When no project is open, the picker comes back.
-        if editors.isEmpty && !recording.isRecording { recording.openPicker() }
+        if editors.isEmpty && widgets.isEmpty && !recording.isRecording { recording.openPicker() }
     }
 
     // MARK: Recent projects
@@ -179,7 +195,7 @@ final class AppController {
     /// "Hide Dock Icon" (while recording) on.
     func applyDockIconPolicy() {
         let hideWhileRecording = recording.isRecording && preferences.hideAppDockIconWhileRecording
-        let hideIdle = preferences.hideDockIcon && editors.isEmpty
+        let hideIdle = preferences.hideDockIcon && editors.isEmpty && widgets.isEmpty
         NSApp.setActivationPolicy(hideWhileRecording || hideIdle ? .accessory : .regular)
     }
 
