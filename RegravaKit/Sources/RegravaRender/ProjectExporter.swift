@@ -55,6 +55,19 @@ public enum ProjectExporter {
         try CursorHovers(chunks: [.init(startMs: 0, endMs: project.recording.durationMs, result: times)]).save(bundle: bundle)
     }
 
+    /// Hide sensitive data / Hide faces: an export waits for the whole scan, so only final
+    /// detections are drawn (`isSensitiveDataStale` cannot happen then).
+    public static func completeSensitiveDataScan(project: Project, bundle: URL) async throws {
+        let processing = project.processing
+        guard processing.isAutoMasking else { return }
+        if let stored = SensitiveDataScan.load(bundle: bundle), stored.isComplete, stored.matches(processing) { return }
+        let video = bundle.appendingPathComponent(project.recording.videoFileName)
+        guard FileManager.default.fileExists(atPath: video.path) else { return }
+        let detections = try await SensitiveDataScanner.scan(video: video, phrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces) { _, _ in }
+        try SensitiveDataScan(customPhrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces, detections: detections,
+                              finalUpToMs: project.recording.durationMs, isComplete: true).save(bundle: bundle)
+    }
+
     public static func export(
         project: Project,
         videoURL: URL,
@@ -69,6 +82,7 @@ public enum ProjectExporter {
         // Export frames wait until face data covers them ("tracking face").
         try await completeFaceTracking(project: project, bundle: videoURL.deletingLastPathComponent())
         try await completeHoverDetection(project: project, bundle: videoURL.deletingLastPathComponent())
+        try await completeSensitiveDataScan(project: project, bundle: videoURL.deletingLastPathComponent())
         // And for the microphone's silences when the camera hides during them.
         try await SilenceAnalyzer.ensure(project: project, bundle: videoURL.deletingLastPathComponent(), recording: videoURL)
         let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent())

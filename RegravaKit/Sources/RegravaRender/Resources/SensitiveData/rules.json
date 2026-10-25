@@ -1,0 +1,692 @@
+{
+  "regexes": [
+    {
+      "name": "mixedCaseRegex",
+      "options": [],
+      "regex": "[a-z][A-Z]|[A-Z][a-z]+[A-Z]"
+    },
+    {
+      "name": "secretLabelRegex",
+      "options": [],
+      "regex": "(?i)(secret|password|passwort|passphrase|\\bpin\\b|security code|cvc|cvv|one-time|verification code|totp|2fa|recovery (codes?|phrase)|seed|mnemonic|iban|account number|routing|database url|connection string|\\bdsn\\b|webhook|private key|token|api key|access key|_key\\b|_secret\\b|\\bsid\\b|session ?id|client secret|signing key)(?![a-z])"
+    },
+    {
+      "name": "identifierLabelOnlyRegex",
+      "options": [],
+      "regex": "(?i)^(?:vat(?: id| no\\.?| number| reg(?:istration)?(?: no\\.?)?)?|tax id|tin|ein|fein|employer id(?:entification)?(?: number)?|federal tax id|ssn|social security(?: number)?|itin|national insurance(?: number)?|ni no|nino|pesel|nip(?: ue| nabywcy)?|regon|steuer-?id|steuerliche identifikationsnummer|steuernummer|st\\.-nr\\.?|ust-?id(?:nr\\.?)?|ust-idnr\\.?|mwst(?:-nr\\.?)?|n° tva(?: intracom\\.?)?|tva(?: intracom\\.?)?|btw(?:-nr)?|p\\. ?iva|cif|nif|nie|dni|dič|alv(?: nro)?|αφμ|ддс №?|oib|pvm kodas|pvn|moms(?:reg\\.?nr)?|kmkr|cvr(?:/se-nr\\.?)?|org\\.nr\\.?|abn|gstin|gst/hst|siret|siren|nir|n° de sécurité sociale|pan|aadhaar|cpf|cnpj|sin|codice fiscale|passport(?: no\\.?| number)?|reisepass-nr\\.?|paszport|dl#|driving licen[cs]e(?: no\\.?)?|licen[cs]e no\\.?|führerschein-nr\\.?|prawo jazdy(?: nr)?|iban|bic|swift(?:/bic)?(?: code)?|routing(?: number)?(?: \\(aba\\))?|ach|account number|acc|a/c|konto|conta|agência|rachunek|nr rachunku|sort code|bsb|transit|institution|ifsc|blz|chave pix(?: \\(cpf\\))?|licen[cs]e key|product key|serial(?: number)?|your key|card number|phone|tel\\.?|telephone|telefon|mobile(?: number\\*?)?|mob|cell|fax|whatsapp|m:|t:|call me at|reach me on|account|dob|birthday|date of birth|cvc|cvv|employer identification number|address|home address|street address)(?:\\s+(?:number|no\\.?|nr\\.?|id|code|nabywcy))?(?:\\s*\\([^)]{1,20}\\))?\\s*[:#*]?$"
+    },
+    {
+      "name": "phraseLabelRegex",
+      "options": [],
+      "regex": "(?i)(phrase|seed|mnemonic|security answer|date of birth)"
+    },
+    {
+      "name": "codeStartRegex",
+      "options": [],
+      "regex": "^(const|let|var|export|function|return|import|def|if|for|kind|type|name)\\b"
+    },
+    {
+      "name": "labelDisqualifierRegex",
+      "options": [],
+      "regex": "[={};<>$\"']|:\\s*\\S|-{3,}"
+    },
+    {
+      "name": "maskedRegex",
+      "options": [],
+      "regex": "^[•●*.\\s]{4,}|^e{6,}$|^[•●*]|•|●|\\*{3}|\\.{3}|…"
+    },
+    {
+      "name": "chromeRegex",
+      "options": [],
+      "regex": "(?i)^(reveal|show|hide|copy|copied|roll key|rotate|edit|delete|remove|regenerate|live|test|active|new|beta|\\d{1,2}|required|optional)$|^(created|last used|updated|rotated|expires)\\b"
+    },
+    {
+      "name": "seedLabelRegex",
+      "options": [],
+      "regex": "(?i)\\b(?:seed|recovery phrase|mnemonic|secret recovery|wallet backup)\\b"
+    },
+    {
+      "name": "mergedLabelValueRegex",
+      "options": [],
+      "regex": "^\\s*(\\S.{1,30}?)\\s+(\\S+)\\s*$"
+    },
+    {
+      "name": "danglingLabelRegex",
+      "options": [],
+      "regex": "(?i)\\b(bearer|basic|token|secret|password|passwd|key)\\s*[\"']?\\s*[=:]?\\s*[\"']?\\s*\\\\?$"
+    },
+    {
+      "name": "printedSecretCommandRegex",
+      "options": [],
+      "regex": "(?i)\\b(?:echo|printenv|print)\\b.*\\$\\{?\\w*(?:token|key|secret|pass\\w*)\\b|base64 (?:-d|--decode)|find-generic-password.*\\s-w\\b|gh auth token|\\bprintenv \\w*(?:TOKEN|KEY|SECRET|PASS)"
+    },
+    {
+      "name": "leadingTokenRegex",
+      "options": [],
+      "regex": "^\\s*[\"'`]?([A-Za-z0-9+/=_\\-.~%@]+)"
+    },
+    {
+      "name": "assignmentStartRegex",
+      "options": [],
+      "regex": "^[A-Za-z_][A-Za-z0-9_.-]*[=:]"
+    },
+    {
+      "name": "gutterNumberRegex",
+      "options": [],
+      "regex": "^\\d{1,4}$"
+    },
+    {
+      "name": "identifierContinuationRegex",
+      "options": [],
+      "regex": "^\\s*([\\w.+-]+(?: \\d{2,6})*)"
+    },
+    {
+      "name": "firstWordRegex",
+      "options": [],
+      "regex": "^\\s*(\\S+)"
+    },
+    {
+      "name": "wordyRegex",
+      "options": [],
+      "regex": "[a-z]+|[A-Z][a-z]+|[a-z]+(?:-[a-z]+)+"
+    },
+    {
+      "name": "labelledValueRegex",
+      "options": [
+        "caseInsensitive"
+      ],
+      "regex": "(?<![\\w])(vat(?: id| no\\.?| number| reg(?:istration)?(?: no\\.?)?)?|tax id|tin|ein|fein|employer id(?:entification)?(?: number)?|federal tax id|ssn|social security(?: number)?|itin|national insurance(?: number)?|ni no|nino|pesel|nip(?: ue| nabywcy)?|regon|steuer-?id|steuerliche identifikationsnummer|steuernummer|st\\.-nr\\.?|ust-?id(?:nr\\.?)?|ust-idnr\\.?|mwst(?:-nr\\.?)?|n° tva(?: intracom\\.?)?|tva(?: intracom\\.?)?|btw(?:-nr)?|p\\. ?iva|cif|nif|nie|dni|dič|alv(?: nro)?|αφμ|ддс №?|oib|pvm kodas|pvn|moms(?:reg\\.?nr)?|kmkr|cvr(?:/se-nr\\.?)?|org\\.nr\\.?|abn|gstin|gst/hst|siret|siren|nir|n° de sécurité sociale|pan|aadhaar|cpf|cnpj|sin|codice fiscale|passport(?: no\\.?| number)?|reisepass-nr\\.?|paszport|dl#|driving licen[cs]e(?: no\\.?)?|licen[cs]e no\\.?|führerschein-nr\\.?|prawo jazdy(?: nr)?|iban|bic|swift(?:/bic)?(?: code)?|routing(?: number)?(?: \\(aba\\))?|ach|account number|acc|a/c|konto|conta|agência|rachunek|nr rachunku|sort code|bsb|transit|institution|ifsc|blz|chave pix(?: \\(cpf\\))?|licen[cs]e key|product key|serial(?: number)?|your key|card number|phone|tel\\.?|telephone|telefon|mobile(?: number\\*?)?|mob|cell|fax|whatsapp|m:|t:|call me at|reach me on|account)(?![\\w])(?:\\s*(?:\\([^)]{1,20}\\)|no\\.?|nr\\.?|n°|number|#|№|id|reg|code|:|-))*\\s*(…?(?:[A-Z0-9./-]*\\d[A-Z0-9./-]*|(?-i:[A-Z]{1,3})(?=\\s|$|[·,;]))(?:(?: | / )(?:[A-Z0-9./-]*\\d[A-Z0-9./-]*|(?-i:[A-Z]{1,3})(?=\\s|$|[·,;])))*)"
+    },
+    {
+      "name": "bicLabelledRegex",
+      "options": [
+        "caseInsensitive"
+      ],
+      "regex": "(?<![\\w])(?:bic|swift(?:/bic)?(?: code)?)[:\\s]+([A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)(?![\\w])"
+    },
+    {
+      "name": "dateOfBirthRegex",
+      "options": [],
+      "regex": "(?i)(?<![\\w])(?:date of birth|dob|birth ?date|birthday|born:|geburtsdatum|data urodzenia|date de naissance|fecha de nacimiento)\\W{0,4}(\\d{1,2}[./-]\\d{1,2}[./-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|[A-Z][a-z]+ \\d{1,2}, \\d{4}|\\d{1,2} [A-Z][a-z]+ \\d{4})"
+    },
+    {
+      "name": "cardExpiryRegex",
+      "options": [],
+      "regex": "(?i)(?<![\\w])(?:exp(?:iry|iration)?(?: date)?|expires|valid thru|mm ?/ ?yy)[:.]?\\s*(\\d{2} ?/ ?\\d{2}(?:\\d{2})?)(?![\\d/])"
+    },
+    {
+      "name": "cardSecurityCodeRegex",
+      "options": [],
+      "regex": "(?i)(?<![\\w])(?:cvc|cvv|cid|security code)[:.]?\\s*(\\d{3,4})(?!\\d)"
+    },
+    {
+      "name": "emailRegex",
+      "options": [],
+      "regex": "([\\w%+-][\\w.%+'-]+)\\s?\\(?[@©]\\s?([\\p{L}\\p{N}-]+)(?:\\.\\s?[\\p{L}\\p{N}-]+)*\\.\\s?(\\p{L}{2,})(?![\\w])"
+    },
+    {
+      "name": "cutEmailRegex",
+      "options": [],
+      "regex": "(?<![\\w.%+'@-])[a-z0-9][a-z0-9._%+'-]{3,}@(?:[\\p{L}\\p{N}-]{3,}(?:\\.[\\p{L}\\p{N}-]+)*…|$)"
+    },
+    {
+      "name": "obfuscatedEmailRegex",
+      "options": [],
+      "regex": "(?i)[\\w.+-]+\\s*[\\[(]at[\\])]\\s*[\\w-]+(?:(?:\\s*[\\[(]dot[\\])]\\s*|\\.)[\\w-]+)+"
+    },
+    {
+      "name": "internationalPhoneRegex",
+      "options": [],
+      "regex": "(?<![\\d+])\\+\\d{1,3}(?:[ .-]?\\(0\\))?(?:[ .-]?\\(?\\d{1,5}\\)?){1,6}(?:\\s?(?:ext\\.?|x)\\s?\\d{1,5})?(?:…)?"
+    },
+    {
+      "name": "nationalPhoneRegexes",
+      "options": [],
+      "regexes": [
+        "(?<![\\d.,])(?:1[ -])?\\(?[2-9]\\d{2}\\)?[ .-][2-9]\\d{2}[ .-]\\d{4}(?:\\s?(?:ext\\.?|x)\\s?\\d{1,5})?(?![\\d])",
+        "(?<![\\w.,:])0\\d{1,4}(?:[ /.-]?\\d{2,4}){2,4}(?![\\w])",
+        "(?<![\\w])\\(\\d{2,4}\\) ?\\d{3,5}(?:[ .-]\\d{2,4}){1,2}(?![\\d])",
+        "(?<![\\d][ ,.])(?<![\\d])[1-9]\\d{2}[ -]\\d{3}[ -]\\d{3}(?![ -]?\\d)"
+      ]
+    },
+    {
+      "name": "dateInNumberRegex",
+      "options": [],
+      "regex": "\\d{1,2}[./]\\d{1,2}[./](?:19|20)\\d{2}"
+    },
+    {
+      "name": "cardRunRegex",
+      "options": [],
+      "regex": "(?<![\\d.,])(?<!\\d[ -])\\d(?:[ -]?\\d){11,18}(?![ -]?\\d)(?:…)?"
+    },
+    {
+      "name": "cutCardRegex",
+      "options": [],
+      "regex": "(?<![\\d])\\d{4}[ -]\\d{4}[ -]\\d{4}(?:[ -]\\d{1,4})?…"
+    },
+    {
+      "name": "imeiBeforeRegex",
+      "options": [],
+      "regex": "(?i)IMEI\\W*$"
+    },
+    {
+      "name": "ibanRegex",
+      "options": [
+        "caseInsensitive"
+      ],
+      "regex": "(?<![\\w…])([A-Z]{2})\\s?(\\d{2})((?:\\s?[A-Z0-9]){10,30})(…)?"
+    },
+    {
+      "name": "polishAccountRegex",
+      "options": [],
+      "regex": "(?<![\\d])\\d{2}(?: ?\\d{4}){6}(?![\\d])"
+    },
+    {
+      "name": "vatRegex",
+      "options": [],
+      "regex": "(?<![\\w])(?:ATU(?:\\d[ .]?){7}\\d|BE ?[01](?:\\d[ .]?){8}\\d|BG(?:\\d[ .]?){8}\\d\\d?|CY(?:\\d[ .]?){7}\\d[A-Z]|CZ(?:\\d[ .]?){7}\\d\\d{0,2}|DE ?(?:\\d[ .]?){8}\\d|DK ?(?:\\d[ .]?){7}\\d|EE(?:\\d[ .]?){8}\\d|EL(?:\\d[ .]?){8}\\d|ES[A-Z0-9]\\d{7}[A-Z0-9]|FI(?:\\d[ .]?){7}\\d|FR ?[A-HJ-NP-Z0-9]{2} ?(?:\\d[ .]?){8}\\d|HR(?:\\d[ .]?){10}\\d|HU(?:\\d[ .]?){7}\\d|IE\\d{7}[A-W][A-IW]?|IE\\d[A-Z+*]\\d{5}[A-W]|IT(?:\\d[ .]?){10}\\d|LT(?:(?:\\d[ .]?){11}\\d|(?:\\d[ .]?){8}\\d)|LU(?:\\d[ .]?){7}\\d|LV(?:\\d[ .]?){10}\\d|MT(?:\\d[ .]?){7}\\d|NL\\d{9}B\\d{2}|PL ?(?:\\d[ .]?){9}\\d|PT(?:\\d[ .]?){8}\\d|RO\\d{6,10}|SE(?:\\d[ .]?){11}\\d|SI(?:\\d[ .]?){7}\\d|SK(?:\\d[ .]?){9}\\d|(?:GB|XI) ?\\d{3} ?\\d{4} ?\\d{2}(?: ?\\d{3})?|CHE-?\\d{3}\\.?\\d{3}\\.?\\d{3}|NO ?\\d{3} ?\\d{3} ?\\d{3}(?= ?MVA))(?![\\w])"
+    },
+    {
+      "name": "ssnRegex",
+      "options": [],
+      "regex": "(?<![\\d-])(\\d{3})-(\\d{2})-(\\d{4})(?![\\d-])"
+    },
+    {
+      "name": "shapedIdentifierRegexes",
+      "options": [],
+      "regexes": [
+        "(?<![\\w])[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z] ?\\d{2} ?\\d{2} ?\\d{2} ?[A-D](?![\\w])",
+        "(?<![\\w])[A-Z]{3}[ABCFGHLJPT][A-Z]\\d{4}[A-Z](?![\\w])",
+        "(?<![\\w])[\\dA-Z]{2}\\.[\\dA-Z]{3}\\.[\\dA-Z]{3}/[\\dA-Z]{4}-\\d{2}(?![\\d])",
+        "(?<![\\w])\\d{2}\\.\\d{3}\\.\\d{3}-[A-Z](?![\\w])"
+      ]
+    },
+    {
+      "name": "cpfRegex",
+      "options": [],
+      "regex": "(?<![\\d])\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}(?![\\d])"
+    },
+    {
+      "name": "dniRegex",
+      "options": [],
+      "regex": "(?<![\\w])([XYZ])?-?(\\d{7,8})-?([A-Z])(?![\\w])"
+    },
+    {
+      "name": "frenchSocialSecurityRegex",
+      "options": [],
+      "regex": "(?<![\\d])[12] ?\\d{2} ?\\d{2} ?(?:\\d{2}|2[AB]) ?\\d{3} ?\\d{3} ?\\d{2}(?![\\d])"
+    },
+    {
+      "name": "machineReadableZoneRegex",
+      "options": [],
+      "regex": "^[A-Z0-9<]{30,44}$"
+    },
+    {
+      "name": "licenceKeyRegex",
+      "options": [],
+      "regex": "(?<![\\w-])[A-Z0-9]{4,6}(?: ?- ?[A-Z0-9]{4,6}){2,}(?:-[A-Z0-9]{1,5})?…?"
+    },
+    {
+      "name": "streetRegexes",
+      "options": [],
+      "regexes": [
+        "(?<![\\w])\\d{1,5}[A-Za-z]?\\s+(?:[NSEW]\\.?\\s+)?(?:[A-Z][\\w'.-]*\\s+){0,3}(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place|Pkwy|Ter|Terrace|Hwy)\\b\\.?(?:,?\\s+(?:Apt|Suite|Unit|Flat|#)\\.?\\s*\\w+)?",
+        "(?<![\\w])(?:ul\\.|al\\.|Rue|Via|Calle|Rua|Avenida|Av\\.|Piazza|Plac|Carrer|Rambla)\\s+(?:[\\w'.-]+\\s+){1,4}?\\d{1,4}[A-Za-z]?(?:/\\d{1,4})?",
+        "(?<![\\w])\\d{1,4}(?:bis|ter)?,?\\s+(?:Rue|Avenue|Boulevard|Bd|Allée|Place|Chemin|Impasse|Quai)\\b[\\w' -]+",
+        "(?<![\\w])[A-ZÄÖÜ][\\wäöüß-]*(?:straße|strasse|str\\.|weg|allee|platz|gasse|ring|damm|gracht|laan|plein)\\s+\\d{1,4}(?:[a-z]|-[A-Z])?(?![\\w])"
+      ]
+    },
+    {
+      "name": "addressLineRegexes",
+      "options": [],
+      "regexes": [
+        "(?:^|(?<=, )|(?<=· ))(?:\\d{5}|\\d{2}-\\d{3}|\\d{4} [A-Z]{2})\\s+[A-ZÄÖÜŁŚŻ][\\wäöüßéèà-]+(?:,\\s+[A-Z][a-z]+)?(?=\\s*$|,|\\s·)",
+        "[A-Z][a-z]+(?: [A-Z][a-z]+)*,\\s?[A-Z][A-Za-z]\\s\\d{5}(?:-\\d{4})?",
+        "(?:(?<=[a-z], )|(?<=[a-z] ))[A-Z]{1,2}\\d[A-Z\\d]? \\d[A-Z]{2}(?![\\w])",
+        "PO Box \\d+.*\\d{5}",
+        "〒\\s?\\d{3}-\\d{4}.*$",
+        "(?:(?<=CEP )|(?<=, ))\\d{5}-\\d{3}(?![\\d-])"
+      ]
+    },
+    {
+      "name": "addressSegmentRegex",
+      "options": [],
+      "regex": ",\\s*((?:[A-Z0-9〒][\\w'.ºª-]*|[a-zA-Z]{1,2}|-)(?: (?:[A-Z0-9][\\w'.ºª-]*|[a-zA-Z]{1,2}|-|de|da|do)){0,4})"
+    },
+    {
+      "name": "unitSegmentRegex",
+      "options": [],
+      "regex": "(?:Flat|Apt|Apartment|Unit|Suite|Floor|c/o)\\b[^,]*$"
+    },
+    {
+      "name": "ipv4Regex",
+      "options": [],
+      "regex": "(?<![\\w.])(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})(?![\\w.])"
+    },
+    {
+      "name": "ipContextBeforeRegex",
+      "options": [],
+      "regex": "(?i)(?:\\bip\\b|address|from|forwarded|login|ssh|@|inet\\b)"
+    },
+    {
+      "name": "userAtHostIPRegex",
+      "options": [],
+      "regex": "[\\w.-]+@\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\w.])"
+    },
+    {
+      "name": "ipv6Regex",
+      "options": [],
+      "regex": "(?i)(?<![\\w:])(?:[0-9a-f]{1,4}:){2,7}(?::?[0-9a-f]{1,4}){1,7}(?![\\w:])"
+    },
+    {
+      "name": "macRegex",
+      "options": [],
+      "regex": "(?<![\\w:-])[0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}(?:\\1[0-9A-Fa-f]{2}){4}(?![\\w:-])"
+    },
+    {
+      "name": "walletRegex",
+      "options": [],
+      "regex": "(?<![\\w])(?:bc1[a-z0-9]{25,59}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|0x[0-9a-fA-F]{40}|0x[0-9a-fA-F]{16,39}…)(?![\\w])"
+    },
+    {
+      "name": "privateKeyHeaderRegex",
+      "options": [],
+      "regex": "^(?:\\d{1,4}\\s+)?-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----$"
+    },
+    {
+      "name": "uuidRegex",
+      "options": [],
+      "regex": "(?<![0-9A-Fa-f-])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Fa-f-])"
+    },
+    {
+      "name": "knownPrefixRegex",
+      "options": [],
+      "regex": "(?:(?<![A-Za-z0-9])(?:(?:sk|rk|pk)[_ ]{1,2}(?:live|test|1ive)[_ ]{1,2}|whsec_|gh[pousr] ?_|github_pat_|GHSAT0|gl(?:pat|cbt)[-–—]|xox[abpres][-–—]|xapp-|sk-(?=[A-Za-z0-9 -]{12})|A[KS][I1l]A(?=[A-Z0-9 ]{8})|AIza|ya29\\.|1//0|GOCSPX-|SG\\.(?=[A-Za-z0-9_ -]{10})|npm_|pypi-AgE|dckr_pat_|hf_|gsk_|r8_|xai-|pplx-|shp(?:at|ss|ca|pa)_|do[por]_v1_|hv[sb]\\.|lin_api_|sbp_|ntn_|PMAK-|ATATT3|sntry[su]_|glsa_|glc_|NRAK-|dp\\.pt\\.|fo1_|nfp_|EAAA(?=[A-Za-z0-9]{40})|dapi(?=[0-9a-f]{32})|pul-|AGE-SECRET-KEY-1|ops_ey|rubygems_|cio(?=[A-Za-z0-9]{32})|key-(?=[0-9a-f]{32})|access_token\\$|ey[J\\]](?=[A-Za-z0-9_ -]{8})|IQoJb3JpZ2luX2Vj|FwoGZXIvYXdz|LS0tLS1CRUdJTi|rpa_|(?:AC|SK)(?=[0-9a-f]{32})|xkeysib-|\\d{8,10}:AA(?=[A-Za-z0-9_-]{30})|AccountKey=|SharedAccessKey=)|(?<=bot)\\d{8,10}:AA)[A-Za-z0-9_\\-+/=.~$%]*(?: (?=[A-Za-z0-9_\\-+/=.~$%]*[0-9A-Z_+/=])[A-Za-z0-9_\\-+/=.~$%]{2,})*…?"
+    },
+    {
+      "name": "knownPrefixAtStartRegex",
+      "options": [],
+      "regex": "^(?:(?:sk|rk|pk)[_ ]{1,2}(?:live|test|1ive)[_ ]{1,2}|whsec_|gh[pousr] ?_|github_pat_|GHSAT0|gl(?:pat|cbt)[-–—]|xox[abpres][-–—]|xapp-|sk-(?=[A-Za-z0-9 -]{12})|A[KS][I1l]A(?=[A-Z0-9 ]{8})|AIza|ya29\\.|1//0|GOCSPX-|SG\\.(?=[A-Za-z0-9_ -]{10})|npm_|pypi-AgE|dckr_pat_|hf_|gsk_|r8_|xai-|pplx-|shp(?:at|ss|ca|pa)_|do[por]_v1_|hv[sb]\\.|lin_api_|sbp_|ntn_|PMAK-|ATATT3|sntry[su]_|glsa_|glc_|NRAK-|dp\\.pt\\.|fo1_|nfp_|EAAA(?=[A-Za-z0-9]{40})|dapi(?=[0-9a-f]{32})|pul-|AGE-SECRET-KEY-1|ops_ey|rubygems_|cio(?=[A-Za-z0-9]{32})|key-(?=[0-9a-f]{32})|access_token\\$|ey[J\\]](?=[A-Za-z0-9_ -]{8})|IQoJb3JpZ2luX2Vj|FwoGZXIvYXdz|LS0tLS1CRUdJTi|rpa_|(?:AC|SK)(?=[0-9a-f]{32})|xkeysib-|\\d{8,10}:AA(?=[A-Za-z0-9_-]{30})|AccountKey=|SharedAccessKey=|\\d{8,10}:AA)"
+    },
+    {
+      "name": "webhookURLRegex",
+      "options": [],
+      "regex": "(?:https?://)?(?:hooks\\.slack\\.com/(?:services|workflows|triggers)|discord(?:app)?\\.com/api/webhooks|[\\w-]+\\.webhook\\.office\\.com)/\\S+"
+    },
+    {
+      "name": "placeholderInsideRegex",
+      "options": [],
+      "regex": "(?i)x{6,}|0{8,}|•{2,}|\\*{3,}|\\.\\.\\.|REPLACE|YOUR_|_HERE\\b|<[a-z_ -]+>|\\$\\{|\\{\\{"
+    },
+    {
+      "name": "credentialURLRegex",
+      "options": [],
+      "regex": "\\b[a-z][a-z0-9+.\\-]*\\s?:\\s?/\\s?/[^\\s/@:]*\\s?:\\s?(?=[^\\s@/]*[A-Za-z!#$%&*])[^\\s@/]+\\S*(?:\\s?:\\s?\\d+\\S*)?|\\bhttps://[0-9a-f]{32}@\\S+"
+    },
+    {
+      "name": "angleNameRegex",
+      "options": [],
+      "regex": "<\\w+>"
+    },
+    {
+      "name": "pgpassRegex",
+      "options": [],
+      "regex": "^[\\w.\\-*]+:(?:\\d+|\\*):[\\w*]+:[\\w*]+:(\\S+)$"
+    },
+    {
+      "name": "secretParameterRegex",
+      "options": [],
+      "regex": "(?i)[?&#;]\\s?(?:access_token|refresh_token|id_token|token|authToken|api_key|apikey|api-key|key|appid|sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token|x-goog-signature|secret|client_secret|password|pwd|pass|code|jwt|auth|session|sid)=([^&\\s#\"']{6,})"
+    },
+    {
+      "name": "tokenishRegex",
+      "options": [],
+      "regex": "\\d|[a-z][A-Z]|[A-Z][a-z].*[A-Z]|[^\\w\\s]"
+    },
+    {
+      "name": "credentialAssignmentRegex",
+      "options": [],
+      "regex": "(?i)(pass(?:word|wd|phrase)?|pwd|secret|token|key|apikey|auth|credentials?|salt|dsn|sid|signature|mnemonic|cookie|session(?:id)?|sessid|otp|bearer|basic|connectionstring|\\bpw)(?:_?id)?(?![a-z0-9])(?:\\s*\\[[^\\]]*\\])?[\"']?(\\s*(?::=|=>|:|=)\\s*|\\s+is\\s+|\\s{2,}|\\s)(.*)$"
+    },
+    {
+      "name": "xmlCredentialRegex",
+      "options": [],
+      "regex": "(?i)<(?:\\w*(?:pass(?:word|wd|phrase)?|pwd|secret|token|key|apikey|auth|credentials?|salt|dsn|sid|signature|mnemonic|cookie|session(?:id)?|sessid|otp|bearer|basic|connectionstring))>([^<]+)</"
+    },
+    {
+      "name": "credentialFlagRegexes",
+      "options": [],
+      "regexes": [
+        "(?:^|\\s)(?:-u|--user)\\s+([^\\s:]+:\\S+)",
+        "\\b(?:mysql\\w*|mariadb\\w*)\\b.*\\s-p(\\S{3,})",
+        "\\bsshpass -p\\s+'?([^\\s']+)",
+        "\\bredis-cli\\b.*\\s-a\\s+(\\S+)",
+        "--(?:password|pass|token|secret|api-key)[= ]((?=\\S*[\\d!@#$%^&*A-Z])[^-\\s]\\S*)",
+        "\\$(?:2[aby]|1|5|6|apr1|argon2id?|y)\\$\\S{10,}"
+      ]
+    },
+    {
+      "name": "placeholderValueRegex",
+      "options": [],
+      "regex": "(?i)^(?:\\$\\{.*|\\?.*|\\$\\w+.*|\\{\\{.*|<[^>]*>.*|\\$\\(.*|%\\w+%|x{4,}.*|\\*{3,}.*|•{3,}.*|\\.{3}.*|…|your[_\\- ].*|.*replace_?me.*|.*_here|changeme|null|none|nil|true|false|undefined|\\d{1,7}|(?-i:[A-Z][A-Z0-9_]{3,})|!vault.*|var\\.\\S+|process\\.env.*|os\\.environ.*|settings\\.\\S+|credentials\\.\\S+|#.*|//.*|show|hidden|copy|reveal|regenerate|string;?|number|boolean|any|object|required|optional|\\w+[.:]\\w*\\(.*)$"
+    },
+    {
+      "name": "codeReferenceRegex",
+      "options": [],
+      "regex": "[()]|[{}<>\\[\\]]|=\\{|===|^=|&&|\\?\\.|\\?\\s|\\w\\[|\\s(?:await|try|new)\\s|^(?:await|try|new)\\s|^[\\[<]"
+    },
+    {
+      "name": "memberPathRegex",
+      "options": [],
+      "regex": "^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)+$"
+    },
+    {
+      "name": "camelIdentifierRegex",
+      "options": [],
+      "regex": "^(?:[a-z]+(?:[A-Z][a-z]+)+|[A-Z][a-z]+(?:[A-Z][a-z]+)*)$"
+    },
+    {
+      "name": "unquotedValueEndRegex",
+      "options": [],
+      "regex": "\\s+#|;\\s|,\\s*$|\\s{3,}| \\(|\\s+\\|"
+    },
+    {
+      "name": "unquotedValueTailRegex",
+      "options": [],
+      "regex": ",\\s|\\)|\\s\\|"
+    },
+    {
+      "name": "qualifierBeforeNounRegex",
+      "options": [],
+      "regex": "(?i)\\b(?:api|secret|private|access|license|signing|encryption|master|client|account|deploy|app|session|auth|admin|root|user|db|database|wifi|wi-fi|sudo|vault|this|your|setup|recovery|backup)\\s$"
+    },
+    {
+      "name": "letterJustBeforeRegex",
+      "options": [],
+      "regex": "[A-Za-z][_\\-.]?$"
+    },
+    {
+      "name": "lowercaseWordRegex",
+      "options": [],
+      "regex": "^[a-z]+$"
+    },
+    {
+      "name": "digitOrColonRegex",
+      "options": [],
+      "regex": "[\\d:]"
+    },
+    {
+      "name": "randomCandidateRegex",
+      "options": [],
+      "regex": "(?:[A-Za-z0-9+/_\\-.~]|\\\\n){16,}={0,2}"
+    },
+    {
+      "name": "hashContextBeforeRegex",
+      "options": [],
+      "regex": "(?i)(?:sha(?:1|256|384|512)[-:]|base64,|\\.tgz#|commit\\s|tx hash\\s*|(?:sha|hash|digest|checksum|etag|commit)\\w*\"?\\s*[=:]?\\s*[\"']?)$"
+    },
+    {
+      "name": "hashTokenRegex",
+      "options": [],
+      "regex": "(?i)sha(?:1|256|384|512)[-:.]|^diff-"
+    },
+    {
+      "name": "hashWordRegex",
+      "options": [],
+      "regex": "(?i)\\b(?:sha-?\\d+|md5|blake2?b?(?:-\\d+)?|digest|checksum|commit|hash|integrity|etag|index)\\b"
+    },
+    {
+      "name": "urlRegex",
+      "options": [],
+      "regex": "(?i)\\b(?:https?://|www\\.|(?:[a-z0-9-]+\\.)+(?:com|org|net|dev|io|so|app|co|us|be|me|ai|gg|ly)/)\\S+"
+    },
+    {
+      "name": "hexRegex",
+      "options": [],
+      "regex": "^[0-9a-fA-F]+$"
+    },
+    {
+      "name": "upperDigitRegex",
+      "options": [],
+      "regex": "^[A-Z0-9]+$"
+    },
+    {
+      "name": "lowerDigitRegex",
+      "options": [],
+      "regex": "^[a-z0-9]+$"
+    },
+    {
+      "name": "segmentSeparatorRegex",
+      "options": [],
+      "regex": "[-_./+~=]|\\\\n"
+    },
+    {
+      "name": "plainWordSegmentRegex",
+      "options": [],
+      "regex": "^(?:[a-z]{3,}|[A-Z][a-z]{2,}|[0-9a-fA-F]{8,})$"
+    },
+    {
+      "name": "upperWordRegex",
+      "options": [],
+      "regex": "^[A-Z]{3,}$"
+    },
+    {
+      "name": "codeRegexes",
+      "options": [],
+      "regexes": [
+        "\\b[0-9a-f]{5}-[0-9a-f]{5}\\b",
+        "(?i)\\b(?:code|otp|totp|pin)\\b\\)?(?: is)?:?[^0-9\\n]{0,12}(\\d{3} ?\\d{3})\\b",
+        "(?<![\\d.])\\d{1,2}\\. (\\d{4} \\d{4})\\b",
+        "(?<!\\S)(?:(?=[a-z0-9-]*\\d)(?=[a-z0-9-]*[a-z])[a-z0-9]{4,5}-[a-z0-9]{4,5}(?:\\s+|$)){2,}",
+        "(?<!\\S)(?:[A-Z2-7]{4} ){5,}[A-Z2-7]{2,4}(?!\\S)"
+      ]
+    },
+    {
+      "name": "wordRegex",
+      "options": [],
+      "regex": "[A-Za-z]+"
+    },
+    {
+      "name": "numberedWordRegex",
+      "options": [],
+      "regex": "\\b\\d{1,2}\\.\\s+([a-z]+)"
+    },
+    {
+      "name": "passwordShapedRegex",
+      "options": [],
+      "regex": "(?<!\\S)(?=[^\\s]*[a-z])(?=[^\\s]*[A-Z])(?=[^\\s]*\\d)(?=[^\\s]*[!#$%&*?~@^])[^\\s/()\\[\\]{}<>=\"'`,;:|\\\\]{10,40}(?!\\S)"
+    },
+    {
+      "name": "passwordContextBeforeRegex",
+      "options": [],
+      "regex": "(?i)\\b(?:pass\\w*|pw|pwd|login|creds?|credentials|user(?:name)?|admin|root)\\b.{0,24}?(?:/|:|=|\\bis)\\s*$"
+    },
+    {
+      "name": "longTokenRegex",
+      "options": [],
+      "regex": "[A-Za-z0-9_\\-]{14,}"
+    },
+    {
+      "name": "zipCodeRegex",
+      "options": [],
+      "regex": "(?<![\\d$€£.,])\\d{5}(?![\\d.,])"
+    }
+  ],
+  "composed": {
+    "phraseRegexTemplate": {
+      "prefix": "(?<![\\p{L}\\p{N}])",
+      "suffix": "(?![\\p{L}\\p{N}])"
+    }
+  },
+  "lists": {
+    "longNumberLabels": {
+      "items": [
+        "account",
+        "phone",
+        "tel",
+        "tel.",
+        "mobile",
+        "call me at",
+        "reach me on",
+        "m:",
+        "t:"
+      ]
+    },
+    "shortNumberLabels": {
+      "items": [
+        "passport",
+        "reisepass-nr",
+        "reisepass-nr.",
+        "paszport",
+        "transit",
+        "institution",
+        "dl#"
+      ]
+    },
+    "fileExtensions": {
+      "items": [
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "svg",
+        "webp",
+        "pdf",
+        "js",
+        "ts",
+        "tsx",
+        "css",
+        "json",
+        "html",
+        "md",
+        "swift",
+        "py",
+        "mov",
+        "mp4",
+        "zip",
+        "txt"
+      ]
+    },
+    "bareNouns": {
+      "items": [
+        "key",
+        "pass",
+        "auth",
+        "sig",
+        "session",
+        "cookie",
+        "basic",
+        "bearer",
+        "salt",
+        "otp",
+        "sid",
+        "dsn"
+      ]
+    },
+    "wordValuedNouns": {
+      "items": [
+        "key",
+        "token",
+        "auth",
+        "session",
+        "sessionid",
+        "cookie",
+        "sid",
+        "apikey"
+      ]
+    },
+    "passwordNouns": {
+      "items": [
+        "password",
+        "passphrase",
+        "passwd",
+        "mnemonic"
+      ]
+    },
+    "ibanLengths": {
+      "items": {
+        "AD": 24,
+        "AE": 23,
+        "AL": 28,
+        "AT": 20,
+        "AZ": 28,
+        "BA": 20,
+        "BE": 16,
+        "BG": 22,
+        "BH": 22,
+        "BR": 29,
+        "BY": 28,
+        "CH": 21,
+        "CR": 22,
+        "CY": 28,
+        "CZ": 24,
+        "DE": 22,
+        "DK": 18,
+        "DO": 28,
+        "EE": 20,
+        "EG": 29,
+        "ES": 24,
+        "FI": 18,
+        "FO": 18,
+        "FR": 27,
+        "GB": 22,
+        "GE": 22,
+        "GI": 23,
+        "GL": 18,
+        "GR": 27,
+        "GT": 28,
+        "HR": 21,
+        "HU": 28,
+        "IE": 22,
+        "IL": 23,
+        "IQ": 23,
+        "IS": 26,
+        "IT": 27,
+        "JO": 30,
+        "KW": 30,
+        "KZ": 20,
+        "LB": 28,
+        "LC": 32,
+        "LI": 21,
+        "LT": 20,
+        "LU": 20,
+        "LV": 21,
+        "LY": 25,
+        "MC": 27,
+        "MD": 24,
+        "ME": 22,
+        "MK": 19,
+        "MR": 27,
+        "MT": 31,
+        "MU": 30,
+        "NL": 18,
+        "NO": 15,
+        "PK": 24,
+        "PL": 28,
+        "PS": 29,
+        "PT": 25,
+        "QA": 29,
+        "RO": 24,
+        "RS": 22,
+        "SA": 24,
+        "SC": 31,
+        "SE": 24,
+        "SI": 19,
+        "SK": 24,
+        "SM": 27,
+        "ST": 25,
+        "SV": 28,
+        "TL": 23,
+        "TN": 24,
+        "TR": 26,
+        "UA": 29,
+        "VA": 22,
+        "VG": 24,
+        "XK": 20
+      }
+    },
+    "dniLetters": {
+      "value": "TRWAGMYFPDXBNJZSQVHLCKE"
+    }
+  }
+}
