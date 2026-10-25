@@ -84,6 +84,8 @@ final class EditorModel: ObservableObject {
     @Published var selectedZoomIDs: Set<UUID> = []
     /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
     var itemClipboard: ItemClipboard?
+    /// A nested command list (a shortcut's sub-actions) shown instead of every action.
+    @Published var commandSubSession: [EditorAction]?
     /// The clip under the pointer (not published: only shortcuts read it).
     var hoveredSliceID: UUID?
     /// The clip a shortcut acts on: the open one, else the hovered one.

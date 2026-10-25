@@ -24,6 +24,33 @@ extension EditorModel {
         if let next { Preferences.shared.playbackPreviewMaxHeight = next }
     }
 
+    /// S on a clip: the speeds as a command list (`setSliceSpeed` sub-actions).
+    func openSliceSpeedList() -> Bool {
+        guard let id = sliceTarget else { return false }
+        let speeds: [Double] = [1, 1.2, 1.4, 1.6, 1.8, 2, 3, 4, 8, 16, 24, 0.5, 0.75]
+        commandSubSession = speeds.map { speed in
+            let name = (speed.rounded() == speed ? String(Int(speed)) : String(speed)) + "x"
+            return EditorAction(name: name, group: speed > 2 ? "fast" : speed < 1 ? "slow" : "regular", icon: "gauge.with.dots.needle.67percent") { [weak self] in
+                self?.setSliceSpeed(id, speed)
+            }
+        }
+        isCommandMenuOpen = true
+        return true
+    }
+
+    /// V / ⌃V on a clip: microphone or system audio volumes.
+    func openSliceVolumeList(systemAudio: Bool) -> Bool {
+        guard let id = sliceTarget, systemAudio ? project.recording.hasSystemAudio : project.recording.hasMicrophone else { return false }
+        let volumes: [Double] = [1, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        commandSubSession = volumes.map { volume in
+            EditorAction(name: "\(Int((volume * 100).rounded()))%", group: volume < 0.1 ? "muted" : volume >= 1 ? "medium" : "regular", icon: "speaker") { [weak self] in
+                self?.updateSlice(id) { if systemAudio { $0.systemAudioVolume = volume } else { $0.volume = volume } }
+            }
+        }
+        isCommandMenuOpen = true
+        return true
+    }
+
     var commandActions: [EditorAction] {
         let finder: () -> Void = { [bundleURL] in NSWorkspace.shared.activateFileViewerSelecting([bundleURL]) }
         return [
@@ -110,7 +137,7 @@ struct CommandMenuOverlay: View {
     private var sections: [(group: String, actions: [EditorAction])] {
         let words = query.lowercased().split(separator: " ")
         // Actions that cannot apply right now are not listed.
-        let matching = editor.commandActions.filter { action in
+        let matching = (editor.commandSubSession ?? editor.commandActions).filter { action in
             guard action.isEnabled else { return false }
             let text = (action.name + " " + action.group).lowercased()
             return words.allSatisfy { text.contains($0) }
@@ -222,6 +249,7 @@ struct CommandMenuOverlay: View {
 
     private func close() {
         editor.isCommandMenuOpen = false
+        editor.commandSubSession = nil
     }
 }
 

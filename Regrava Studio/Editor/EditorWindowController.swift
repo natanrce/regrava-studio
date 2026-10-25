@@ -191,6 +191,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 }
             case ("j", []): editor.playToward(-1) // "Play backward or increase speed"
             case ("x", []): return editor.rippleRemoveSlice() // "Remove slice till previous cut"
+            case ("s", []): return editor.openSliceSpeedList() // "Set slice speed"
+            case ("v", []): return editor.openSliceVolumeList(systemAudio: false) // "Set slice volume"
+            case ("v", [.control]): return editor.openSliceVolumeList(systemAudio: true)
             case ("k", []): editor.togglePlay() // "Pause" / "Play", resets the speed
             case ("1", []) where editor.openLayoutID != nil, ("2", []) where editor.openLayoutID != nil,
                  ("3", []) where editor.openLayoutID != nil, ("4", []) where editor.openLayoutID != nil:
