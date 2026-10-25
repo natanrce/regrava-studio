@@ -195,6 +195,7 @@ final class EditorModel: ObservableObject {
     func prepare() async {
         await rebuildComposition()
         updateFaceTracking()
+        updateSensitiveDataScan()
         updateSilence()
         syncMicrophoneRenders()
         updateHoverDetection()
@@ -355,6 +356,7 @@ final class EditorModel: ObservableObject {
         let silenceChanged = updated.camera.hideDuringSilenceMs != project.camera.hideDuringSilenceMs
         let cursorStyleChanged = updated.cursor.set != project.cursor.set
         let oldFollowsHovers = project.cursor.followRecordedPositionOnHover, oldSpringIsNil = project.animation.mouseSpring == nil
+        let oldProcessing = project.processing
         let micModeChanged = updated.audio.microphoneAudioPreset != project.audio.microphoneAudioPreset
             || updated.audio.muteMicrophone != project.audio.muteMicrophone
         project = updated
@@ -376,6 +378,7 @@ final class EditorModel: ObservableObject {
             Task { await rebuildComposition(replacingItem: true) }
         }
         if faceTrackingChanged { updateFaceTracking() }
+        if updated.processing != oldProcessing { updateSensitiveDataScan() }
         if updated.cursor.followRecordedPositionOnHover != oldFollowsHovers || (updated.animation.mouseSpring == nil) != oldSpringIsNil { updateHoverDetection() }
         if silenceChanged { updateSilence() }
         if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
@@ -556,6 +559,42 @@ final class EditorModel: ObservableObject {
                 Task { @MainActor [weak self] in self?.scheduleRefresh() }
             }
             if let faces { try? faces.save(bundle: bundle) }
+            await MainActor.run { [weak self] in self?.scheduleRefresh() }
+        }
+    }
+
+    private var sensitiveDataTask: Task<Void, Never>?
+    private var sensitiveDataKey: String?
+
+    /// Hide sensitive data / Hide faces: scans while either is on, again when the phrases or the
+    /// face search change. Turning "Hide sensitive data" on or off alone does not start a scan
+    /// (text is always found and filtered when drawn).
+    func updateSensitiveDataScan() {
+        let processing = project.processing
+        guard processing.isAutoMasking else {
+            sensitiveDataTask?.cancel()
+            sensitiveDataTask = nil
+            sensitiveDataKey = nil
+            return
+        }
+        let key = processing.sensitiveDataCustomPhrases.joined(separator: ",") + "-" + (processing.autoMaskFaces ? "faces" : "")
+        guard key != sensitiveDataKey else { return }
+        sensitiveDataTask?.cancel()
+        sensitiveDataKey = key
+        let bundle = bundleURL, video = videoURL, durationMs = project.recording.durationMs
+        if let stored = SensitiveDataScan.load(bundle: bundle), stored.isComplete, stored.matches(processing) {
+            scheduleRefresh()
+            return
+        }
+        let phrases = processing.sensitiveDataCustomPhrases, faces = processing.autoMaskFaces
+        sensitiveDataTask = Task.detached(priority: .utility) { [weak self] in
+            let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces) { partial, finalUpTo in
+                // Partial results show as they come (`project.sensitiveDataPartial`).
+                try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: partial, finalUpToMs: finalUpTo, isComplete: false).save(bundle: bundle)
+                Task { @MainActor [weak self] in self?.scheduleRefresh() }
+            }
+            guard let detections, !Task.isCancelled else { return }
+            try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: detections, finalUpToMs: durationMs, isComplete: true).save(bundle: bundle)
             await MainActor.run { [weak self] in self?.scheduleRefresh() }
         }
     }
@@ -1623,6 +1662,7 @@ final class EditorModel: ObservableObject {
             transcriptSaveTask?.cancel()
             try? transcript.save(bundle: bundleURL)
         }
+        sensitiveDataTask?.cancel()
         faceTrackingTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
