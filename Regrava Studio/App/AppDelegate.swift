@@ -119,6 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         project(file, "Save as...", key: "s", modifiers: [.command, .shift]) { $0.saveAs() }
         project(file, "Show project in Finder", key: "o", modifiers: [.command, .shift], icon: "folder") { NSWorkspace.shared.activateFileViewerSelecting([$0.bundleURL]) }
         file.addItem(.separator())
+        add(to: file, "Import preset...") { PresetStore.shared.importPreset() }.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
+        file.addItem(.separator())
         project(file, "Remove project", icon: "trash") { model in
             guard model.deleteProject() else { return }
             AppController.shared.closeEditor(for: model)

@@ -55,7 +55,7 @@ struct GeneralPanel: View {
                     }
                 }
             }
-            SidebarSection(showsDivider: false) {
+            SidebarSection {
                 SliderField(name: "Shadow", value: editor.binding(\.style.shadow.intensity), range: 0...0.6, step: 0.01, preview: { percent($0) }, resetValue: 0.3)
                 if style.shadow.intensity > 0 {
                     SegmentedPicker(options: [false, true], label: { $0 ? "Directional" : "Classic" }, selection: editor.binding(\.style.shadow.isDirectional))
@@ -66,6 +66,8 @@ struct GeneralPanel: View {
                     }
                 }
             }
+            // Privacy, the last section.
+            SidebarSection(showsDivider: false) { PrivacySection(editor: editor) }
         }
     }
 
@@ -1107,6 +1109,90 @@ struct CursorTile: View {
         }
         .onChange(of: isSelected) { _, selected in
             if selected { cycle?.cancel(); shown = nil }
+        }
+    }
+}
+
+
+// MARK: - Privacy
+
+/// "Hide sensitive data" and "Hide faces", each with its "Review Before Sharing" warning, and the
+/// custom phrases under the first.
+private struct PrivacySection: View {
+    @ObservedObject var editor: EditorModel
+
+    var body: some View {
+        let processing = editor.project.processing
+        VStack(alignment: .leading, spacing: Theme.gap(3)) {
+            ToggleRow(icon: "lock.fill", title: "Hide sensitive data", description: "Covers emails, phone numbers, card numbers and keys shown in the recording",
+                      isOn: editor.binding(\.processing.autoMaskSensitiveData))
+            if processing.autoMaskSensitiveData {
+                ReviewWarning()
+                CustomPhrasesField(editor: editor)
+            }
+            ToggleRow(icon: "face.dashed.fill", title: "Hide faces", description: "Blurs people's faces shown in the recording, like avatars and video calls",
+                      isOn: editor.binding(\.processing.autoMaskFaces))
+            if processing.autoMaskFaces { ReviewWarning() }
+        }
+    }
+}
+
+/// Shown under each toggle that is on.
+private struct ReviewWarning: View {
+    var body: some View {
+        Callout(kind: .warning, icon: "exclamationmark.triangle.fill", title: "Review Before Sharing",
+                message: "Some private details may still be visible in parts of your recording. Watch it in full before you share it.")
+    }
+}
+
+/// A button while there are no phrases, else a text area saved on blur when the parsed list changed.
+private struct CustomPhrasesField: View {
+    @ObservedObject var editor: EditorModel
+    @State private var isEditing = false
+    @State private var draft: String?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let stored = editor.project.processing.sensitiveDataCustomPhrases
+        if stored.isEmpty && !isEditing {
+            RSButton(title: "Add custom phrases", icon: "plus", kind: .secondary) {
+                isEditing = true
+                DispatchQueue.main.async { focused = true }
+            }
+            .fixedSize()
+        } else {
+            NamedField(name: "Custom phrases", description: "Names, clients or other words, separated by commas") {
+                ZStack(alignment: .topLeading) {
+                    if (draft ?? stored.joined(separator: ", ")).isEmpty {
+                        Text("Jane Appleseed, Acme Inc.")
+                            .font(Theme.Typo.controlCopy)
+                            .foregroundStyle(Theme.Colors.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: Binding(get: { draft ?? stored.joined(separator: ", ") }, set: { draft = $0 }))
+                        .font(Theme.Typo.controlCopy)
+                        .scrollContentBackground(.hidden)
+                        .focused($focused)
+                        .frame(minHeight: 44)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.lighterBg))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.Colors.systemBorder))
+            }
+            .onChange(of: focused) { _, isFocused in
+                guard !isFocused else { return }
+                isEditing = false
+                if let text = draft {
+                    draft = nil
+                    let parsed = ProcessingConfig.parsePhrases(text)
+                    if parsed.joined(separator: "\n") != stored.joined(separator: "\n") {
+                        editor.change { $0.processing.sensitiveDataCustomPhrases = parsed }
+                    }
+                }
+            }
         }
     }
 }
