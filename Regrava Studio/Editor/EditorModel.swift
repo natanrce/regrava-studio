@@ -117,6 +117,8 @@ final class EditorModel: ObservableObject {
     /// The timeline's scroll and zoom, published on their own object: only the timeline redraws
     /// while they change (scroll and pinch fire for every trackpad event).
     let viewport = TimelineViewport()
+    /// Background tasks shown by the toolbar's spinner (`view.tasks`).
+    let tasks = BackgroundTasks()
     /// Audio waveforms drawn in the clips.
     let waveforms = TimelineWaveforms()
     /// Visible timeline duration (zoom level of the timeline).
@@ -244,10 +246,17 @@ final class EditorModel: ObservableObject {
               let next = wanted.first(where: { MicrophoneRenderer.readyURL(bundle: bundleURL, preset: $0) == nil }) else { return }
         let recording = videoURL, bundle = bundleURL
         microphoneRenderProgress[next] = 0
+        // "Preparing audio" shows after 800 ms, the other modes after 100 ms.
+        let taskID = "microphone-render-\(next.rawValue)"
+        tasks.register(taskID, name: next.taskLabel, showAfterMs: next == .voice || next == .channelFix ? 800 : 100, progress01: 0)
         microphoneRenderTasks[next] = Task { [weak self] in
+            defer { self?.tasks.finish(taskID) }
             do {
                 try await MicrophoneRenderer.render(recording: recording, microphoneTrackIndex: index, preset: next, bundle: bundle) { value in
-                    Task { @MainActor in self?.microphoneRenderProgress[next] = value }
+                    Task { @MainActor in
+                        self?.microphoneRenderProgress[next] = value
+                        self?.tasks.update(taskID, progress01: value)
+                    }
                 }
                 guard let self else { return }
                 self.microphoneRenderProgress[next] = nil
@@ -574,6 +583,7 @@ final class EditorModel: ObservableObject {
         guard processing.isAutoMasking else {
             sensitiveDataTask?.cancel()
             sensitiveDataTask = nil
+            tasks.finish("sensitive-data")
             sensitiveDataKey = nil
             return
         }
@@ -587,11 +597,18 @@ final class EditorModel: ObservableObject {
             return
         }
         let phrases = processing.sensitiveDataCustomPhrases, faces = processing.autoMaskFaces
+        // "Detecting sensitive data", shown after 500 ms.
+        tasks.finish("sensitive-data")
+        tasks.register("sensitive-data", name: "Detecting sensitive data", showAfterMs: 500, progress01: 0)
         sensitiveDataTask = Task.detached(priority: .utility) { [weak self] in
+            defer { Task { @MainActor [weak self] in self?.tasks.finish("sensitive-data") } }
             let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces) { partial, finalUpTo in
                 // Partial results show as they come (`project.sensitiveDataPartial`).
                 try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: partial, finalUpToMs: finalUpTo, isComplete: false).save(bundle: bundle)
-                Task { @MainActor [weak self] in self?.scheduleRefresh() }
+                Task { @MainActor [weak self] in
+                    self?.tasks.update("sensitive-data", progress01: durationMs > 0 ? finalUpTo / durationMs : nil)
+                    self?.scheduleRefresh()
+                }
             }
             guard let detections, !Task.isCancelled else { return }
             try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: detections, finalUpToMs: durationMs, isComplete: true).save(bundle: bundle)

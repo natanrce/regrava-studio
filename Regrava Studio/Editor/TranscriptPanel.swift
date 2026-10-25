@@ -18,9 +18,13 @@ extension EditorModel {
     func generateTranscript(locale: String) {
         guard !isGeneratingTranscript, let track = project.recording.audioSources.firstIndex(of: .microphone) else { return }
         isGeneratingTranscript = true
+        tasks.register("transcript", name: "Generating transcript")
         let recording = videoURL, bundle = bundleURL
         Task {
-            defer { isGeneratingTranscript = false }
+            defer {
+                isGeneratingTranscript = false
+                tasks.finish("transcript")
+            }
             do {
                 let words = try await SpeechTranscription.transcribe(recording: recording, audioTrackIndex: track, locale: locale)
                 let result = SessionTranscript(generator: .system(locale: locale), transcript: words)

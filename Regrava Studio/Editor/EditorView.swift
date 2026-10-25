@@ -115,6 +115,7 @@ private struct Topbar: View {
                         .disabled(!editor.canRedo)
                         .opacity(editor.canRedo ? 1 : Theme.disabledOpacity)
                 }
+                BackgroundTasksIndicator(tasks: editor.tasks)
                 Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
                 PresetsButton(editor: editor)
                 Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
