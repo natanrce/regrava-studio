@@ -269,6 +269,8 @@ public struct Project: Codable, Hashable, Sendable {
     public var slices: [Slice]
     /// Sensitive data and highlight masks (`scene.masks`).
     public var masks: [MaskRange] = []
+    /// Hide sensitive data / Hide faces (`processing`).
+    public var processing = ProcessingConfig()
     public var audio = AudioConfig()
     /// Device frame around iPhone/iPad recordings (`device`).
     public var device = DeviceConfig()
@@ -328,6 +330,7 @@ public struct Project: Codable, Hashable, Sendable {
         slices = stored.isEmpty ? Self.defaultSlices(durationMs: recording.durationMs) : stored.sorted { $0.sourceStartMs < $1.sourceStartMs }
         resolvedTypingSuggestionsMs = c.value(.resolvedTypingSuggestionsMs, default: [])
         masks = c.value(.masks, default: [])
+        processing = c.value(.processing, default: ProcessingConfig())
         audio = c.value(.audio, default: AudioConfig())
         device = c.value(.device, default: DeviceConfig())
         crop = c.value(.crop, default: ScreenCropConfig())
