@@ -1,0 +1,48 @@
+import Foundation
+import Testing
+@testable import RegravaCore
+
+struct PresetFileTests {
+    /// A preset's meta.json from the fixture reads into the same settings.
+    @Test func readsAPresetMetaFile() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/preset-meta.json")
+        let config = try PresetFile.decode(Data(contentsOf: url))
+        #expect(config.cursor.size == 48)
+        #expect(config.cursor.set.id == "macos-tahoe")
+        #expect(config.style.cornerRadius == 16)
+        #expect(config.style.paddingRatio == 0.1)
+        #expect(config.style.aspectRatio == nil)
+        #expect(config.style.background.systemName == "macOS/san-francisco-dark.jpg")
+        #expect(config.style.background.gradientStops.first?.hexString == "#4776e6")
+        #expect(config.animation.mouseSpring?.stiffness == 340)
+        #expect(config.animation.screenSpring.damping == 12)
+        #expect(config.defaultLayout?.cameraOverlay.zoomedScale == 0.8)
+        #expect(config.captions?.enableShortcuts == true)
+        #expect(config.device?.enableMockup == true)
+    }
+
+    /// Written and read back unchanged, in the envelope.
+    @Test func roundTrips() throws {
+        let project = Project(recording: RecordingInfo(videoSize: Size2(width: 100, height: 100), pointPixelScale: 1, durationMs: 1000, fps: 60), mouseEvents: [])
+        var config = project.presetConfig
+        config.style.cornerRadius = 22
+        config.style.aspectRatio = 16.0 / 9
+        config.processing?.autoMaskFaces = true
+        let data = try PresetFile.encode(config, appVersion: "1.0")
+        let root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let json = root["json"] as! [String: Any]
+        #expect(json["version"] as? String == "4.0.0")
+        #expect(((json["projectConfig"] as! [String: Any])["styles"] as! [String: Any])["screenBorderRadius"] as? Double == 22)
+        let back = try PresetFile.decode(data)
+        #expect(back.style == config.style)
+        #expect(back.cursor == config.cursor)
+        #expect(back.audio == config.audio)
+        #expect(back.processing?.autoMaskFaces == true)
+        #expect(back.defaultLayout == config.defaultLayout)
+    }
+
+    @Test func rejectsABadVersion() {
+        let data = #"{"json":{"version":"x","projectConfig":{}}}"#.data(using: .utf8)!
+        #expect(throws: PresetFile.Failure.self) { try PresetFile.decode(data) }
+    }
+}
