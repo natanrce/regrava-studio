@@ -602,7 +602,7 @@ final class EditorModel: ObservableObject {
         tasks.register("sensitive-data", name: "Detecting sensitive data", showAfterMs: 500, progress01: 0)
         sensitiveDataTask = Task.detached(priority: .utility) { [weak self] in
             defer { Task { @MainActor [weak self] in self?.tasks.finish("sensitive-data") } }
-            let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces) { partial, finalUpTo in
+            let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces, bundle: bundle) { partial, finalUpTo in
                 // Partial results show as they come (`project.sensitiveDataPartial`).
                 try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: partial, finalUpToMs: finalUpTo, isComplete: false).save(bundle: bundle)
                 Task { @MainActor [weak self] in
