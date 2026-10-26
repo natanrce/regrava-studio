@@ -75,8 +75,10 @@ public enum SilenceDetection {
 
     /// Inside a long enough silence, away from its edges.
     public static func isSilent(_ chunks: [SilenceChunk], at t: Double, hideDuringSilenceMs: Double) -> Bool {
-        guard let chunk = chunks.first(where: { $0.startMs <= t && t <= $0.endMs }),
-              chunk.endMs - chunk.startMs >= hideDuringSilenceMs else { return false }
+        // Chunks are ordered and apart: the first ending at or after `t` is the only candidate.
+        guard let i = ceilSearch(count: chunks.count, value: t, key: { chunks[$0].endMs }), chunks[i].startMs <= t else { return false }
+        let chunk = chunks[i]
+        guard chunk.endMs - chunk.startMs >= hideDuringSilenceMs else { return false }
         return t - chunk.startMs >= edgeMs && chunk.endMs - t >= edgeMs
     }
 }

@@ -55,4 +55,25 @@ import Testing
             }
         }
     }
+
+    @Test func silenceLookupMatchesAFullScan() {
+        // Chunks with a long one, short ones, and one ending where the next window starts.
+        let chunks = [
+            SilenceChunk(startMs: 0, endMs: 600), SilenceChunk(startMs: 650, endMs: 9000),
+            SilenceChunk(startMs: 9050, endMs: 9600), SilenceChunk(startMs: 12_000, endMs: 30_000),
+        ]
+        func scan(_ chunks: [SilenceChunk], _ t: Double, _ hide: Double) -> Bool {
+            guard let chunk = chunks.first(where: { $0.startMs <= t && t <= $0.endMs }),
+                  chunk.endMs - chunk.startMs >= hide else { return false }
+            return t - chunk.startMs >= SilenceDetection.edgeMs && chunk.endMs - t >= SilenceDetection.edgeMs
+        }
+        let edges = chunks.flatMap { [$0.startMs, $0.endMs, $0.startMs + SilenceDetection.edgeMs, $0.endMs - SilenceDetection.edgeMs] }
+        for list in [chunks, [], [chunks[1]]] {
+            for t in Self.probes(edges) + stride(from: -100.0, through: 31_000, by: 37).map({ $0 }) {
+                for hide in [100.0, 5000] {
+                    #expect(SilenceDetection.isSilent(list, at: t, hideDuringSilenceMs: hide) == scan(list, t, hide))
+                }
+            }
+        }
+    }
 }
