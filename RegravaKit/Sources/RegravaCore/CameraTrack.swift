@@ -555,7 +555,7 @@ struct CameraPlanner {
     /// middle), with the cursor bounds over the next 350 ms.
     func restingFocus(at t: Double) -> (center: Vec2, bounds: Rect2?) {
         let video = project.recording.videoSize
-        let group = restingGroups.last { ($0.events.first?.timeMs ?? .infinity) <= t }
+        let group = lastSearch(count: restingGroups.count, while: { restingGroups[$0].startMs <= t }).map { restingGroups[$0] }
         let center = group.map { Vec2($0.center.x / video.width, $0.center.y / video.height) } ?? .center01
         guard let b = Self.cursorBounds(cleaned, from: t, to: t + 350) else { return (center, nil) }
         return (center, Rect2(x: b.x / video.width, y: b.y / video.height, width: b.width / video.width, height: b.height / video.height))

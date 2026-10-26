@@ -2,7 +2,6 @@ import Foundation
 
 /// A burst of mouse activity that fits in the visible area of a zoom.
 public struct FocusGroup: Hashable, Sendable {
-    public var events: [MouseEvent]
     public var startMs: Double
     public var endMs: Double
     public var bounds: Rect2
@@ -21,7 +20,6 @@ public enum FocusGrouping {
         func close(at end: Double) {
             guard let first = current.first else { return }
             groups.append(FocusGroup(
-                events: current,
                 startMs: first.timeMs,
                 endMs: end,
                 bounds: Rect2(x: minX, y: minY, width: maxX - minX, height: maxY - minY),
@@ -67,6 +65,6 @@ public enum FocusGrouping {
 
     /// The group that has most recently started at `timeMs`, or the first upcoming one.
     public static func group(at timeMs: Double, in groups: [FocusGroup]) -> FocusGroup? {
-        groups.last(where: { $0.startMs <= timeMs }) ?? groups.first
+        lastSearch(count: groups.count, while: { groups[$0].startMs <= timeMs }).map { groups[$0] } ?? groups.first
     }
 }
