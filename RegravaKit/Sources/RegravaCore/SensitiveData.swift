@@ -40,7 +40,8 @@ public struct ProcessingConfig: Codable, Hashable, Sendable {
 }
 
 public enum SensitiveDataKind: String, Codable, Hashable, Sendable {
-    case email, phone, address, ssn, card, iban, apiKey, secret, privateKey, custom, face
+    /// `identifier`: labelled IDs, VAT, national numbers, IP and MAC addresses, wallets and the like.
+    case email, phone, address, ssn, card, iban, apiKey, secret, privateKey, identifier, custom, face
 }
 
 /// Where an item is at a moment, in video pixels, top-left origin, already padded past the text.
@@ -64,6 +65,8 @@ public struct SensitiveDataKeyframe: Codable, Hashable, Sendable {
 
 /// One found item, covered for `[startMs, endMs)` of recording time.
 public struct SensitiveDataDetection: Codable, Hashable, Sendable {
+    /// The scan's number for the item (0 in results stored before ids were kept).
+    public var id: Int
     public var kind: SensitiveDataKind
     public var text: String
     public var startMs: Double
@@ -71,13 +74,25 @@ public struct SensitiveDataDetection: Codable, Hashable, Sendable {
     public var isTyped: Bool
     public var keyframes: [SensitiveDataKeyframe]
 
-    public init(kind: SensitiveDataKind, text: String, startMs: Double, endMs: Double, isTyped: Bool = false, keyframes: [SensitiveDataKeyframe]) {
+    public init(id: Int = 0, kind: SensitiveDataKind, text: String, startMs: Double, endMs: Double, isTyped: Bool = false, keyframes: [SensitiveDataKeyframe]) {
+        self.id = id
         self.kind = kind
         self.text = text
         self.startMs = startMs
         self.endMs = endMs
         self.isTyped = isTyped
         self.keyframes = keyframes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int.self, forKey: .id) ?? 0
+        kind = try c.decode(SensitiveDataKind.self, forKey: .kind)
+        text = try c.decode(String.self, forKey: .text)
+        startMs = try c.decode(Double.self, forKey: .startMs)
+        endMs = try c.decode(Double.self, forKey: .endMs)
+        isTyped = try c.decodeIfPresent(Bool.self, forKey: .isTyped) ?? false
+        keyframes = try c.decode([SensitiveDataKeyframe].self, forKey: .keyframes)
     }
 }
 
