@@ -197,13 +197,15 @@ final class RecordingCoordinator: ObservableObject {
 
     @Published private(set) var audioSourceApps: [AudioSourceApp] = []
 
-    /// The running apps ScreenCaptureKit can record, in its order.
+    /// The apps with a normal window on screen (window layer 0), by name.
     func refreshAudioSourceApps() async {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return }
-        let apps = content.applications.compactMap { app -> AudioSourceApp? in
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else { return }
+        let withWindows = Set(content.windows.filter { $0.windowLayer == 0 }.compactMap { $0.owningApplication?.processID })
+        let apps = content.applications.filter { withWindows.contains($0.processID) }.compactMap { app -> AudioSourceApp? in
             guard !app.bundleIdentifier.isEmpty, let path = NSRunningApplication(processIdentifier: app.processID)?.bundleURL?.path else { return nil }
             return AudioSourceApp(name: app.applicationName, bundleID: app.bundleIdentifier, appPath: path, processID: app.processID)
         }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         if apps != audioSourceApps { audioSourceApps = apps }
     }
 
