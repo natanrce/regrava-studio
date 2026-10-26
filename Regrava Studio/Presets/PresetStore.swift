@@ -132,6 +132,10 @@ final class PresetStore: ObservableObject {
         panel.canChooseDirectories = true
         panel.treatsFilePackagesAsDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        importPreset(at: url)
+    }
+
+    func importPreset(at url: URL) {
         guard [Self.packageExtension, Self.originalPackageExtension].contains(url.pathExtension) else {
             Dialogs.info(title: "Invalid file selected", message: "The selected file is not a valid Regrava Studio preset file. Please select a file with the .\(Self.packageExtension) extension.")
             return

@@ -1594,6 +1594,37 @@ final class EditorModel: ObservableObject {
         exports.start(project: project, videoURL: videoURL, projectName: projectName, settings: preferences.widgetExportSettings.current, target: target)
     }
 
+    /// "Export to file..." / "Export to clipboard" with the export picker's current settings.
+    func exportWithCurrentSettings(_ target: ExportTarget) {
+        guard !exports.isExporting else { return }
+        pause()
+        exports.start(project: project, videoURL: videoURL, projectName: projectName, settings: preferences.exportSettings.current, target: target)
+    }
+
+    /// "Copy and zip project": the project folder zipped and put on the clipboard.
+    func copyAndZipProject() {
+        let bundle = bundleURL, name = projectName
+        if isDirty { saveNow() }
+        Task.detached {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let zip = folder.appendingPathComponent("\(name).zip")
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", bundle.path, zip.path]
+            let ok = (try? process.run()) != nil && { process.waitUntilExit(); return process.terminationStatus == 0 }()
+            await MainActor.run { [weak self] in
+                if ok {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([zip as NSURL])
+                    self?.showToast("Copied project to clipboard")
+                } else {
+                    self?.showToast("Failed to copy project to clipboard")
+                }
+            }
+        }
+    }
+
     /// "Export current frame as image...": the styled frame at 2160 px height as PNG,
     /// "<name> - Frame <n>", then shown in Finder.
     func exportCurrentFrame() {

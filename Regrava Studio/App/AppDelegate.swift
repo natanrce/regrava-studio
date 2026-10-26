@@ -51,9 +51,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Dock menu. Projects opened from Finder or the Dock's recent documents.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.pathExtension == ProjectStore.fileExtension {
-            AppController.shared.recording.closePicker()
-            AppController.shared.openProject(at: url)
+        for url in urls {
+            if url.scheme == DeepLinks.scheme {
+                DeepLinks.handle(url)
+            } else if url.pathExtension == ProjectStore.fileExtension {
+                AppController.shared.recording.closePicker()
+                AppController.shared.openProject(at: url)
+            } else if url.pathExtension == PresetStore.packageExtension {
+                // Opening a preset package imports it.
+                PresetStore.shared.importPreset(at: url)
+            }
         }
     }
 
