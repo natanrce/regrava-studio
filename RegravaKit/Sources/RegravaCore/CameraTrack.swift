@@ -273,7 +273,7 @@ public final class CameraTrack: @unchecked Sendable {
     /// The frame at playback time `timeMs`, with the previous project frame attached for motion blur.
     public func frame(at timeMs: Double) -> CameraFrame {
         var frame = interpolatedFrame(at: timeMs)
-        let before = interpolatedFrame(at: max(0, timeMs - sampleIntervalMs))
+        let before = interpolatedMotion(at: max(0, timeMs - sampleIntervalMs))
         frame.previousScreenRect = before.screenRect
         frame.previousCursor = before.cursor
         frame.previousCursorScale = before.cursorScale
@@ -281,15 +281,36 @@ public final class CameraTrack: @unchecked Sendable {
         return frame
     }
 
+    /// The samples around playback time `timeMs` and the fraction between them.
+    private func neighbours(at timeMs: Double) -> (a: CameraFrame, b: CameraFrame, f: Double) {
+        let position = clamp(timeMs / sampleIntervalMs, 0, Double(samples.count - 1))
+        let i0 = Int(position.rounded(.down))
+        let i1 = min(i0 + 1, samples.count - 1)
+        return (samples[i0], samples[i1], position - Double(i0))
+    }
+
+    /// Screen, cursor, press scale and camera placement of `interpolatedFrame(at:)`, without the rest.
+    private func interpolatedMotion(at timeMs: Double) -> (screenRect: Rect2, cursor: Vec2?, cursorScale: Double, cameraRect: Rect2?) {
+        guard let first = samples.first else { return (layout.restScreen, nil, 1, nil) }
+        let (a, b, f) = neighbours(at: timeMs)
+        return (
+            a.screenRect.lerp(to: b.screenRect, f),
+            interpolate(a.cursor, b.cursor, f) ?? first.cursor,
+            a.cursorScale + (b.cursorScale - a.cursorScale) * f,
+            Self.interpolate(a.cameraRect, b.cameraRect, f)
+        )
+    }
+
+    private static func interpolate(_ a: Rect2?, _ b: Rect2?, _ f: Double) -> Rect2? {
+        if let a, let b { return a.lerp(to: b, f) }
+        return a ?? b
+    }
+
     private func interpolatedFrame(at timeMs: Double) -> CameraFrame {
         guard let first = samples.first else {
             return CameraFrame(timeMs: timeMs, screenRect: layout.restScreen)
         }
-        let position = clamp(timeMs / sampleIntervalMs, 0, Double(samples.count - 1))
-        let i0 = Int(position.rounded(.down))
-        let i1 = min(i0 + 1, samples.count - 1)
-        let f = position - Double(i0)
-        let a = samples[i0], b = samples[i1]
+        let (a, b, f) = neighbours(at: timeMs)
         var frame = CameraFrame(
             timeMs: timeMs,
             screenRect: a.screenRect.lerp(to: b.screenRect, f),
@@ -299,11 +320,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
         frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
         frame.mask = Self.interpolate(a.mask, b.mask, f)
-        if let ca = a.cameraRect, let cb = b.cameraRect {
-            frame.cameraRect = ca.lerp(to: cb, f)
-        } else {
-            frame.cameraRect = a.cameraRect ?? b.cameraRect
-        }
+        frame.cameraRect = Self.interpolate(a.cameraRect, b.cameraRect, f)
         frame.cameraOpacity = a.cameraOpacity + (b.cameraOpacity - a.cameraOpacity) * f
         frame.cameraCornerRadius = a.cameraCornerRadius + (b.cameraCornerRadius - a.cameraCornerRadius) * f
         frame.cameraSizeFactor = a.cameraSizeFactor + (b.cameraSizeFactor - a.cameraSizeFactor) * f

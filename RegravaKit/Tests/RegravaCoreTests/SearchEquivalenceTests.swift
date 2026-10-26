@@ -128,4 +128,18 @@ import Testing
             }
         }
     }
+
+    @Test func previousFrameValuesMatchTheFrameOneStepEarlier() {
+        var p = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 2, durationMs: 6000, fps: 30, cameraFileName: "camera.mov", cameraSize: Size2(width: 1280, height: 720)), mouseEvents: Array(Self.events.prefix(60)))
+        p.zooms = [ZoomRange(startMs: 1000, endMs: 3000, scale: 2)]
+        let track = CameraTrack(project: p)
+        for t in stride(from: 0.0, through: 6500, by: 11.7) {
+            let frame = track.frame(at: t)
+            let before = track.frame(at: max(0, t - track.sampleIntervalMs))
+            #expect(frame.previousScreenRect == before.screenRect)
+            #expect(frame.previousCursor == before.cursor)
+            #expect(frame.previousCursorScale == before.cursorScale)
+            #expect(frame.previousCameraRect == before.cameraRect)
+        }
+    }
 }
