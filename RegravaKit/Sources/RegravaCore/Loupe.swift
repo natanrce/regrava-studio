@@ -122,21 +122,29 @@ extension CameraPlanner {
     }
 
     /// `isCoveredByLoupe`: the active lens covers at least half of the camera, sampled on a 32
-    /// × 32 grid. Rects in stage units. `target` is `loupeTarget(at:)` of the instant.
+    /// × 32 grid over the part of the camera within the lens's bounding square and weighted by
+    /// that part's share of the camera. Rects in stage units. `target` is `loupeTarget(at:)`
+    /// of the instant.
     func isCameraCoveredByLoupe(camera: Rect2, screen: Rect2, target: (frame: LoupeFrame, isActive: Bool)) -> Bool {
         guard camera.width > 0, camera.height > 0 else { return false }
         guard target.isActive else { return false }
         let center = Vec2(screen.x + target.frame.center.x * screen.width, screen.y + target.frame.center.y * screen.height)
         let r = target.frame.radius * screen.width
+        guard r > 0 else { return false }
+        let x0 = max(camera.x, center.x - r), x1 = min(camera.x + camera.width, center.x + r)
+        let y0 = max(camera.y, center.y - r), y1 = min(camera.y + camera.height, center.y + r)
+        guard x1 > x0, y1 > y0 else { return false }
+        let rr = r * r
         var inside = 0
-        for i in 0..<32 {
-            for j in 0..<32 {
-                let x = camera.x + (Double(i) + 0.5) / 32 * camera.width
-                let y = camera.y + (Double(j) + 0.5) / 32 * camera.height
-                if hypot(x - center.x, y - center.y) <= r { inside += 1 }
+        for j in 0..<32 {
+            let dy = y0 + (Double(j) + 0.5) / 32 * (y1 - y0) - center.y
+            for i in 0..<32 {
+                let dx = x0 + (Double(i) + 0.5) / 32 * (x1 - x0) - center.x
+                if dx * dx + dy * dy <= rr { inside += 1 }
             }
         }
-        return Double(inside) / 1024 >= 0.5
+        let covered = Double(inside) / 1024 * (x1 - x0) * (y1 - y0)
+        return clamp(covered / (camera.width * camera.height), 0, 1) >= 0.5
     }
 
     /// The enabled zoom with the latest end at or before `t`; the first in project order among

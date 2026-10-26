@@ -48,4 +48,22 @@ import Testing
         let zoom = try JSONDecoder().decode(ZoomRange.self, from: Data(json.utf8))
         #expect(zoom.presentation == .screen && zoom.loupeOptions == LoupeOptions())
     }
+
+    @Test func cameraCoverageIsTheLensShareOfTheCamera() {
+        let p = project([])
+        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, sparse: p.mouseEvents)
+        let screen = Rect2(x: 0, y: 0, width: 1000, height: 1000)
+        let camera = Rect2(x: 400, y: 400, width: 200, height: 200)
+        func lens(_ radius: Double, at center: Vec2 = Vec2(0.5, 0.5), active: Bool = true) -> (frame: LoupeFrame, isActive: Bool) {
+            (LoupeFrame(center: center, radius: radius, zoom: 2, bevelRatio: 0, chromaticAberration: 0, shadowAlpha: 0, presence: 1), active)
+        }
+        // A disc inside the camera: π·r² over 40 000.
+        #expect(planner.isCameraCoveredByLoupe(camera: camera, screen: screen, target: lens(0.085)))  // ≈ 0.57
+        #expect(!planner.isCameraCoveredByLoupe(camera: camera, screen: screen, target: lens(0.075))) // ≈ 0.44
+        #expect(planner.isCameraCoveredByLoupe(camera: camera, screen: screen, target: lens(0.5)))
+        #expect(!planner.isCameraCoveredByLoupe(camera: camera, screen: screen, target: lens(0.5, active: false)))
+        #expect(!planner.isCameraCoveredByLoupe(camera: camera, screen: screen, target: lens(0)))
+        // Far from the camera.
+        #expect(!planner.isCameraCoveredByLoupe(camera: camera, screen: screen, target: lens(0.2, at: Vec2(0.05, 0.05))))
+    }
 }
