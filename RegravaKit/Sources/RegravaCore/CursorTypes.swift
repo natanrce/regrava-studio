@@ -76,13 +76,30 @@ public enum CursorTypes {
         config.optimizeOriginalTypes ? optimized(events) : events
     }
 
+    /// Image names of `typeEvents`, index for index.
+    public static func assetNames(of typeEvents: [MouseEvent]) -> [String] {
+        typeEvents.map { assetName(for: $0.cursorID) }
+    }
+
+    /// Image of a moment before any type event.
+    private static let unrecordedName = assetName(for: nil)
+
     /// Times where the drawn image changes, used as planner sync points.
     public static func imageChangeTimes(_ typeEvents: [MouseEvent], config: CursorConfig) -> [Double] {
         guard !config.alwaysUseDefault else { return [] }
+        return imageChangeTimes(typeEvents, names: assetNames(of: typeEvents))
+    }
+
+    /// `imageChangeTimes` with the events' image names already resolved (`assetNames(of:)`).
+    public static func imageChangeTimes(_ typeEvents: [MouseEvent], names: [String], config: CursorConfig) -> [Double] {
+        guard !config.alwaysUseDefault else { return [] }
+        return imageChangeTimes(typeEvents, names: names)
+    }
+
+    private static func imageChangeTimes(_ typeEvents: [MouseEvent], names: [String]) -> [Double] {
         var times: [Double] = []
         var previous: String?
-        for event in typeEvents {
-            let name = assetName(for: event.cursorID)
+        for (event, name) in zip(typeEvents, names) {
             if let previous, previous != name { times.append(event.timeMs) }
             previous = name
         }
@@ -94,6 +111,14 @@ public enum CursorTypes {
         guard !config.alwaysUseDefault else { return defaultName }
         let index = floorSearch(count: typeEvents.count, value: t) { typeEvents[$0].timeMs }
         return assetName(for: index.map { typeEvents[$0].cursorID } ?? nil)
+    }
+
+    /// `assetName(at:typeEvents:config:)` with the events' image names already resolved
+    /// (`assetNames(of:)`).
+    public static func assetName(at t: Double, typeEvents: [MouseEvent], names: [String], config: CursorConfig) -> String {
+        guard !config.alwaysUseDefault else { return defaultName }
+        let index = floorSearch(count: typeEvents.count, value: t) { typeEvents[$0].timeMs }
+        return index.map { names[$0] } ?? unrecordedName
     }
 
     /// Whether the cursor is drawn pressed at `t`. With smooth movement the drawn cursor runs

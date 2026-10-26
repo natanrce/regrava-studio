@@ -103,6 +103,8 @@ public final class CameraTrack: @unchecked Sendable {
     private let samples: [CameraFrame]
     private let clicks: [MouseEvent]
     private let typeEvents: [MouseEvent]
+    /// Image names of `typeEvents`, index for index.
+    private let typeEventNames: [String]
     private let cursorConfig: CursorConfig
 
     public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, sampleRateHz: Double? = nil) {
@@ -123,7 +125,9 @@ public final class CameraTrack: @unchecked Sendable {
         cursorConfig = project.cursor
         let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)
         self.typeEvents = typeEvents
-        let imageChanges = CursorTypes.imageChangeTimes(typeEvents, config: project.cursor)
+        let typeEventNames = project.cursor.alwaysUseDefault ? [] : CursorTypes.assetNames(of: typeEvents)
+        self.typeEventNames = typeEventNames
+        let imageChanges = CursorTypes.imageChangeTimes(typeEvents, names: typeEventNames, config: project.cursor)
         let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
         let hoverTimes = project.cursorHoverTimes(hovers)
 
@@ -313,7 +317,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cameraFocal01 = a.cameraFocal01.lerp(to: b.cameraFocal01, f)
         frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
-        frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, config: cursorConfig)
+        frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, names: typeEventNames, config: cursorConfig)
         if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {
             let age = source - clicks[i].timeMs
             if age >= 0 && age < Self.clickRippleMs {

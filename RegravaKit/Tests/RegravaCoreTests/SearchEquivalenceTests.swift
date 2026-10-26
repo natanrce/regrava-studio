@@ -76,4 +76,20 @@ import Testing
             }
         }
     }
+
+    @Test func resolvedCursorNamesMatchTheLookup() {
+        let types = Self.events
+        let names = CursorTypes.assetNames(of: types)
+        for always in [false, true] {
+            var config = CursorConfig()
+            config.alwaysUseDefault = always
+            #expect(CursorTypes.imageChangeTimes(types, names: names, config: config) == CursorTypes.imageChangeTimes(types, config: config))
+            for list in [types, []] {
+                let listNames = CursorTypes.assetNames(of: list)
+                for t in Self.probes(list.map(\.timeMs)) {
+                    #expect(CursorTypes.assetName(at: t, typeEvents: list, names: listNames, config: config) == CursorTypes.assetName(at: t, typeEvents: list, config: config))
+                }
+            }
+        }
+    }
 }
