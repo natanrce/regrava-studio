@@ -1601,6 +1601,29 @@ final class EditorModel: ObservableObject {
         exports.start(project: project, videoURL: videoURL, projectName: projectName, settings: preferences.exportSettings.current, target: target)
     }
 
+    /// "Extract raw recording files...": the recorded movies copied into a folder.
+    func extractRawRecordingFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.message = "Select folder to extract raw recording files"
+        panel.prompt = "Extract"
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        let names = [project.recording.videoFileName, project.recording.cameraFileName].compactMap { $0 }
+        for name in names {
+            let source = videoURL.deletingLastPathComponent().appendingPathComponent(name)
+            var target = folder.appendingPathComponent(name)
+            var n = 2
+            while FileManager.default.fileExists(atPath: target.path) {
+                target = folder.appendingPathComponent("\((name as NSString).deletingPathExtension) \(n).\((name as NSString).pathExtension)")
+                n += 1
+            }
+            try? FileManager.default.copyItem(at: source, to: target)
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
+
     /// "Copy and zip project": the project folder zipped and put on the clipboard.
     func copyAndZipProject() {
         let bundle = bundleURL, name = projectName

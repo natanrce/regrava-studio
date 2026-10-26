@@ -94,64 +94,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let main = NSMenu()
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Regrava Studio", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        icon(appMenu.addItem(withTitle: "About Regrava Studio", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""), "info.circle")
         appMenu.addItem(.separator())
-        add(to: appMenu, "Settings…", key: ",") { SettingsWindowController.shared.show() }
+        add(to: appMenu, "Show settings", key: ",") { SettingsWindowController.shared.show() }.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Regrava Studio", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
-        hideOthers.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
-        appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Regrava Studio", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        icon(appMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"), "minus.rectangle")
+        icon(appMenu.addItem(withTitle: "Hide Regrava Studio", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"), "rectangle.dashed")
+        icon(appMenu.addItem(withTitle: "Quit Regrava Studio", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"), "xmark.square")
         addSubmenu(appMenu, title: "Regrava Studio", to: main)
 
         // File: items that cannot apply are hidden.
         let file = NSMenu(title: "File")
         file.identifier = NSUserInterfaceItemIdentifier("file")
         file.delegate = self
+        recoverItem = conditional(file, "Recover unfinished recordings", icon: "arrow.up.circle", available: { !RecordingRecovery.shared.unfinished.isEmpty }) {
+            Task { await RecordingRecovery.shared.recoverAll() }
+        }
+        add(to: file, "Show previous projects") { AppController.shared.showPreviousProjects() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        add(to: file, "Open project...", key: "o") { AppController.shared.openProjectPanel() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        conditional(file, "Open last project", key: "z", modifiers: [.command, .option], icon: "arrow.counterclockwise", available: { AppController.shared.lastProjectURL != nil }) { AppController.shared.openLastProject() }
+        file.addItem(.separator())
+        add(to: file, "Import preset...") { PresetStore.shared.importPreset() }.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
+        file.addItem(.separator())
         let recent = NSMenuItem(title: "Open recent", action: nil, keyEquivalent: "")
         recent.submenu = NSMenu(title: "Open recent")
         file.addItem(recent)
         recentItem = recent
         file.addItem(.separator())
-        recoverItem = conditional(file, "Recover unfinished recordings", icon: "arrow.up.circle", available: { !RecordingRecovery.shared.unfinished.isEmpty }) {
-            Task { await RecordingRecovery.shared.recoverAll() }
-        }
-        add(to: file, "Open project...", key: "o") { AppController.shared.openProjectPanel() }
-        conditional(file, "Open last project", key: "z", modifiers: [.command, .option], available: { AppController.shared.lastProjectURL != nil }) { AppController.shared.openLastProject() }
-        add(to: file, "Show previous projects") { AppController.shared.showPreviousProjects() }
-        file.addItem(.separator())
-        project(file, "Save", key: "s") { $0.saveFromMenu() }
-        project(file, "Save as...", key: "s", modifiers: [.command, .shift]) { $0.saveAs() }
+        project(file, "Save", key: "s", icon: "square.and.arrow.down") { $0.saveFromMenu() }
+        project(file, "Save as...", key: "s", modifiers: [.command, .shift], icon: "square.and.arrow.down") { $0.saveAs() }
         project(file, "Show project in Finder", key: "o", modifiers: [.command, .shift], icon: "folder") { NSWorkspace.shared.activateFileViewerSelecting([$0.bundleURL]) }
-        file.addItem(.separator())
-        add(to: file, "Import preset...") { PresetStore.shared.importPreset() }.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
         file.addItem(.separator())
         project(file, "Remove project", icon: "trash") { model in
             guard model.deleteProject() else { return }
             AppController.shared.closeEditor(for: model)
         }
-        file.addItem(.separator())
-        file.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         addSubmenu(file, title: "File", to: main)
 
-        // Edit: the project's Undo/Redo, hidden when there is nothing to undo; text fields keep
-        // their own undo.
+        // Edit: the standard text commands, then the project's Undo/Redo (hidden when there is
+        // nothing to undo; text fields keep their own undo).
         let edit = NSMenu(title: "Edit")
         edit.identifier = NSUserInterfaceItemIdentifier("edit")
         edit.delegate = self
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        let pasteMatch = edit.addItem(withTitle: "Paste and Match Style", action: #selector(NSTextView.pasteAsPlainText(_:)), keyEquivalent: "v")
+        pasteMatch.keyEquivalentModifierMask = [.command, .option, .shift]
+        edit.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        let speech = NSMenuItem(title: "Speech", action: nil, keyEquivalent: "")
+        let speechMenu = NSMenu(title: "Speech")
+        speechMenu.addItem(withTitle: "Start Speaking", action: #selector(NSTextView.startSpeaking(_:)), keyEquivalent: "")
+        speechMenu.addItem(withTitle: "Stop Speaking", action: #selector(NSTextView.stopSpeaking(_:)), keyEquivalent: "")
+        speech.submenu = speechMenu
+        edit.addItem(speech)
+        edit.addItem(.separator())
         conditional(edit, "Undo", key: "z", icon: "arrow.uturn.backward", available: { Self.textUndo.map { $0.canUndo } ?? AppController.shared.focusedEditor?.model.canUndo ?? false }) {
             if let undo = Self.textUndo { undo.undo() } else { AppController.shared.focusedEditor?.model.undo() }
         }
         conditional(edit, "Redo", key: "z", modifiers: [.command, .shift], icon: "arrow.uturn.forward", available: { Self.textUndo.map { $0.canRedo } ?? AppController.shared.focusedEditor?.model.canRedo ?? false }) {
             if let undo = Self.textUndo { undo.redo() } else { AppController.shared.focusedEditor?.model.redo() }
         }
-        edit.addItem(.separator())
-        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         addSubmenu(edit, title: "Edit", to: main)
 
         let record = NSMenu(title: "Record")
@@ -168,14 +173,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let export = NSMenu(title: "Export")
         export.identifier = NSUserInterfaceItemIdentifier("export")
         export.delegate = self
-        project(export, "Export...", key: "e", modifiers: [.command, .shift], available: { !$0.exports.isExporting }) { $0.openExportPicker() }
-        project(export, "Quick export to clipboard", key: "c", modifiers: [.command, .option], available: { !$0.exports.isExporting }) { $0.quickExport(.clipboard) }
-        project(export, "Quick export to file...", key: "s", modifiers: [.command, .option], available: { !$0.exports.isExporting }) { $0.quickExport(.file) }
-        add(to: export, "Show previous clipboard exports") { ExportController.revealClipboardExports() }
+        add(to: export, "Open recent Clipboard exports") { ExportController.revealClipboardExports() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        export.addItem(.separator())
+        project(export, "Export...", key: "e", modifiers: [.command, .shift], icon: "square.and.arrow.up.fill", available: { !$0.exports.isExporting }) { $0.openExportPicker() }
+        export.addItem(.separator())
+        project(export, "Quick export to clipboard", key: "c", modifiers: [.command, .option], icon: "video.bubble", available: { !$0.exports.isExporting }) { $0.quickExport(.clipboard) }
+        project(export, "Quick export to file...", key: "s", modifiers: [.command, .option], icon: "square.and.arrow.up.fill", available: { !$0.exports.isExporting }) { $0.quickExport(.file) }
+        add(to: export, "Show previous clipboard exports") { ExportController.revealClipboardExports() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        export.addItem(.separator())
+        project(export, "Extract raw recording files...", icon: "square.and.arrow.down") { $0.extractRawRecordingFiles() }
         export.addItem(.separator())
         project(export, "Export current frame as image...", icon: "square.and.arrow.up") { $0.exportCurrentFrame() }
-        export.addItem(.separator())
-        add(to: export, "Open recent Clipboard exports") { ExportController.revealClipboardExports() }
         addSubmenu(export, title: "Export", to: main)
 
         let window = NSMenu(title: "Window")
@@ -183,6 +191,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         window.addItem(.separator())
         window.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        window.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        window.addItem(.separator())
+        add(to: window, "Reset windows positions") { AppController.shared.resetWindowPositions() }.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
+        window.addItem(.separator())
         addSubmenu(window, title: "Window", to: main)
         NSApp.windowsMenu = window
         return main
@@ -195,6 +207,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.keyEquivalentModifierMask = modifiers
         menu.addItem(item)
         return item
+    }
+
+    private func icon(_ item: NSMenuItem, _ name: String) {
+        item.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
     }
 
     /// File → "Recover N unfinished recordings", hidden when there are none (`canApply`).
@@ -279,10 +295,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let builder = MenuBuilder()
         switch menu.identifier?.rawValue {
         case "record":
-            builder.group("recording-new")
-            builder.item(recording.isRecording ? "Stop recording" : "New recording...", icon: "record.circle", shortcut: shortcuts[.recordStartStop] ?? nil) {
-                recording.isRecording ? recording.requestFinish() : recording.openPicker()
-            }
             builder.group("recording")
             builder.item("Record display", icon: "dock.rectangle", enabled: !recording.isRecording, shortcut: shortcuts[.recordDisplay] ?? nil) { recording.openPicker(preselect: .display) }
             builder.item("Record window", icon: "macwindow", enabled: !recording.isRecording, shortcut: shortcuts[.recordWindow] ?? nil) { recording.openPicker(preselect: .window) }
@@ -294,6 +306,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             builder.group("settings-zooms")
             builder.item("Automatically create zooms", checked: preferences.createAutomaticZooms) { preferences.createAutomaticZooms.toggle() }
+            builder.group("recording-new")
+            builder.item(recording.isRecording ? "Stop recording" : "New recording...", icon: "record.circle", shortcut: shortcuts[.recordStartStop] ?? nil) {
+                recording.isRecording ? recording.requestFinish() : recording.openPicker()
+            }
         case "file":
             let recovery = RecordingRecovery.shared
             recovery.refresh()
@@ -305,38 +321,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateVisibility(menu)
             return
         case "view":
-            // Sidebar panels ⌘1…⌘0, shown disabled when not applicable (`showIfDisabled`); Camera
-            // Style is not in the menu.
+            // Sidebar panels ⌘1…⌘0, shown disabled when not applicable; Camera Style is not listed.
             if let editor = AppController.shared.focusedEditor?.model {
                 builder.group("sidebar")
                 for entry in editor.railEntries where entry.root != .cameraStyle {
-                    let item = builder.item(entry.name, icon: entry.icon, checked: editor.sidebarRoot == entry.root && editor.layoutType.showsSidebar, enabled: entry.disabledTooltip == nil) {
+                    let item = builder.item(entry.name, icon: entry.icon, enabled: entry.disabledTooltip == nil) {
                         editor.openSidebar(entry.root)
                     }
                     item.keyEquivalent = String(entry.key.character)
                     item.keyEquivalentModifierMask = .command
                 }
-            }
-            // "editor" group.
-            if let editor = AppController.shared.focusedEditor?.model {
-                builder.group("editor")
-                builder.item("Show editor sidebar", icon: "sidebar.right", checked: editor.layoutType.showsSidebar) { editor.toggleSidebarShown() }
-                builder.item("Loop playback", icon: "repeat", checked: preferences.playbackLoop) { preferences.playbackLoop.toggle() }
-                builder.item("Show editor timeline", icon: "timeline.selection", checked: editor.layoutType.showsTimeline) { editor.toggleTimelineShown() }
-                builder.item("Always show timeline scrollbar", icon: "chevron.up.chevron.down", checked: preferences.alwaysShowTimelineScrollbar) { preferences.alwaysShowTimelineScrollbar.toggle() }
-            }
-            // Only while an editor is open (no `showIfDisabled`).
-            if AppController.shared.keyEditor != nil {
                 builder.group("editor-waveform")
                 builder.item("Show audio waveform", icon: "waveform", checked: !preferences.hideAudioWaveform) { preferences.hideAudioWaveform.toggle() }
                 builder.item("Smooth waveform", icon: "waveform", checked: preferences.enableSmoothWaveform) { preferences.enableSmoothWaveform.toggle() }
+                builder.group("editor")
+                builder.item("Loop playback", icon: "repeat", checked: preferences.playbackLoop) { preferences.playbackLoop.toggle() }
+                builder.item("Always show timeline scrollbar", icon: "chevron.up.chevron.down", checked: preferences.alwaysShowTimelineScrollbar) { preferences.alwaysShowTimelineScrollbar.toggle() }
+                builder.item("Show editor sidebar", icon: "sidebar.right", checked: editor.layoutType.showsSidebar) { editor.toggleSidebarShown() }
+                builder.item("Show editor timeline", icon: "rectangle.bottomthird.inset.filled", checked: editor.layoutType.showsTimeline) { editor.toggleTimelineShown() }
             }
             builder.group("recording")
-            builder.item(preferences.showSpeakerNotes ? "Hide speaker notes" : "Show speaker notes", icon: "text.bubble", checked: preferences.showSpeakerNotes, shortcut: shortcuts[.toggleShowSpeakerNotes] ?? nil) {
+            builder.item("Show speaker notes", icon: "text.bubble", checked: preferences.showSpeakerNotes, shortcut: shortcuts[.toggleShowSpeakerNotes] ?? nil) {
                 preferences.showSpeakerNotes.toggle()
             }
             builder.item("Show recording widget", icon: "menubar.dock.rectangle.badge.record", checked: preferences.showRecordingWidget, shortcut: shortcuts[.toggleRecordingWidget] ?? nil) {
                 preferences.showRecordingWidget.toggle()
+            }
+            if AppController.shared.focusedEditor != nil {
+                builder.group("help")
+                builder.submenu("Preview size", icon: "viewfinder") { sizes in
+                    for height in [480, 720, 1080, 1440, 2160] {
+                        sizes.item("\(height)p", checked: preferences.playbackPreviewMaxHeight == height) { preferences.playbackPreviewMaxHeight = height }
+                    }
+                }
             }
         default:
             return

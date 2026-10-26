@@ -183,6 +183,17 @@ final class AppController {
     }
 
     /// "Show previous projects": reveals the projects folder in Finder.
+    /// "Reset windows positions": every remembered window frame and panel position is forgotten,
+    /// and the open windows go back to their default places.
+    func resetWindowPositions() {
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("NSWindow Frame ") || key.hasPrefix("panel.") || key == "quick-export-widget-origin" {
+            defaults.removeObject(forKey: key)
+        }
+        for editor in editors { editor.window?.center() }
+        widgets.forEach { $0.window?.center() }
+    }
+
     func showPreviousProjects() {
         let folder = preferences.projectsFolder
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
