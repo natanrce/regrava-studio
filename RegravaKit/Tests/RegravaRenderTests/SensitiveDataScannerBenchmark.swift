@@ -4,7 +4,7 @@ import Testing
 import RegravaCore
 @testable import RegravaRender
 
-/// SCAN_BENCH=/path/to/movie swift test --filter SensitiveDataScannerBenchmark
+/// SCAN_BENCH=/path/to/movie [SCAN_START=s] [SCAN_FACES=0] swift test --filter SensitiveDataScannerBenchmark
 struct SensitiveDataScannerBenchmark {
     @Test func scansAClip() async throws {
         guard let path = ProcessInfo.processInfo.environment["SCAN_BENCH"] else { return }
@@ -15,7 +15,7 @@ struct SensitiveDataScannerBenchmark {
         try await session.export(to: clip, as: .mov)
         defer { try? FileManager.default.removeItem(at: clip) }
         let t0 = Date()
-        let detections = try await SensitiveDataScanner.scan(video: clip, phrases: ["Natan"], detectFaces: true) { _, _ in }
+        let detections = try await SensitiveDataScanner.scan(video: clip, phrases: ["Natan"], detectFaces: ProcessInfo.processInfo.environment["SCAN_FACES"] != "0") { _, _ in }
         print("SCAN \(Date().timeIntervalSince(t0))s, \(detections.count) detections")
         for d in detections.prefix(40) { print("  \(d.kind) \(Int(d.startMs))-\(Int(d.endMs)) \(d.text.prefix(40)) \(d.keyframes.first.map { "\(Int($0.x)),\(Int($0.y)) \(Int($0.width))x\(Int($0.height))" } ?? "")") }
     }

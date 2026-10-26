@@ -63,7 +63,7 @@ public enum ProjectExporter {
         if let stored = SensitiveDataScan.load(bundle: bundle), stored.isComplete, stored.matches(processing) { return }
         let video = bundle.appendingPathComponent(project.recording.videoFileName)
         guard FileManager.default.fileExists(atPath: video.path) else { return }
-        let detections = try await SensitiveDataScanner.scan(video: video, phrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces) { _, _ in }
+        let detections = try await SensitiveDataScanner.scan(video: video, phrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces, bundle: bundle) { _, _ in }
         try SensitiveDataScan(customPhrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces, detections: detections,
                               finalUpToMs: project.recording.durationMs, isComplete: true).save(bundle: bundle)
     }
