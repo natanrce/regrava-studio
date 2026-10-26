@@ -102,9 +102,8 @@ extension CameraPlanner {
         if let range = loupeRange(at: t) { return (loupeOptions(range, at: t), true) }
         // Inactive stand-in: the nearer of the previous and next zoom of any kind; a loupe
         // keeps its place and size while its optics fade, anything else collapses the lens.
-        let enabled = project.zooms.filter { !$0.isDisabled }
-        let previous = enabled.filter { $0.endMs <= t }.max { $0.endMs < $1.endMs }
-        let next = enabled.filter { $0.startMs > t }.min { $0.startMs < $1.startMs }
+        let previous = previousEnabledZoom(endingAtOrBefore: t)
+        let next = nextEnabledZoom(startingAfter: t)
         var nearest: (zoom: ZoomRange, at: Double)?
         switch (previous, next) {
         case let (p?, n?): nearest = t - p.endMs <= n.startMs - t ? (p, p.endMs) : (n, n.startMs)
@@ -123,10 +122,9 @@ extension CameraPlanner {
     }
 
     /// `isCoveredByLoupe`: the active lens covers at least half of the camera, sampled on a 32
-    /// × 32 grid. Rects in stage units.
-    func isCameraCoveredByLoupe(camera: Rect2, screen: Rect2, at t: Double) -> Bool {
+    /// × 32 grid. Rects in stage units. `target` is `loupeTarget(at:)` of the instant.
+    func isCameraCoveredByLoupe(camera: Rect2, screen: Rect2, target: (frame: LoupeFrame, isActive: Bool)) -> Bool {
         guard camera.width > 0, camera.height > 0 else { return false }
-        let target = loupeTarget(at: t)
         guard target.isActive else { return false }
         let center = Vec2(screen.x + target.frame.center.x * screen.width, screen.y + target.frame.center.y * screen.height)
         let r = target.frame.radius * screen.width
@@ -139,5 +137,22 @@ extension CameraPlanner {
             }
         }
         return Double(inside) / 1024 >= 0.5
+    }
+
+    /// The enabled zoom with the latest end at or before `t`; the first in project order among
+    /// equal ends.
+    func previousEnabledZoom(endingAtOrBefore t: Double) -> ZoomRange? {
+        let byEnd = enabledZoomsByEnd
+        guard var i = lastSearch(count: byEnd.count, while: { byEnd[$0].endMs <= t }) else { return nil }
+        while i > 0 && byEnd[i - 1].endMs == byEnd[i].endMs { i -= 1 }
+        return byEnd[i]
+    }
+
+    /// The enabled zoom with the earliest start after `t`; the first in project order among
+    /// equal starts.
+    func nextEnabledZoom(startingAfter t: Double) -> ZoomRange? {
+        let byStart = enabledZoomsByStart
+        let i = (lastSearch(count: byStart.count, while: { byStart[$0].startMs <= t }) ?? -1) + 1
+        return i < byStart.count ? byStart[i] : nil
     }
 }

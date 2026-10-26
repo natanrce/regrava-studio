@@ -180,7 +180,8 @@ public final class CameraTrack: @unchecked Sendable {
             let t = Double(i) * sampleIntervalMs
             let source = resolver.playbackToSource(t)
             let slice = project.slice(atSource: source)
-            let target = planner.targets(at: source)
+            let loupeTarget = planner.loupeTarget(at: source)
+            let target = planner.targets(at: source, loupe: loupeTarget)
             let screenConfig = target.instant ? SpringConfig.instant : project.animation.screenSpring
             if i == 0 {
                 screen = SpringRect(target.screen)
@@ -221,8 +222,7 @@ public final class CameraTrack: @unchecked Sendable {
 
             var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPath?.position(at: t))
             // The lens springs on its own (`styles.loupe`).
-            let loupeTarget = planner.loupeTarget(at: source).frame
-            if i == 0 { loupe = LoupeSpring(loupeTarget) } else { loupe.advance(toward: loupeTarget, config: planner.loupeSpring(at: source), milliseconds: sampleIntervalMs) }
+            if i == 0 { loupe = LoupeSpring(loupeTarget.frame) } else { loupe.advance(toward: loupeTarget.frame, config: planner.loupeSpring(at: source), milliseconds: sampleIntervalMs) }
             let lens = loupe.frame
             frame.loupe = lens.isVisible(recordingWidth: project.recording.videoSize.width, k: 0.1) ? lens : nil
             frame.screenReferenceWidth = target.screenReferenceWidth * layout.scale
@@ -489,6 +489,9 @@ struct CameraPlanner {
     let restingGroups: [FocusGroup]
     /// Quiet stretches of the microphone for "Hide during silence".
     let silence: [SilenceChunk]
+    /// Enabled zooms of any kind ordered by end, then by start, ties in project order.
+    let enabledZoomsByEnd: [ZoomRange]
+    let enabledZoomsByStart: [ZoomRange]
 
     init(project: Project, timeline: LayoutTimeline, cleaned: [MouseEvent], sparse: [MouseEvent], silence: [SilenceChunk] = []) {
         self.project = project
@@ -501,6 +504,13 @@ struct CameraPlanner {
         loupes = project.zooms
             .filter { !$0.isDisabled && $0.presentation == .loupe && $0.endMs > $0.startMs }
             .sorted { $0.startMs < $1.startMs }
+        let enabled = project.zooms.enumerated().filter { !$0.element.isDisabled }
+        enabledZoomsByEnd = enabled
+            .sorted { $0.element.endMs != $1.element.endMs ? $0.element.endMs < $1.element.endMs : $0.offset < $1.offset }
+            .map(\.element)
+        enabledZoomsByStart = enabled
+            .sorted { $0.element.startMs != $1.element.startMs ? $0.element.startMs < $1.element.startMs : $0.offset < $1.offset }
+            .map(\.element)
 
         let video = project.recording.videoSize
         var groups: [UUID: [FocusGroup]] = [:]
@@ -595,7 +605,8 @@ struct CameraPlanner {
         return timeline.isCameraHidden(at: t)
     }
 
-    func targets(at t: Double) -> LayoutTargets {
+    /// `loupe` is `loupeTarget(at: t)`.
+    func targets(at t: Double, loupe: (frame: LoupeFrame, isActive: Bool)) -> LayoutTargets {
         let hidden = isCameraHidden(at: t)
         let swapToHideVariant = hidden || project.camera.hide
         let anyZoom = project.zooms.contains { $0.contains(t) }
@@ -628,7 +639,7 @@ struct CameraPlanner {
             screen: screen,
             instant: isInInstantWindow(t),
             camera: camera,
-            cameraOpacity: hidden || camera == nil || (camera.map { isCameraCoveredByLoupe(camera: $0, screen: screen, at: t) } ?? false) ? 0 : 1,
+            cameraOpacity: hidden || camera == nil || (camera.map { isCameraCoveredByLoupe(camera: $0, screen: screen, target: loupe) } ?? false) ? 0 : 1,
             cameraBorderRadius: radius,
             cameraReferenceWidth: initial?.width ?? camera?.width ?? 1,
             cameraHidden: hidden,
