@@ -162,7 +162,7 @@ public final class CameraTrack: @unchecked Sendable {
         var cameraReference = SpringValue(1)
         let hasCamera = project.recording.hasCamera && !project.camera.hide
         let samplesFor200Ms = Int((200 / sampleIntervalMs).rounded(.up))
-        var hiddenHistory: [Bool] = []
+        var lastHiddenIndex: Int?
         var maskAnimator = MaskAnimator(masks: project.masks, recordingSize: project.recording.videoSize)
         var press = SpringValue(1)
         var opacity = SpringValue(1)
@@ -190,8 +190,8 @@ public final class CameraTrack: @unchecked Sendable {
             }
 
             // Camera: the fast spring while hidden and for 200 ms after.
-            hiddenHistory.append(target.cameraHidden)
-            let recentlyHidden = hiddenHistory.suffix(samplesFor200Ms + 1).contains(true)
+            if target.cameraHidden { lastHiddenIndex = i }
+            let recentlyHidden = lastHiddenIndex.map { i - $0 <= samplesFor200Ms } ?? false
             let cameraConfig = recentlyHidden ? Self.cameraHideSpring : project.animation.screenSpring
             if hasCamera, let rect = target.camera {
                 if i == 0 || cameraRect.rect.width == 0 {
