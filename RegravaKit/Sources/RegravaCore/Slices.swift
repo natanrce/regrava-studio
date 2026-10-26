@@ -87,6 +87,8 @@ public struct TimeResolver: Sendable, Hashable {
     }
 
     public let links: [Link]
+    /// Links are in source order and apart, so source lookups can binary-search them.
+    private let isSourceOrdered: Bool
 
     public init(slices: [Slice]) {
         var links: [Link] = []
@@ -103,6 +105,8 @@ public struct TimeResolver: Sendable, Hashable {
             playback += duration
         }
         self.links = links
+        isSourceOrdered = links.allSatisfy { $0.sourceStartMs <= $0.sourceEndMs }
+            && zip(links, links.dropFirst()).allSatisfy { $0.sourceEndMs <= $1.sourceStartMs }
     }
 
     /// Link playing at `t`: the first ending at or after it, else the last (`getLinkAtPlaybackTimeIndex`).
@@ -127,7 +131,15 @@ public struct TimeResolver: Sendable, Hashable {
 
     /// `getIsSourceRangePresent`: a strictly positive overlap with a clip.
     public func isSourceRangePresent(_ start: Double, _ end: Double) -> Bool {
-        links.contains { min(end, $0.sourceEndMs) - max(start, $0.sourceStartMs) > 0 }
+        func overlaps(_ link: Link) -> Bool { min(end, link.sourceEndMs) - max(start, link.sourceStartMs) > 0 }
+        guard isSourceOrdered else { return links.contains(where: overlaps) }
+        // Links ending at or before `start`, or starting at or after `end`, cannot overlap.
+        var i = (lastSearch(count: links.count, while: { links[$0].sourceEndMs <= start }) ?? -1) + 1
+        while i < links.count && links[i].sourceStartMs < end {
+            if overlaps(links[i]) { return true }
+            i += 1
+        }
+        return false
     }
 
     public func isSourceTimePresent(_ t: Double) -> Bool {

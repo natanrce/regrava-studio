@@ -142,4 +142,25 @@ import Testing
             #expect(frame.previousCameraRect == before.cameraRect)
         }
     }
+
+    @Test func sourceRangePresenceMatchesAFullScan() {
+        func slice(_ start: Double, _ end: Double, speed: Double = 1) -> Slice {
+            var s = Slice(sourceStartMs: start, sourceEndMs: end)
+            s.timeScale = 1 / speed
+            return s
+        }
+        let ordered = [slice(0, 1000), slice(1000, 2500, speed: 2), slice(3000, 3000), slice(3000, 4000), slice(6000, 9000)]
+        let unordered = [slice(3000, 4000), slice(0, 1000), slice(500, 1500)]
+        for list in [ordered, unordered, [], [ordered[0]]] {
+            let resolver = TimeResolver(slices: list)
+            let edges = list.flatMap { [$0.sourceStartMs, $0.sourceEndMs] }
+            let points = Self.probes(edges) + stride(from: -50.0, through: 9100, by: 97).map { $0 }
+            for a in points {
+                for b in [a, a + 0.5, a + 300, a + 2000] + edges {
+                    let scan = resolver.links.contains { min(b, $0.sourceEndMs) - max(a, $0.sourceStartMs) > 0 }
+                    #expect(resolver.isSourceRangePresent(a, b) == scan)
+                }
+            }
+        }
+    }
 }
