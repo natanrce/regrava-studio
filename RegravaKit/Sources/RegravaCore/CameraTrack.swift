@@ -564,8 +564,13 @@ struct CameraPlanner {
     /// Bounds of the cursor from the event at or before `start` through those up to `end`.
     static func cursorBounds(_ events: [MouseEvent], from start: Double, to end: Double) -> Rect2? {
         let floor = MouseProcessing.lastIndex(atOrBefore: start, in: events)
-        let inRange = events.indices.filter { events[$0].timeMs >= start && events[$0].timeMs <= end }
-        guard let first = floor ?? inRange.first, let last = inRange.last ?? floor else { return nil }
+        // First and last events within [start, end].
+        var inRange: (first: Int, last: Int)?
+        if let lo = ceilSearch(count: events.count, value: start, key: { events[$0].timeMs }),
+           let hi = MouseProcessing.lastIndex(atOrBefore: end, in: events), lo <= hi {
+            inRange = (lo, hi)
+        }
+        guard let first = floor ?? inRange?.first, let last = inRange?.last ?? floor else { return nil }
         var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
         for i in first...last {
             let p = events[i].position
