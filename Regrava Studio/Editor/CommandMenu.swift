@@ -56,6 +56,7 @@ extension EditorModel {
         return [
             EditorAction(name: isPlaying ? "Pause" : "Play", group: "Playback", icon: isPlaying ? "pause.circle" : "play.circle", shortcut: "Space") { [weak self] in self?.togglePlay() },
             EditorAction(name: "Remove slice till previous cut", group: "Slice", icon: "scissors", shortcut: "X", isEnabled: project.slices.count > 1 && (project.sliceIndex(atSource: currentSourceTimeMs) ?? 0) > 0) { [weak self] in self?.rippleRemoveSlice() },
+            EditorAction(name: "Create project from video...", group: "Project", icon: "folder") { VideoImport.pickAndCreate() },
             EditorAction(name: "Copy and zip project", group: "Project", icon: "doc.zipper") { [weak self] in self?.copyAndZipProject() },
             EditorAction(name: "Export to file... with current settings", group: "Export", icon: "square.and.arrow.down", isEnabled: !exports.isExporting) { [weak self] in self?.exportWithCurrentSettings(.file) },
             EditorAction(name: "Export to clipboard with current settings", group: "Export", icon: "doc.on.clipboard", isEnabled: !exports.isExporting) { [weak self] in self?.exportWithCurrentSettings(.clipboard) },

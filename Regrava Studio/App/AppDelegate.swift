@@ -114,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add(to: file, "Open project...", key: "o") { AppController.shared.openProjectPanel() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
         conditional(file, "Open last project", key: "z", modifiers: [.command, .option], icon: "arrow.counterclockwise", available: { AppController.shared.lastProjectURL != nil }) { AppController.shared.openLastProject() }
         file.addItem(.separator())
+        add(to: file, "Create project from video...") { VideoImport.pickAndCreate() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        file.addItem(.separator())
         add(to: file, "Import preset...") { PresetStore.shared.importPreset() }.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
         file.addItem(.separator())
         let recent = NSMenuItem(title: "Open recent", action: nil, keyEquivalent: "")
