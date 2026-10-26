@@ -59,6 +59,26 @@ public struct CaptureResult: Sendable {
     public var flags: [String] = []
     /// Starts of the sessions after the first, on the joined timeline.
     public var sessionStartsMs: [Double] = []
+
+    public init(videoURL: URL, mouseEvents: [MouseEvent], customCursors: [CapturedCursorImage], keystrokes: [Keystroke], audioSources: [AudioSource],
+                cameraURL: URL?, cameraSize: Size2?, markersMs: [Double], videoSize: Size2, pointPixelScale: Double, durationMs: Double, fps: Int,
+                externalDevice: ExternalDeviceInfo? = nil, flags: [String] = [], sessionStartsMs: [Double] = []) {
+        self.videoURL = videoURL
+        self.mouseEvents = mouseEvents
+        self.customCursors = customCursors
+        self.keystrokes = keystrokes
+        self.audioSources = audioSources
+        self.cameraURL = cameraURL
+        self.cameraSize = cameraSize
+        self.markersMs = markersMs
+        self.videoSize = videoSize
+        self.pointPixelScale = pointPixelScale
+        self.durationMs = durationMs
+        self.fps = fps
+        self.externalDevice = externalDevice
+        self.flags = flags
+        self.sessionStartsMs = sessionStartsMs
+    }
 }
 
 public enum CaptureError: LocalizedError {
