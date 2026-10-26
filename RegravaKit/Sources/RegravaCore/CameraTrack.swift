@@ -174,12 +174,13 @@ public final class CameraTrack: @unchecked Sendable {
         let buttonEvents = pathEvents.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
+        let sliceLookup = SliceLookup(slices: project.slices)
         frames.reserveCapacity(count)
 
         for i in 0..<count {
             let t = Double(i) * sampleIntervalMs
             let source = resolver.playbackToSource(t)
-            let slice = project.slice(atSource: source)
+            let slice = sliceLookup.slice(atSource: source)
             let loupeTarget = planner.loupeTarget(at: source)
             let target = planner.targets(at: source, loupe: loupeTarget)
             let screenConfig = target.instant ? SpringConfig.instant : project.animation.screenSpring

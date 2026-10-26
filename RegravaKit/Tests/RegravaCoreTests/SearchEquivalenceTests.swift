@@ -115,4 +115,17 @@ import Testing
             }
         }
     }
+
+    @Test func sliceLookupMatchesAFullScan() {
+        func slice(_ start: Double, _ end: Double) -> Slice { Slice(sourceStartMs: start, sourceEndMs: end) }
+        // Cuts, a shared edge, a zero-length slice on a shared edge, and an out-of-order list.
+        let ordered = [slice(0, 1000), slice(1000, 2500), slice(3000, 3000), slice(3000, 4000), slice(6000, 9000)]
+        let unordered = [slice(3000, 4000), slice(0, 1000), slice(500, 1500)]
+        for list in [ordered, unordered, [], [ordered[0]]] {
+            let lookup = SliceLookup(slices: list)
+            for t in Self.probes(list.flatMap { [$0.sourceStartMs, $0.sourceEndMs] }) + stride(from: -50.0, through: 9100, by: 33).map({ $0 }) {
+                #expect(lookup.slice(atSource: t) == list.first { $0.contains(sourceTime: t) })
+            }
+        }
+    }
 }

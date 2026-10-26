@@ -306,3 +306,25 @@ public extension Project {
         resolvedTypingSuggestionsMs.append(range.startMs)
     }
 }
+
+/// `Project.slice(atSource:)` by binary search when the slices are in order and apart, as
+/// editing keeps them; a scan otherwise.
+struct SliceLookup {
+    let slices: [Slice]
+    private let ordered: Bool
+
+    init(slices: [Slice]) {
+        self.slices = slices
+        ordered = slices.allSatisfy { $0.sourceStartMs <= $0.sourceEndMs }
+            && zip(slices, slices.dropFirst()).allSatisfy { $0.sourceEndMs <= $1.sourceStartMs }
+    }
+
+    /// The first slice containing source time `t`.
+    func slice(atSource t: Double) -> Slice? {
+        guard ordered else { return slices.first { $0.contains(sourceTime: t) } }
+        // Slices before the first ending at or after `t` end before it; those after start later.
+        guard let i = ceilSearch(count: slices.count, value: t, key: { slices[$0].sourceEndMs }),
+              slices[i].sourceStartMs <= t else { return nil }
+        return slices[i]
+    }
+}
