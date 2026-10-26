@@ -59,4 +59,37 @@ struct CaptionsTests {
         #expect(scene.words.count == 4)
         #expect(track.scene(atPlayback: 9000).box!.opacity < 0.01)
     }
+
+    @Test func influencingLinesMatchAFullScan() {
+        // Lines of varied length and spacing, two sharing an edge, one starting a long gap.
+        var words: [TranscriptWord] = []
+        var t = 0.0
+        for i in 0..<120 {
+            let gap = [0.0, 1500, 300, 2600, 0, 50][i % 6]
+            t += gap
+            let length = Double(80 + (i * 37) % 400)
+            words.append(word(" w\(i)", t, t + length))
+            t += length
+        }
+        let stage = Rect2(x: 0, y: 0, width: 1920, height: 1080)
+        let lines = CaptionLayout.lines(words, maxWidth: 400, measure: measure)
+        #expect(lines.count > 10)
+        let track = CaptionTrack(lines: lines, config: CaptionsConfig(), stage: stage, resolver: TimeResolver(slices: []), fps: 60)
+        func fullScan(_ t: Double) -> [Int] {
+            lines.indices.filter { t >= lines[$0].startMs - CaptionTrack.influenceMs && t <= lines[$0].endMs + CaptionTrack.influenceMs }
+        }
+        var probes = [-5000.0, lines[0].startMs - 1000, lines.last!.endMs + 1000, lines.last!.endMs + 1000.5, t + 10_000]
+        for line in lines { probes += [line.startMs - 1000, line.startMs, line.endMs, line.endMs + 1000, line.endMs + 1000.01] }
+        for t in stride(from: -2000.0, through: t + 2000, by: 7.3) { probes.append(t) }
+        for t in probes { #expect(track.influencingLines(at: t) == fullScan(t)) }
+
+        // Lines out of order still give the same lines as a full scan.
+        let shuffled = Array(lines.reversed())
+        let unsorted = CaptionTrack(lines: shuffled, config: CaptionsConfig(), stage: stage, resolver: TimeResolver(slices: []), fps: 60)
+        for t in probes.prefix(50) {
+            #expect(unsorted.influencingLines(at: t) == shuffled.indices.filter { t >= shuffled[$0].startMs - 1000 && t <= shuffled[$0].endMs + 1000 })
+        }
+        let empty = CaptionTrack(lines: [], config: CaptionsConfig(), stage: stage, resolver: TimeResolver(slices: []), fps: 60)
+        #expect(empty.influencingLines(at: 0).isEmpty)
+    }
 }

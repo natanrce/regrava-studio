@@ -95,6 +95,18 @@ func ceilSearch(count: Int, value: Double, key: (Int) -> Double) -> Int? {
     return low < count ? low : nil
 }
 
+/// Index of the last element satisfying `predicate`, for a predicate that holds on a prefix of
+/// the elements and fails on the rest; nil when it holds on none.
+func lastSearch(count: Int, while predicate: (Int) -> Bool) -> Int? {
+    var low = 0
+    var high = count
+    while low < high {
+        let mid = (low + high) >> 1
+        if predicate(mid) { low = mid + 1 } else { high = mid }
+    }
+    return low > 0 ? low - 1 : nil
+}
+
 /// Gap above which two recorded samples are not interpolated.
 let cursorSampleGapMs = 40.0
 /// Tiny time offset used for instantaneous lead changes.

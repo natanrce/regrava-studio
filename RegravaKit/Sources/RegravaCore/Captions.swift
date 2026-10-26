@@ -261,6 +261,9 @@ public struct CaptionTrack: Sendable {
     let unit: Double
     let resolver: TimeResolver
     let fps: Double
+    /// Largest `endMs` of the lines up to each index, when the lines are ordered by start
+    /// (nil otherwise): bounds the lines near an instant without visiting all of them.
+    private let maxEndThrough: [Double]?
 
     public init(lines: [CaptionLine], config: CaptionsConfig, stage: Rect2, resolver: TimeResolver, fps: Double) {
         self.lines = lines
@@ -270,6 +273,29 @@ public struct CaptionTrack: Sendable {
         unit = stage.height / 1080
         self.resolver = resolver
         self.fps = max(fps, 1)
+        var maxEnd: [Double] = []
+        maxEnd.reserveCapacity(lines.count)
+        var sorted = true
+        for (i, line) in lines.enumerated() {
+            if i > 0 && line.startMs < lines[i - 1].startMs { sorted = false; break }
+            maxEnd.append(max(maxEnd.last ?? -.infinity, line.endMs))
+        }
+        maxEndThrough = sorted ? maxEnd : nil
+    }
+
+    /// Indices, ascending, of the lines within `influenceMs` of `t`.
+    func influencingLines(at t: Double) -> [Int] {
+        let influence = Self.influenceMs
+        func near(_ i: Int) -> Bool { t >= lines[i].startMs - influence && t <= lines[i].endMs + influence }
+        guard let maxEnd = maxEndThrough else { return lines.indices.filter(near) }
+        guard let last = lastSearch(count: lines.count, while: { t >= lines[$0].startMs - influence }) else { return [] }
+        var result: [Int] = []
+        var i = last
+        while i >= 0 && t <= maxEnd[i] + influence {
+            if near(i) { result.append(i) }
+            i -= 1
+        }
+        return result.reversed()
     }
 
     private struct Targets {
@@ -285,8 +311,9 @@ public struct CaptionTrack: Sendable {
         let r = act.rect
         // `pad({x: 0.5·fontSize, y: 0.25·fontSize})`.
         out.box = .init(rect: Rect2(x: r.x - 0.5 * fontSize, y: r.y - 0.25 * fontSize, width: r.width + fontSize, height: r.height + 0.5 * fontSize), opacity: act.opacity)
-        for (li, line) in lines.enumerated() where t >= line.startMs - Self.influenceMs && t <= line.endMs + Self.influenceMs {
-            let own = CaptionFrame(line: line, config: config, stage: stage, t: t)
+        for li in influencingLines(at: t) {
+            let line = lines[li]
+            let own = li == active ? act : CaptionFrame(line: line, config: config, stage: stage, t: t)
             for wi in line.words.indices {
                 var rect = own.wordRect(wi, slidePx: Self.slidePx * unit)
                 rect.x += r.x
