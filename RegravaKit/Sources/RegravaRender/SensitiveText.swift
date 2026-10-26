@@ -528,10 +528,11 @@ enum Classifier {
         }
         for c in s {
             if c.isLetter { letters += 1 }
-            if c.isUppercase {
+            // Only ASCII letters form runs; any other character ends one.
+            if c.isASCII, c.isUppercase {
                 flush()
                 run.append(c)
-            } else if c.isLowercase {
+            } else if c.isASCII, c.isLowercase {
                 run.append(c)
             } else {
                 flush()
@@ -546,7 +547,8 @@ enum Classifier {
         var count = 0
         var previous: Character?
         for c in s {
-            if let p = previous, (p.isLetter && c.isNumber) || (p.isNumber && c.isLetter) { count += 1 }
+            // Only ASCII letters and digits are told apart.
+            if let p = previous, p.isASCII, c.isASCII, (p.isLetter && c.isNumber) || (p.isNumber && c.isLetter) { count += 1 }
             previous = c
         }
         return count
@@ -575,7 +577,8 @@ enum Classifier {
         var switches = 0
         var previous: Character?
         for c in s {
-            guard c.isLetter || c.isNumber else {
+            // Only ASCII letters and digits count; anything else breaks the sequence.
+            guard c.isASCII, c.isLetter || c.isNumber else {
                 previous = nil
                 continue
             }
@@ -647,16 +650,13 @@ enum Classifier {
         }
         let switches = letterDigitSwitchCount(s)
         if R["upperDigitRegex"].test(s) {
-            if switches > 2 {
-                let letters = s.filter(\.isLetter).count
-                if letters > 2 { return s.count <= letters * 4 }
-            }
-            return s.count > 23 && s.contains(where: \.isNumber) && s.contains(where: \.isLetter)
+            guard switches > 2 else { return false }
+            return s.count <= s.filter(\.isLetter).count * 4
         }
         if !R["lowerDigitRegex"].test(s) {
             let ratio = pronounceableLetterRatio(s)
             if s.count >= 12, ratio < 0.65 { return true }
-            if ratio < 0.8 { return switches > 2 }
+            return ratio < 0.8 && switches > 2
         }
         guard s.count >= 16, switches >= 4 else { return false }
         return digitRunCount(s) > 2
@@ -1201,12 +1201,14 @@ extension Classifier {
         if R["gutterNumberRegex"].test(token) { return false }
         if token.allSatisfy(\.isNumber) { return false }
         if R["placeholderValueRegex"].whole(token) { return false }
-        let wholeLine = line.text.trimmingCharacters(in: whitespaceSet).trimmingCharacters(in: CharacterSet(charactersIn: "\"'`,;)\\ "))
+        let trimmed = line.text.trimmingCharacters(in: .whitespaces)
+        let wholeLine = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`,;)\\ "))
         var alone = false
-        if !wholeLine.hasSuffix(token) {
-            alone = line.text.split(whereSeparator: \.isWhitespace).count == 1
+        if wholeLine.hasSuffix(token) {
+            alone = trimmed.split(whereSeparator: \.isWhitespace).count == 1
         }
-        let quoted = token.first.map { "\"'`".contains($0) } ?? false
+        // A token closed by a quote right after it in the line may be shorter.
+        let quoted = trimmed.dropFirst(token.count).first.map { "\"'`".contains($0) } ?? false
         let minLength = quoted ? 4 : 6
         var mixed = false
         if token.count >= minLength, token.contains(where: \.isNumber) {
