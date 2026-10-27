@@ -104,17 +104,26 @@ final class ExportController: ObservableObject {
     var onToast: ((String) -> Void)?
 
     private func update(progress: Double) {
-        guard job != nil else { return }
-        job?.progress = progress
+        guard let current = job?.progress else { return }
+        // The finest step shown is 0.01%; smaller changes are not published.
+        if current == 0 || progress - current >= 0.0001 || progress >= 1 || progress < current { job?.progress = progress }
         dockProgress.show(progress)
         // " NN%" beside the menu bar item while exporting.
-        AppController.shared.statusItem?.setTitle(" \(Int((progress * 100).rounded(.down)))%")
+        let percent = Int((progress * 100).rounded(.down))
+        if percent != statusPercent {
+            statusPercent = percent
+            AppController.shared.statusItem?.setTitle(" \(percent)%")
+        }
     }
+
+    /// The percent last shown beside the menu bar item.
+    private var statusPercent: Int?
 
     /// A failure before any frame is an initialization error (a toast); later ones keep the
     /// progress screen as "Export failed" until it is stopped.
     private func finish(error: String?) {
         dockProgress.hide()
+        statusPercent = nil
         AppController.shared.statusItem?.setTitle(nil)
         task = nil
         if let error {
