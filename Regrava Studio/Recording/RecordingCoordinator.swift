@@ -458,6 +458,8 @@ final class RecordingCoordinator: ObservableObject {
         overlays.hide()
         pickerPanel?.orderOut(nil)
         isPickerOpen = false
+        if let pickerKeyMonitor { NSEvent.removeMonitor(pickerKeyMonitor) }
+        pickerKeyMonitor = nil
 
         let bundle: URL
         do {
