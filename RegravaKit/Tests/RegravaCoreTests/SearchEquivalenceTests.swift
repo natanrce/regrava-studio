@@ -180,4 +180,26 @@ import Testing
         #expect(!isAscending(count: unsorted.count) { Array(unsorted)[$0] })
         #expect(!isAscending(count: 2) { [1.0, .nan][$0] })
     }
+
+    @Test func activeLayoutRangeMatchesAFullScan() {
+        // Shared edges, an overlap, a disabled range, a long range covering later ones, gaps.
+        let layouts = [
+            CameraLayoutRange(startMs: 5000, endMs: 7000, type: .screenOnly),
+            CameraLayoutRange(startMs: 1000, endMs: 3000, type: .splitScreen),
+            CameraLayoutRange(startMs: 3000, endMs: 4000, type: .fullscreenCamera),
+            CameraLayoutRange(startMs: 3500, endMs: 3800, type: .screenOnly, isDisabled: true),
+            CameraLayoutRange(startMs: 8000, endMs: 20_000),
+            CameraLayoutRange(startMs: 9000, endMs: 9500, type: .cutoutCamera),
+        ]
+        for list in [layouts, [], [layouts[3]]] {
+            var p = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 2, durationMs: 21_000, fps: 60, cameraFileName: "camera.mov", cameraSize: Size2(width: 1280, height: 720)), mouseEvents: [])
+            p.cameraLayouts = list
+            let timeline = LayoutTimeline(project: p)
+            let sorted = list.sorted { $0.startMs < $1.startMs }
+            for t in Self.probes(list.flatMap { [$0.startMs, $0.endMs] }) {
+                let range = sorted.last { $0.contains(t) }
+                #expect(timeline.activeRange(at: t) == (range?.isDisabled == false ? range : nil))
+            }
+        }
+    }
 }

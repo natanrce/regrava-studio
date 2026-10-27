@@ -592,11 +592,16 @@ public struct LayoutTimeline: Sendable {
     let ranges: [CameraLayoutRange]
     let resolvers: [UUID: LayoutResolver]
     public let defaultResolver: LayoutResolver
+    /// Largest `endMs` of `ranges` up to each index.
+    private let maxEndThrough: [Double]
 
     public init(project: Project) {
         defaultResolver = project.defaultLayoutResolver
         let usable = project.recording.hasCamera ? project.cameraLayouts.sorted { $0.startMs < $1.startMs } : []
         ranges = usable
+        var maxEnd: [Double] = []
+        for range in usable { maxEnd.append(max(maxEnd.last ?? -.infinity, range.endMs)) }
+        maxEndThrough = maxEnd
         var resolvers: [UUID: LayoutResolver] = [:]
         for range in usable { resolvers[range.id] = project.resolver(for: range) }
         self.resolvers = resolvers
@@ -604,8 +609,14 @@ public struct LayoutTimeline: Sendable {
 
     /// Enabled range at `t` (`findAt`, both ends inclusive).
     public func activeRange(at t: Double) -> CameraLayoutRange? {
-        guard let range = ranges.last(where: { $0.contains(t) }), !range.isDisabled else { return nil }
-        return range
+        // The last range containing `t`: among those starting at or before it, back to the
+        // first whose predecessors all end before it.
+        guard var i = lastSearch(count: ranges.count, while: { ranges[$0].startMs <= t }) else { return nil }
+        while i >= 0 && t <= maxEndThrough[i] {
+            if ranges[i].contains(t) { return ranges[i].isDisabled ? nil : ranges[i] }
+            i -= 1
+        }
+        return nil
     }
 
     private func resolver(at t: Double) -> LayoutResolver {
