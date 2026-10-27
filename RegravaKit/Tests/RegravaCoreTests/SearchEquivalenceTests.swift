@@ -202,4 +202,21 @@ import Testing
             }
         }
     }
+
+    @Test func speedCurveInsertionMatchesSortingOnEachAdd() {
+        var curve = SpeedCurve()
+        var reference: [SpeedBump] = []
+        for k in 0..<200 {
+            let start = Double((k * 7919) % 3000)
+            let bump = SpeedBump(rampInStartMs: start, fullStartMs: start + 20, fullEndMs: start + 60 + Double(k % 5), rampOutEndMs: start + 100 + Double(k % 7) * 30, speed: [0.5, 1, 1.5, 2.25][k % 4])
+            curve.add(bump)
+            if bump.speed > 1 {
+                reference.append(bump)
+                reference.sort { $0.rampInStartMs < $1.rampInStartMs }
+            }
+        }
+        #expect(curve.bumps.map(\.rampInStartMs) == reference.map(\.rampInStartMs))
+        #expect(curve.bumps.map(\.rampOutEndMs) == reference.map(\.rampOutEndMs))
+        #expect(curve.bumps.map(\.speed) == reference.map(\.speed))
+    }
 }

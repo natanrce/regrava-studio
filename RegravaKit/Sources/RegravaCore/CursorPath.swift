@@ -244,8 +244,9 @@ struct SpeedCurve {
 
     mutating func add(_ bump: SpeedBump) {
         guard bump.speed > 1 else { return }
-        bumps.append(bump)
-        bumps.sort { $0.rampInStartMs < $1.rampInStartMs }
+        // Kept ordered by ramp-in start, after any bumps starting at the same time.
+        let at = (lastSearch(count: bumps.count, while: { bumps[$0].rampInStartMs <= bump.rampInStartMs }) ?? -1) + 1
+        bumps.insert(bump, at: at)
         longestBumpMs = max(longestBumpMs, bump.rampOutEndMs - bump.rampInStartMs)
     }
 
