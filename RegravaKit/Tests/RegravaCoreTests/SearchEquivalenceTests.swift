@@ -219,4 +219,18 @@ import Testing
         #expect(curve.bumps.map(\.rampOutEndMs) == reference.map(\.rampOutEndMs))
         #expect(curve.bumps.map(\.speed) == reference.map(\.speed))
     }
+
+    @Test func instantRangeLookupMatchesAFullScan() {
+        let path = RecordedCursorPath(points: [CursorPathPoint(timeMs: 0, position: .zero)])
+        func range(_ a: Double, _ b: Double) -> TimeRange { TimeRange(startMs: a, endMs: b) }
+        let ordered = [range(0, 1000), range(1000, 1000), range(1000, 2500), range(4000, 4100), range(5000, 9000)]
+        let unordered = [range(3000, 4000), range(0, 1000), range(500, 1500)]
+        for list in [ordered, unordered, [], [range(-.infinity, .infinity)]] {
+            let simulation = CursorSimulation(path: path, spring: .cursor, instantRanges: list)
+            let edges = list.flatMap { [$0.startMs, $0.endMs] }.filter(\.isFinite)
+            for t in Self.probes(edges) + stride(from: -50.0, through: 9100, by: 41).map({ $0 }) {
+                #expect(simulation.isInstant(t) == list.contains { t >= $0.startMs && t < $0.endMs })
+            }
+        }
+    }
 }

@@ -284,11 +284,16 @@ final class CursorSimulation {
     let path: RecordedCursorPath
     let spring: SpringConfig
     let instantRanges: [TimeRange]
+    /// The ranges are in order and apart, so the last one starting at or before an instant is
+    /// the only one that can contain it.
+    private let instantRangesOrdered: Bool
 
     init(path: RecordedCursorPath, spring: SpringConfig, instantRanges: [TimeRange]) {
         self.path = path
         self.spring = spring
         self.instantRanges = instantRanges
+        instantRangesOrdered = instantRanges.allSatisfy { $0.startMs <= $0.endMs }
+            && zip(instantRanges, instantRanges.dropFirst()).allSatisfy { $0.endMs <= $1.startMs }
     }
 
     var lagMs: Double { spring.damping / spring.stiffness * 1000 }
@@ -298,7 +303,9 @@ final class CursorSimulation {
     }
 
     func isInstant(_ t: Double) -> Bool {
-        instantRanges.contains { t >= $0.startMs && t < $0.endMs }
+        guard instantRangesOrdered else { return instantRanges.contains { t >= $0.startMs && t < $0.endMs } }
+        guard let i = lastSearch(count: instantRanges.count, while: { t >= instantRanges[$0].startMs }) else { return false }
+        return t < instantRanges[i].endMs
     }
 
     func run(
