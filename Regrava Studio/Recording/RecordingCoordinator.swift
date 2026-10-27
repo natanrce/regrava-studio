@@ -121,8 +121,11 @@ final class RecordingCoordinator: ObservableObject {
         // The capture ended by itself: finish what was recorded and say so (`recovered-from-error`).
         let unexpectedStop: (Error) -> Void = { [weak self] error in
             Task { @MainActor in
-                self?.endProblem = error
-                await self?.finish()
+                guard let self else { return }
+                self.endProblem = error
+                // A pause, resume or start still running ends first.
+                for await phase in self.$phase.values where phase != .working && phase != .starting { break }
+                await self.finish()
             }
         }
         recorder.onUnexpectedStop = unexpectedStop
