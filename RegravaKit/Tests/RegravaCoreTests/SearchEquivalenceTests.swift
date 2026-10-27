@@ -163,4 +163,21 @@ import Testing
             }
         }
     }
+
+    @Test func keyRangeIndicesMatchAFilter() {
+        let sorted = Self.events.map(\.timeMs)
+        let unsorted = sorted.reversed() + [5.0, .nan, 5]
+        for keys in [sorted, Array(unsorted), [], [42]] {
+            let ascending = isAscending(count: keys.count) { keys[$0] }
+            for low in Self.probes(keys.filter { !$0.isNaN }) {
+                for high in [low, low + 0.5, low + 1000, low - 1] {
+                    #expect(indices(count: keys.count, ascending: ascending, from: low, through: high) { keys[$0] }
+                        == keys.indices.filter { keys[$0] >= low && keys[$0] <= high })
+                }
+            }
+        }
+        #expect(isAscending(count: sorted.count) { sorted[$0] })
+        #expect(!isAscending(count: unsorted.count) { Array(unsorted)[$0] })
+        #expect(!isAscending(count: 2) { [1.0, .nan][$0] })
+    }
 }

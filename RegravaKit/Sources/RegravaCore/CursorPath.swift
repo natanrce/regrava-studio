@@ -84,6 +84,20 @@ func floorSearch(count: Int, value: Double, key: (Int) -> Double) -> Int? {
     return low > 0 ? low - 1 : nil
 }
 
+/// Whether the keys never decrease (false with a NaN key).
+func isAscending(count: Int, key: (Int) -> Double) -> Bool {
+    count < 2 || (1..<count).allSatisfy { key($0 - 1) <= key($0) }
+}
+
+/// Indices, in order, of the elements whose key lies in `[low, high]`; binary-searched when
+/// `ascending` (see `isAscending`), filtered otherwise.
+func indices(count: Int, ascending: Bool, from low: Double, through high: Double, key: (Int) -> Double) -> [Int] {
+    guard ascending else { return (0..<count).filter { key($0) >= low && key($0) <= high } }
+    let first = (lastSearch(count: count, while: { key($0) < low }) ?? -1) + 1
+    let end = (lastSearch(count: count, while: { key($0) <= high }) ?? -1) + 1
+    return Array(first..<max(first, end))
+}
+
 /// Index of the first element whose key is >= `value`.
 func ceilSearch(count: Int, value: Double, key: (Int) -> Double) -> Int? {
     var low = 0

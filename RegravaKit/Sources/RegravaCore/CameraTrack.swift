@@ -386,22 +386,26 @@ public final class CameraTrack: @unchecked Sendable {
         var hovers: [Double] = []
         var cuts: [Double] = []
         var instant: [TimeRange] = []
+        let eventsAscending = isAscending(count: pathEvents.count) { pathEvents[$0].timeMs }
+        let changesAscending = isAscending(count: imageChangesMs.count) { imageChangesMs[$0] }
+        let hoversAscending = isAscending(count: hoverTimesMs.count) { hoverTimesMs[$0] }
         for (index, link) in resolver.links.enumerated() {
             let atStart = MouseProcessing.lastIndex(atOrBefore: link.sourceStartMs, in: pathEvents).map { pathEvents[$0] } ?? pathEvents[0]
             points.append(CursorPathPoint(timeMs: link.playbackStartMs, position: atStart.position))
-            for event in pathEvents where event.timeMs >= link.sourceStartMs && event.timeMs <= link.sourceEndMs {
+            for e in indices(count: pathEvents.count, ascending: eventsAscending, from: link.sourceStartMs, through: link.sourceEndMs, key: { pathEvents[$0].timeMs }) {
+                let event = pathEvents[e]
                 let t = link.sourceToPlayback(event.timeMs)
                 points.append(CursorPathPoint(timeMs: t, position: event.position))
                 var mapped = event
                 mapped.timeMs = t
                 syncEvents.append(mapped)
             }
-            for change in imageChangesMs where change >= link.sourceStartMs && change <= link.sourceEndMs {
-                imageChanges.append(link.sourceToPlayback(change))
+            for c in indices(count: imageChangesMs.count, ascending: changesAscending, from: link.sourceStartMs, through: link.sourceEndMs, key: { imageChangesMs[$0] }) {
+                imageChanges.append(link.sourceToPlayback(imageChangesMs[c]))
             }
             // Hovers in cuts drop out; sped-up clips bring them closer.
-            for hover in hoverTimesMs where hover >= link.sourceStartMs && hover <= link.sourceEndMs {
-                hovers.append(link.sourceToPlayback(hover))
+            for h in indices(count: hoverTimesMs.count, ascending: hoversAscending, from: link.sourceStartMs, through: link.sourceEndMs, key: { hoverTimesMs[$0] }) {
+                hovers.append(link.sourceToPlayback(hoverTimesMs[h]))
             }
             if index > 0, resolver.links[index - 1].sourceEndMs != link.sourceStartMs {
                 cuts.append(link.playbackStartMs)
@@ -532,8 +536,9 @@ struct CameraPlanner {
 
         let video = project.recording.videoSize
         var groups: [UUID: [FocusGroup]] = [:]
+        let sparseAscending = isAscending(count: sparse.count) { sparse[$0].timeMs }
         for zoom in zooms + loupes where zoom.mode == .auto {
-            var events = sparse.filter { $0.timeMs >= zoom.startMs && $0.timeMs <= zoom.endMs }
+            var events = indices(count: sparse.count, ascending: sparseAscending, from: zoom.startMs, through: zoom.endMs, key: { sparse[$0].timeMs }).map { sparse[$0] }
             // Include where the cursor already was when the zoom starts.
             if let i = MouseProcessing.lastIndex(atOrBefore: zoom.startMs, in: sparse), sparse[i].timeMs < zoom.startMs {
                 var carried = sparse[i]
