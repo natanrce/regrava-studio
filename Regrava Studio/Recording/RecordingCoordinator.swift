@@ -106,6 +106,8 @@ final class RecordingCoordinator: ObservableObject {
     private lazy var cameraPreview = CameraPreviewController(coordinator: self)
     /// The recording folder (in "Recordings In Progress") until it becomes a project.
     private var bundleURL: URL?
+    /// The folder being recorded into, while a recording is in progress.
+    var recordingFolder: URL? { isRecording ? bundleURL : nil }
     private var endProblem: Error?
     private var activeSelection: RecordSelection?
     private var timer: Timer?
@@ -421,6 +423,7 @@ final class RecordingCoordinator: ObservableObject {
     private func begin() async {
         guard let selection else { return }
         phase = .starting
+        bundleURL = nil
         activeSelection = selection
         overlays.hide()
         pickerPanel?.orderOut(nil)

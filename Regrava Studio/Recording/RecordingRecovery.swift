@@ -59,12 +59,14 @@ enum RecordingFolders {
         return try? JSONDecoder().decode(AppData.self, from: Data(marker.appData.utf8))
     }
 
-    /// `listUnfinished`: the folders no finish ended, newest first.
-    static func unfinished() -> [URL] {
+    /// `listUnfinished`: the folders no finish ended, newest first. `excluding` is the folder of
+    /// the recording in progress, which is not unfinished.
+    static func unfinished(excluding current: URL? = nil) -> [URL] {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey]
         let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
         return folders
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { $0.standardizedFileURL != current?.standardizedFileURL }
             .filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent(RecordingMetadata.fileName).path) }
             .sorted {
                 let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
@@ -149,7 +151,7 @@ final class RecordingRecovery: ObservableObject {
     @Published private(set) var unfinished: [URL] = []
 
     func refresh() {
-        let list = RecordingFolders.unfinished()
+        let list = RecordingFolders.unfinished(excluding: AppController.shared.recording.recordingFolder)
         if list != unfinished { unfinished = list }
     }
 
