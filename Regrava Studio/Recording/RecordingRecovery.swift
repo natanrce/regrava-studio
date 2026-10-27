@@ -221,6 +221,7 @@ final class RecordingRecovery: ObservableObject {
 final class LoaderWindow {
     static let shared = LoaderWindow()
     private var panel: NSPanel?
+    private var host: NSHostingView<AnyView>?
 
     func show(_ message: String) {
         let view = HStack(spacing: Theme.gap(1)) {
@@ -231,14 +232,17 @@ final class LoaderWindow {
         .frame(height: 56)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .environment(\.colorScheme, .dark)
-        let host = NSHostingView(rootView: view)
+        // One hosting view, given each new message.
+        let host = self.host ?? NSHostingView(rootView: AnyView(view))
+        if self.host != nil { host.rootView = AnyView(view) }
+        self.host = host
         let size = host.fittingSize
         let panel = self.panel ?? NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .floating
-        panel.contentView = host
+        if panel.contentView !== host { panel.contentView = host }
         let screen = NSScreen.main?.visibleFrame ?? .zero
         panel.setFrame(NSRect(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2, width: size.width, height: size.height), display: true)
         panel.orderFrontRegardless()
