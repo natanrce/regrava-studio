@@ -213,9 +213,6 @@ public extension Project {
         return true
     }
 
-    /// Removes a slice (never the last one). With `closeGap`, the previous slice is extended up
-    /// to the next one (`remove(true)`).
-    @discardableResult
     /// Zooms, layouts and masks entirely cut out are removed.
     mutating func removeNonPresentTimelineItems() {
         let resolver = self.resolver
@@ -238,6 +235,9 @@ public extension Project {
         return nil
     }
 
+    /// Removes a slice (never the last one). With `closeGap`, the previous slice is extended up
+    /// to the next one (`remove(true)`).
+    @discardableResult
     mutating func removeSlice(_ id: UUID, closeGap: Bool = false) -> Bool {
         guard slices.count > 1, let i = slices.firstIndex(where: { $0.id == id }) else { return false }
         let previous = i > 0 ? slices[i - 1].id : nil
