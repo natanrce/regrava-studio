@@ -119,6 +119,8 @@ final class Preferences: ObservableObject {
     static let shared = Preferences()
     private let defaults = UserDefaults.standard
     private var cancellables: Set<AnyCancellable> = []
+    /// What `persist` last wrote for each JSON-encoded key.
+    private var encoded: [String: Data] = [:]
 
     // General
     @Published var startAtStartup: Bool
@@ -245,7 +247,11 @@ final class Preferences: ObservableObject {
             if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
         }
         func encode<T: Encodable>(_ key: String, _ value: T) {
-            defaults.set(try? JSONEncoder().encode(value), forKey: key)
+            let data = try? JSONEncoder().encode(value)
+            // An unchanged value is not written again.
+            if let data, encoded[key] == data { return }
+            encoded[key] = data
+            defaults.set(data, forKey: key)
         }
         set("startAtStartup", startAtStartup)
         set("hideDockIcon", hideDockIcon)
