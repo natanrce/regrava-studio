@@ -239,7 +239,8 @@ final class Preferences: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func persist() {
+    /// Writes every preference now (also run on quit, ahead of the debounced save).
+    func persist() {
         func set(_ key: String, _ value: Any?) {
             if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
         }
@@ -287,10 +288,9 @@ final class Preferences: ObservableObject {
         encode("shortcuts", Dictionary(uniqueKeysWithValues: shortcuts.map { ($0.key.rawValue, $0.value) }))
     }
 
-    /// "Reset preferences": back to the defaults.
+    /// "Reset preferences": back to the defaults. Only the preferences are reset; recent
+    /// projects, speaker notes and window positions stay.
     func reset() {
-        let domain = Bundle.main.bundleIdentifier ?? "com.natanzin.regravastudio"
-        defaults.removePersistentDomain(forName: domain)
         startAtStartup = false
         hideDockIcon = false
         projectsFolderPath = nil
@@ -330,6 +330,8 @@ final class Preferences: ObservableObject {
         exportSettings = ExportSettingsStore()
         widgetExportSettings = ExportSettingsStore()
         shortcuts = Dictionary(uniqueKeysWithValues: ShortcutAction.allCases.map { ($0, $0.defaultShortcut) })
+        defaultPresetID = nil
+        persist()
         applyStartAtLogin()
     }
 
