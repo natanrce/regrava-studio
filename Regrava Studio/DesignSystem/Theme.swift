@@ -50,8 +50,6 @@ enum Theme {
         static let label = Font.system(size: 12, weight: .regular)
         static let copy = Font.system(size: 13, weight: .regular)
         static let controlCopy = Font.system(size: 13, weight: .regular)
-        static let largeCopy = Font.system(size: 16, weight: .regular)
-        static let subtitle = Font.system(size: 16, weight: .regular)
         static let title = Font.system(size: 20, weight: .semibold)
         static let titleMedium = Font.system(size: 20, weight: .medium)
         static let hero = Font.system(size: 32, weight: .semibold)
@@ -72,9 +70,6 @@ enum Theme {
         static let control = Box(height: 38, radius: 6, paddingX: 12)
         static let largeControl = Box(height: 40, radius: 6, paddingX: 14)
         static let heroControl = Box(height: 48, radius: 6, paddingX: 20)
-        static let squareControl = Box(height: 38, width: 38, radius: 5, paddingX: 14)
-        static let smallSquareControl = Box(height: 28, width: 28, radius: 6, paddingX: 8)
-        static let toolbar = Box(height: 38, width: 46, radius: 6, paddingX: 12)
         static let badge = Box(height: 22, radius: 50, paddingX: 8)
     }
 }

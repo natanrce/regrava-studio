@@ -469,7 +469,6 @@ enum DeviceSourceMenu {
     static func show(coordinator: RecordingCoordinator) {
         coordinator.selection = nil
         guard ensureCameraPermission() else { return }
-        coordinator.externalDevices.start()
         let devices = coordinator.externalDevices.devices
         let menu = MenuBuilder()
         if devices.isEmpty {

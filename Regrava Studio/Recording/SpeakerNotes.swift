@@ -39,7 +39,6 @@ final class SpeakerNotesStore: ObservableObject {
 final class SpeakerNotesWindowController: NSWindowController, NSWindowDelegate {
     static let shared = SpeakerNotesWindowController()
     private var cancellables: Set<AnyCancellable> = []
-    private var isClosingFromSetting = false
 
     private init() {
         let panel = NSPanel(
@@ -94,9 +93,7 @@ final class SpeakerNotesWindowController: NSWindowController, NSWindowDelegate {
             if !window.isVisible { window.makeKeyAndOrderFront(nil) }
             positionTrafficLights()
         } else if window.isVisible {
-            isClosingFromSetting = true
             window.orderOut(nil)
-            isClosingFromSetting = false
         }
     }
 

@@ -159,7 +159,6 @@ struct QuickExportWidgetView: View {
     @ObservedObject var editor: EditorModel
     @ObservedObject var exports: ExportController
     @ObservedObject private var preferences = Preferences.shared
-    @EnvironmentObject private var clock: PlaybackClock
     var autoAction: AfterRecordingAction?
     @State private var hovered = false
     @State private var isAutoExporting = false

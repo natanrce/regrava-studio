@@ -1,6 +1,5 @@
 @preconcurrency import AVFoundation
 import AppKit
-import CoreMediaIO
 import RegravaCapture
 import SwiftUI
 
@@ -191,18 +190,5 @@ private final class CameraPreviewView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         menuProvider?()
-    }
-}
-
-/// Lets AVFoundation list USB-connected iOS/iPadOS screens as capture devices.
-enum ScreenCaptureDevices {
-    static func enable() {
-        var address = CMIOObjectPropertyAddress(
-            mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyAllowScreenCaptureDevices),
-            mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
-            mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain)
-        )
-        var allow: UInt32 = 1
-        CMIOObjectSetPropertyData(CMIOObjectID(kCMIOObjectSystemObject), &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &allow)
     }
 }
