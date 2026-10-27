@@ -229,7 +229,7 @@ final class RecordingCoordinator: ObservableObject {
         if let id = cameraID, !cameras.contains(where: { $0.id == id }) { cameraID = nil }
         if let id = microphoneID, !microphones.contains(where: { $0.id == id }) { microphoneID = nil }
         isPickerOpen = true
-        Task { await refreshSources() }
+        let sources = reloadSources()
         if pickerPanel == nil {
             pickerPanel = GlassPanel(height: 64, cornerRadius: 16, focusable: true, positionKey: "recording-picker") {
                 RecordingPickerView(coordinator: self)
@@ -239,7 +239,14 @@ final class RecordingCoordinator: ObservableObject {
         pickerPanel?.makeKey()
         NSApp.activate(ignoringOtherApps: true)
         microphoneLevel.monitor(deviceID: microphoneID)
-        if let preselect { selectType(preselect) }
+        if let preselect {
+            selectType(preselect)
+            // What depends on the screens (a single display, the saved area) is chosen once they are known.
+            Task {
+                await sources.value
+                if sourceType == preselect, selection == nil { autoSelect(preselect) }
+            }
+        }
         installPickerShortcuts()
     }
 
@@ -277,6 +284,20 @@ final class RecordingCoordinator: ObservableObject {
         microphones = DeviceCatalog.microphones()
     }
 
+    private var sourcesRefresh: Task<Void, Never>?
+
+    /// One refresh of the screen sources at a time: a refresh asked for while one runs joins it.
+    @discardableResult
+    private func reloadSources() -> Task<Void, Never> {
+        if let sourcesRefresh { return sourcesRefresh }
+        let task = Task {
+            await refreshSources()
+            sourcesRefresh = nil
+        }
+        sourcesRefresh = task
+        return task
+    }
+
     func refreshSources() async {
         do {
             displays = try await CaptureCatalog.displays()
@@ -298,6 +319,13 @@ final class RecordingCoordinator: ObservableObject {
         }
         sourceType = type
         selection = nil
+        autoSelect(type)
+        if type == .device { return }
+        reloadSources()
+    }
+
+    /// A single display is selected right away; Area starts from the last picked area.
+    private func autoSelect(_ type: SourceType) {
         switch type {
         case .display:
             if displays.count == 1 { selection = .display(displays[0]) }
@@ -308,8 +336,6 @@ final class RecordingCoordinator: ObservableObject {
         case .window, .device:
             break
         }
-        if type == .device { return }
-        Task { await refreshSources() }
     }
 
     /// Escape: clears the selected source, else closes the picker.
