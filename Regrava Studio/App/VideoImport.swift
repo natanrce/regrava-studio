@@ -25,7 +25,14 @@ enum VideoImport {
             let result = try await makeRecording(from: video) { progress in
                 LoaderWindow.shared.show("\(message) (\(Int((progress * 100).rounded()))%)")
             }
-            let made = try RecordingFolders.createProject(from: result.capture, folder: result.folder)
+            let made: (bundle: URL, project: Project)
+            do {
+                made = try RecordingFolders.createProject(from: result.capture, folder: result.folder)
+            } catch {
+                // Nothing lists this folder as unfinished, so it is not kept.
+                try? FileManager.default.removeItem(at: result.folder)
+                throw error
+            }
             AppController.shared.recording.closePicker()
             AppController.shared.openProject(bundle: made.bundle, project: made.project, isNewRecording: true)
         } catch {
@@ -50,6 +57,17 @@ enum VideoImport {
 
         let folder = RecordingFolders.root.appendingPathComponent(randomName(), isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        do {
+            return (try await export(picture: picture, sound: sound, duration: duration, size: size, into: folder, progress: progress), folder)
+        } catch {
+            // Nothing lists this folder as unfinished, so it is not kept.
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+    }
+
+    /// Copies the picture and sound into the folder's movie, as a finished recording.
+    private static func export(picture: AVAssetTrack, sound: AVAssetTrack?, duration: CMTime, size: CGSize, into folder: URL, progress: @escaping @MainActor (Double) -> Void) async throws -> CaptureResult {
         let composition = AVMutableComposition()
         let range = CMTimeRange(start: .zero, duration: duration)
         if let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
@@ -86,6 +104,6 @@ enum VideoImport {
             durationMs: duration.seconds * 1000,
             fps: 60
         )
-        return (capture, folder)
+        return capture
     }
 }
