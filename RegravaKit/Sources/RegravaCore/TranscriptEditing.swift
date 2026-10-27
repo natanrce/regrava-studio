@@ -300,12 +300,13 @@ public enum TranscriptEditing {
         let present = deleted.filter { isPresent($0, resolver: resolver) }
         guard !present.isEmpty else { return .nothing }
         var ranges = cutRanges(tokens: tokens, deleted: present, project: project)
-        if removedDuration(project.slices, ranges) <= 0 {
+        var removed = removedDuration(project.slices, ranges)
+        if removed <= 0 {
             let p = presentRanges(project)
             ranges = merge(present.flatMap { $0.kind == .gap ? intersect($0.sourceStartMs, $0.sourceEndMs, p) : [] })
+            removed = removedDuration(project.slices, ranges)
         }
         if wouldRemoveAll(project.slices, ranges) { return .wouldRemoveAll }
-        let removed = removedDuration(project.slices, ranges)
         guard removed > 0 else { return .nothing }
         applyCuts(&project, ranges)
         removeNonPresentItems(&project)
