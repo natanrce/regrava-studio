@@ -3,6 +3,34 @@ import Testing
 @testable import RegravaCore
 
 struct TranscriptTests {
+    @Test func timingMatchesTheRegexReplacementForms() {
+        func syllables(_ word: String) -> Int {
+            var w = word.lowercased()
+            if w.count <= 3 { return 1 }
+            w = w.replacingOccurrences(of: "(?:[^laeiouy]es|ed|[^laeiouy]e)$", with: "", options: .regularExpression)
+            w = w.replacingOccurrences(of: "^y", with: "", options: .regularExpression)
+            let matches = (try? NSRegularExpression(pattern: "[aeiouy]{1,2}"))?.numberOfMatches(in: w, range: NSRange(w.startIndex..., in: w)) ?? 0
+            return matches > 0 ? matches : 1
+        }
+        func duration(_ text: String) -> Double {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return 0 }
+            var total = 0
+            for part in trimmed.split(whereSeparator: \.isWhitespace) {
+                let cleaned = String(part).replacingOccurrences(of: "[^A-Za-z0-9_]", with: "", options: .regularExpression)
+                if !cleaned.isEmpty { total += syllables(cleaned) }
+            }
+            return Double(total) / 3 * 1000
+        }
+        let samples = ["", "  ", "the", "recording", "Studio", "played", "yes", "Yesterday", "boxes", "make", "table",
+                       "café", "cafe\u{301}s", "naïve", "über", "日本語", "emoji😀word", "snake_case", "R2-D2!", "don't",
+                       " hello world ", "line\nbreak", "YYY", "eye", "queue", "rhythm", "ﬁne", "İstanbul", "x̧yz"]
+        for text in samples {
+            #expect(TranscriptTiming.estimatedDurationMs(text) == duration(text), "\(text)")
+            #expect(TranscriptTiming.syllables(text) == syllables(text), "\(text)")
+        }
+    }
+
     @Test func syllablesFollowTheHeuristic() {
         #expect(TranscriptTiming.syllables("the") == 1)
         #expect(TranscriptTiming.syllables("recording") == 3)

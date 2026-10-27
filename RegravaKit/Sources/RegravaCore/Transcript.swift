@@ -79,14 +79,34 @@ public enum TranscriptTiming {
     /// Spoken syllables per second.
     static let syllablesPerSecond = 3.0
 
+    private static let silentEnding = try! NSRegularExpression(pattern: "(?:[^laeiouy]es|ed|[^laeiouy]e)$")
+    private static let leadingY = try! NSRegularExpression(pattern: "^y")
+    private static let vowelGroup = try! NSRegularExpression(pattern: "[aeiouy]{1,2}")
+
+    private static func removing(_ regex: NSRegularExpression, from s: String) -> String {
+        regex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
+    }
+
     /// Syllables of one word.
     static func syllables(_ word: String) -> Int {
         var w = word.lowercased()
         if w.count <= 3 { return 1 }
-        w = w.replacingOccurrences(of: "(?:[^laeiouy]es|ed|[^laeiouy]e)$", with: "", options: .regularExpression)
-        w = w.replacingOccurrences(of: "^y", with: "", options: .regularExpression)
-        let matches = (try? NSRegularExpression(pattern: "[aeiouy]{1,2}"))?.numberOfMatches(in: w, range: NSRange(w.startIndex..., in: w)) ?? 0
+        w = removing(silentEnding, from: w)
+        w = removing(leadingY, from: w)
+        let matches = vowelGroup.numberOfMatches(in: w, range: NSRange(w.startIndex..., in: w))
         return matches > 0 ? matches : 1
+    }
+
+    /// Keeps the ASCII letters, digits and underscores (`[^A-Za-z0-9_]` removed).
+    private static func asciiWordCharacters(_ s: Substring) -> String {
+        var out = String.UnicodeScalarView()
+        for scalar in s.unicodeScalars {
+            switch scalar.value {
+            case 0x30...0x39, 0x41...0x5A, 0x61...0x7A, 0x5F: out.append(scalar)
+            default: break
+            }
+        }
+        return String(out)
     }
 
     /// Estimated spoken duration in ms. Only ASCII letters, digits and `_` count as word
@@ -96,7 +116,7 @@ public enum TranscriptTiming {
         guard !trimmed.isEmpty else { return 0 }
         var total = 0
         for part in trimmed.split(whereSeparator: \.isWhitespace) {
-            let cleaned = String(part).replacingOccurrences(of: "[^A-Za-z0-9_]", with: "", options: .regularExpression)
+            let cleaned = asciiWordCharacters(part)
             if !cleaned.isEmpty { total += syllables(cleaned) }
         }
         return Double(total) / syllablesPerSecond * 1000
