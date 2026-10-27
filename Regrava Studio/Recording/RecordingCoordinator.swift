@@ -87,7 +87,8 @@ final class RecordingCoordinator: ObservableObject {
     @Published var showCameraPreview = true
     // Recording
     @Published private(set) var phase: Phase = .idle
-    @Published private(set) var elapsed: TimeInterval = 0
+    /// The recording's elapsed time, observed only by the timer that shows it.
+    let clock = RecordingClock()
     /// True while an operation has been running for ≥ 3 s ("Working...").
     @Published private(set) var showsWorking = false
     @Published private(set) var flagFlash = false
@@ -671,12 +672,12 @@ final class RecordingCoordinator: ObservableObject {
     }
 
     private func startTimer() {
-        elapsed = 0
+        clock.elapsed = 0
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.elapsed = self.isDeviceRecording ? self.deviceRecorder.elapsed : self.recorder.elapsed
+                self.clock.elapsed = self.isDeviceRecording ? self.deviceRecorder.elapsed : self.recorder.elapsed
             }
         }
     }
@@ -684,7 +685,7 @@ final class RecordingCoordinator: ObservableObject {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
-        elapsed = 0
+        clock.elapsed = 0
     }
 
     // MARK: Auxiliary windows
@@ -737,6 +738,13 @@ final class RecordingCoordinator: ObservableObject {
         } else {
             cameraPreview.hide()
         }
-        pickerPanel?.refit()
+        // A hidden picker is fitted again when it is presented.
+        if pickerPanel?.isVisible == true { pickerPanel?.refit() }
     }
+}
+
+/// Elapsed recording time, apart from the coordinator so its ticks redraw only the timer.
+@MainActor
+final class RecordingClock: ObservableObject {
+    @Published var elapsed: TimeInterval = 0
 }

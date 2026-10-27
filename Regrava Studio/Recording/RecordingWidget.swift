@@ -8,7 +8,7 @@ struct RecordingWidgetView: View {
     var body: some View {
         ZStack {
             HStack(spacing: Theme.gap(0)) {
-                StopTimerButton(elapsed: coordinator.elapsed) { coordinator.requestFinish() }
+                StopTimerButton(clock: coordinator.clock) { coordinator.requestFinish() }
                 PanelDivider(verticalMargin: 8, opacity: 0.15)
                 HStack(spacing: Theme.gap(1)) {
                     if coordinator.phase == .paused {
@@ -60,9 +60,11 @@ struct RecordingWidgetView: View {
 
 /// `stop.circle` + timer in #ff3f3f, control box (38 tall, radius 6), grows to fill the row.
 private struct StopTimerButton: View {
-    var elapsed: TimeInterval
+    @ObservedObject var clock: RecordingClock
     var action: () -> Void
     @State private var hovered = false
+
+    private var elapsed: TimeInterval { clock.elapsed }
 
     var body: some View {
         Button(action: action) {
