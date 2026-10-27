@@ -130,9 +130,6 @@ public struct ExportSettings: Codable, Hashable, Sendable {
         }
     }
 
-    /// Shareable-link exports are fixed to these values.
-    public static let shareableLink = ExportSettings(format: .mp4, fps: 60, quality: .socialMedia, height: 1080)
-
     /// Resolutions currently allowed (web qualities cap at 1080p).
     public var allowedResolutions: [Int] {
         let all = format.resolutionOptions

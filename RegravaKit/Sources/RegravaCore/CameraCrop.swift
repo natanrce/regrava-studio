@@ -38,10 +38,6 @@ public struct CameraCropState: Sendable, Equatable {
         crop = applyConstraints ? Self.constrain(c, in: frame, aspectRatio: aspectNumber, minSize: Self.minCropSize) : Self.clampMax(c, in: frame)
     }
 
-    public mutating func setCrop01(_ c: Rect2, applyConstraints: Bool = true) {
-        setCrop(Rect2(x: c.x * frame.width, y: c.y * frame.height, width: c.width * frame.width, height: c.height * frame.height), applyConstraints: applyConstraints)
-    }
-
     public mutating func setForcedAspectRatio(_ ratio: Vec2?) {
         forcedAspectRatio = ratio
         crop = Self.constrain(crop, in: frame, aspectRatio: aspectNumber, minSize: Self.minCropSize)

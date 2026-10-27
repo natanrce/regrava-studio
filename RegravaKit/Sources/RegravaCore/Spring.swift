@@ -241,20 +241,3 @@ public struct SpringRect: Hashable, Sendable {
         height.advance(toward: target.height, config: config, milliseconds: milliseconds)
     }
 }
-
-public struct SpringPoint: Hashable, Sendable {
-    public var x: SpringValue
-    public var y: SpringValue
-
-    public init(_ point: Vec2) {
-        x = SpringValue(point.x)
-        y = SpringValue(point.y)
-    }
-
-    public var point: Vec2 { Vec2(x.value, y.value) }
-
-    public mutating func advance(toward target: Vec2, config: SpringConfig, milliseconds: Double) {
-        x.advance(toward: target.x, config: config, milliseconds: milliseconds)
-        y.advance(toward: target.y, config: config, milliseconds: milliseconds)
-    }
-}

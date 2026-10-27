@@ -117,7 +117,6 @@ public enum ColorGrading {
 
     static let skinChromaKnee = 0.11
     static let colorDensityMaxDrop = 0.1
-    static let lumaWeights = (0.2126, 0.7152, 0.0722)
 
     /// Circular mean of the OKLab hues of seven skin swatches, ≈ 62.0931°.
     public static let skinCenterHueDeg: Double = {

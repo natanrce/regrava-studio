@@ -88,15 +88,6 @@ public struct Rect2: Codable, Hashable, Sendable {
             height: height + (other.height - height) * t
         )
     }
-
-    /// Largest rectangle with `content`'s aspect ratio that fits in `bounds`, centered.
-    public static func aspectFit(_ content: Size2, in bounds: Rect2) -> Rect2 {
-        guard content.width > 0, content.height > 0 else { return bounds }
-        let scale = min(bounds.width / content.width, bounds.height / content.height)
-        let w = content.width * scale
-        let h = content.height * scale
-        return Rect2(x: bounds.midX - w / 2, y: bounds.midY - h / 2, width: w, height: h)
-    }
 }
 
 @inlinable
