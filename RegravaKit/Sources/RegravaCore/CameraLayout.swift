@@ -225,6 +225,8 @@ public final class LayoutResolver: @unchecked Sendable {
     /// Whether the fitted screen leaves empty bands in the zoom area ("Avoid empty area").
     public let hasUncoveredZoomArea: Bool
     private let split: SplitState?
+    /// `LayoutMath.anchor` of the zoom area and camera: where zooms are anchored.
+    private let zoomAnchor: Vec2
     private let makeVariant: (() -> LayoutResolver)?
     public private(set) lazy var zoomedVariant: LayoutResolver = makeVariant?() ?? self
     public var hideCameraVariant: LayoutResolver { zoomedVariant }
@@ -259,6 +261,7 @@ public final class LayoutResolver: @unchecked Sendable {
         self.allowsScreenBorderRadius = allowsScreenBorderRadius
         self.hasUncoveredZoomArea = hasUncoveredZoomArea
         self.split = split
+        zoomAnchor = LayoutMath.anchor(zoomArea: zoomArea, camera: cameraRect)
         self.makeVariant = makeVariant
     }
 
@@ -444,8 +447,7 @@ public final class LayoutResolver: @unchecked Sendable {
             case .bottom: Vec2(focus.x, 1)
             }
         }
-        let anchor = LayoutMath.anchor(zoomArea: zoomArea, camera: cameraRect)
-        return initialScreenRect.zoom(level, origin01: focus, area: zoomArea, anchor: anchor)
+        return initialScreenRect.zoom(level, origin01: focus, area: zoomArea, anchor: zoomAnchor)
     }
 
     /// Edge the overflowing split screen rests against: its own, or the camera's when the cursor
