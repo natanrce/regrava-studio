@@ -114,7 +114,7 @@ final class MicrophoneLevelMonitor: NSObject, ObservableObject {
         watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                if Date().timeIntervalSince(self.lastSignal) > 7 { self.isSilent = true }
+                if Date().timeIntervalSince(self.lastSignal) > 7, !self.isSilent { self.isSilent = true }
             }
         }
     }
@@ -133,10 +133,12 @@ final class MicrophoneLevelMonitor: NSObject, ObservableObject {
     private func receive(_ decibels: Float) {
         let db = Double(decibels)
         if db > -100 { lastSignal = Date() }
-        isSilent = db <= -100 && Date().timeIntervalSince(lastSignal) > 7
+        let silent = db <= -100 && Date().timeIntervalSince(lastSignal) > 7
+        if silent != isSilent { isSilent = silent }
         let normalized = max(0, min(1, (db + 60) / 60))
-        level = normalized
-        peak = max(normalized, peak * 0.92)
+        if normalized != level { level = normalized }
+        let nextPeak = max(normalized, peak * 0.92)
+        if nextPeak != peak { peak = nextPeak }
     }
 }
 
