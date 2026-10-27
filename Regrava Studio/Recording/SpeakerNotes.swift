@@ -10,7 +10,8 @@ final class SpeakerNotesStore: ObservableObject {
     static let shared = SpeakerNotesStore()
     static let defaultFontSize = 14.0
 
-    @Published var content: String { didSet { defaults.set(content, forKey: "speakerNoteContent") } }
+    /// Read by the note's text view when it is made; typing does not redraw anything.
+    var content: String { didSet { defaults.set(content, forKey: "speakerNoteContent") } }
     @Published var prompterSpeed: Double { didSet { defaults.set(prompterSpeed, forKey: "speakerNotesPrompterSpeed") } }
     @Published var opacity: Double { didSet { defaults.set(opacity, forKey: "speakerNotesOpacity") } }
     @Published var fontSize: Double { didSet { defaults.set(fontSize, forKey: "speakerNotesFontSize") } }
@@ -186,6 +187,8 @@ private struct SpeakerNotesText: NSViewRepresentable {
         var position: CGFloat = 0
         var speed: Double = 0
         var observers: [Any] = []
+        /// The font size the text view was last styled with.
+        var styledFontSize: Double?
 
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
@@ -241,13 +244,13 @@ private struct SpeakerNotesText: NSViewRepresentable {
             center.addObserver(forName: NSView.frameDidChangeNotification, object: scrollView, queue: .main) { _ in coordinator.sync() },
         ]
         scrollView.postsFrameChangedNotifications = true
-        style(text)
+        style(text, coordinator: context.coordinator)
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let text = scrollView.documentView as? NSTextView else { return }
-        style(text)
+        style(text, coordinator: context.coordinator)
         context.coordinator.run(playing: store.isPlaying, speed: store.pixelsPerSecond)
     }
 
@@ -257,7 +260,9 @@ private struct SpeakerNotesText: NSViewRepresentable {
     }
 
     /// Font size, 1.5 line height, 20 px bottom padding and the placeholder.
-    private func style(_ text: NSTextView) {
+    private func style(_ text: NSTextView, coordinator: Coordinator) {
+        guard coordinator.styledFontSize != store.fontSize else { return }
+        coordinator.styledFontSize = store.fontSize
         let font = NSFont.systemFont(ofSize: store.fontSize)
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = store.fontSize * 1.5
