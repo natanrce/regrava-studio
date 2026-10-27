@@ -138,6 +138,11 @@ final class RecordingCoordinator: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        // The source overlays dim with the current setting.
+        preferences.$recordingAreaCover
+            .dropFirst()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         // Keep auxiliary windows in sync with the state.
         objectWillChange
             .debounce(for: .milliseconds(10), scheduler: RunLoop.main)
