@@ -181,19 +181,30 @@ public enum TranscriptEditing {
     }
 
     public static func isPresent(_ token: TranscriptToken, in project: Project) -> Bool {
-        project.resolver.isSourceRangePresent(token.sourceStartMs, token.sourceEndMs)
+        isPresent(token, resolver: project.resolver)
+    }
+
+    /// `isPresent(_:in:)` with the project's `resolver` built once by the caller.
+    public static func isPresent(_ token: TranscriptToken, resolver: TimeResolver) -> Bool {
+        resolver.isSourceRangePresent(token.sourceStartMs, token.sourceEndMs)
     }
 
     public static func canTighten(_ gap: TranscriptToken, in project: Project) -> Bool {
-        gap.kind == .gap && !tighten(gap.sourceStartMs, gap.sourceEndMs, present: presentRanges(project)).isEmpty
+        canTighten(gap, present: presentRanges(project))
+    }
+
+    /// `canTighten(_:in:)` with the project's `presentRanges` built once by the caller.
+    public static func canTighten(_ gap: TranscriptToken, present: [(Double, Double)]) -> Bool {
+        gap.kind == .gap && !tighten(gap.sourceStartMs, gap.sourceEndMs, present: present).isEmpty
     }
 
     /// The source ranges to cut for deleted tokens.
     static func cutRanges(tokens: [TranscriptToken], deleted: [TranscriptToken], project: Project) -> [(Double, Double)] {
         let present = presentRanges(project)
+        let resolver = project.resolver
         let deletedSet = Set(deleted.map(\.index))
         func keptWord(_ i: Int) -> Bool {
-            tokens[i].kind == .word && !deletedSet.contains(i) && isPresent(tokens[i], in: project)
+            tokens[i].kind == .word && !deletedSet.contains(i) && isPresent(tokens[i], resolver: resolver)
         }
         let sorted = deleted.map(\.index).sorted()
         var runs: [[Int]] = []
@@ -285,7 +296,8 @@ public enum TranscriptEditing {
 
     /// `deleteTokens`: cuts the present tokens out of the video.
     public static func delete(_ deleted: [TranscriptToken], tokens: [TranscriptToken], project: inout Project) -> DeleteResult {
-        let present = deleted.filter { isPresent($0, in: project) }
+        let resolver = project.resolver
+        let present = deleted.filter { isPresent($0, resolver: resolver) }
         guard !present.isEmpty else { return .nothing }
         var ranges = cutRanges(tokens: tokens, deleted: present, project: project)
         if removedDuration(project.slices, ranges) <= 0 {
@@ -331,12 +343,13 @@ public enum TranscriptEditing {
 
     /// `restoreTarget`: video back for cut words (40 ms of air) or cut pauses.
     public static func restore(_ target: [TranscriptToken], project: inout Project) {
-        guard target.contains(where: { !isPresent($0, in: project) }) else { return }
+        let resolver = project.resolver
+        guard target.contains(where: { !isPresent($0, resolver: resolver) }) else { return }
         let words = target.filter { $0.kind == .word }
-        if let first = words.first, let last = words.last, words.contains(where: { !isPresent($0, in: project) }) {
+        if let first = words.first, let last = words.last, words.contains(where: { !isPresent($0, resolver: resolver) }) {
             addBack(&project, first.sourceStartMs - 40, last.sourceEndMs + 40)
         } else {
-            for gap in target.filter({ $0.kind == .gap && !isPresent($0, in: project) }).sorted(by: { $0.sourceStartMs > $1.sourceStartMs }) {
+            for gap in target.filter({ $0.kind == .gap && !isPresent($0, resolver: resolver) }).sorted(by: { $0.sourceStartMs > $1.sourceStartMs }) {
                 addBack(&project, gap.sourceStartMs, gap.sourceEndMs)
             }
         }
