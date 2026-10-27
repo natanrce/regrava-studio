@@ -116,7 +116,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 /// Permissions step: Screen Recording + Accessibility, polled every 500 ms. There is no
 /// terms checkbox or account step.
 @MainActor
-final class OnboardingWindowController: NSWindowController {
+final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let shared = OnboardingWindowController()
     private let model = OnboardingModel()
 
@@ -134,7 +134,13 @@ final class OnboardingWindowController: NSWindowController {
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = NSColor(Theme.Colors.background)
         super.init(window: window)
+        window.delegate = self
         hosting.rootView = OnboardingView(model: model)
+    }
+
+    /// Closed with the close button: the permissions are no longer polled.
+    func windowWillClose(_ notification: Notification) {
+        model.stopPolling()
     }
 
     @available(*, unavailable)
