@@ -16,6 +16,16 @@ final class MenuBuilder {
         menu.autoenablesItems = false
     }
 
+    /// SF Symbol images, made once per name (menus are rebuilt often).
+    private static var symbols: [String: NSImage] = [:]
+
+    static func symbol(_ name: String) -> NSImage? {
+        if let image = symbols[name] { return image }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        symbols[name] = image
+        return image
+    }
+
     /// A menu whose items are built again, in place and without closing, after every toggle
     /// and on `refresh()`.
     static func live(_ build: @escaping (MenuBuilder) -> Void) -> MenuBuilder {
@@ -57,7 +67,7 @@ final class MenuBuilder {
         action: (() -> Void)? = nil
     ) -> NSMenuItem {
         let item = ClosureMenuItem(title: title, action: action)
-        if let icon { item.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil) }
+        if let icon { item.image = Self.symbol(icon) }
         if let image {
             image.size = NSSize(width: 16, height: 16)
             item.image = image
@@ -83,7 +93,7 @@ final class MenuBuilder {
         let child = MenuBuilder()
         build(child)
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        if let icon { item.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil) }
+        if let icon { item.image = Self.symbol(icon) }
         item.submenu = child.menu
         menu.addItem(item)
     }

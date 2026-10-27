@@ -273,6 +273,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let last = menu.items.last(where: { !$0.isHidden }), last.isSeparatorItem { last.isHidden = true }
     }
 
+    /// The app icon at 16 px, shared by the recent project items.
+    private static let recentIcon: NSImage? = {
+        let image = NSApp.applicationIconImage.copy() as? NSImage
+        image?.size = NSSize(width: 16, height: 16)
+        return image
+    }()
+
     /// "Open recent ▸": one item per recent project; a missing one says so.
     private func rebuildRecent() {
         guard let recentItem, let submenu = recentItem.submenu else { return }
@@ -288,8 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 AppController.shared.recording.closePicker()
                 AppController.shared.openProject(at: url)
             }
-            item.image = NSApp.applicationIconImage.copy() as? NSImage
-            item.image?.size = NSSize(width: 16, height: 16)
+            item.image = Self.recentIcon
             submenu.addItem(item)
         }
     }
@@ -298,6 +304,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = menu
         main.addItem(item)
+    }
+
+    /// The unfinished recordings and recent projects are read from disk when File opens.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu.identifier?.rawValue == "file" else { return }
+        let recovery = RecordingRecovery.shared
+        recovery.refresh()
+        recoverItem?.title = recovery.actionName
+        rebuildRecent()
+        updateVisibility(menu)
     }
 
     /// "Record" and "View" menus are rebuilt on open so checks stay current.
@@ -324,10 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 recording.isRecording ? recording.requestFinish() : recording.openPicker()
             }
         case "file":
-            let recovery = RecordingRecovery.shared
-            recovery.refresh()
-            recoverItem?.title = recovery.actionName
-            rebuildRecent()
+            // Also run before key equivalents are matched; the disk is read only on open.
             updateVisibility(menu)
             return
         case "edit", "export":
