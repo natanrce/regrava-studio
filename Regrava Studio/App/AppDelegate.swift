@@ -17,11 +17,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The app has a dark-only theme.
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.mainMenu = buildMainMenu()
-        if UISnapshots.runIfRequested() { return }
+        if UISnapshots.runIfRequested() {
+            isRenderingSnapshots = true
+            return
+        }
         AppController.shared.launch()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Snapshot rendering changes preferences that must not be kept.
+    private var isRenderingSnapshots = false
+
+    /// A preference changed just before quitting is saved too.
+    func applicationWillTerminate(_ notification: Notification) {
+        if !isRenderingSnapshots { Preferences.shared.persist() }
+    }
 
     /// Quitting mid-recording interrupts it; its folder is recovered on the next launch.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
