@@ -14,20 +14,36 @@ struct RecentProject: Identifiable, Hashable {
     var lastOpened: Date?
     var modified: Date?
     var previewURL: URL?
+    /// When the preview file was written, so a rewritten one is decoded again.
+    var previewModified: Date?
 
     var id: URL { url }
 
     static func load(_ url: URL, lastOpened: Date?) -> RecentProject {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
         let preview = ProjectPreview.url(bundle: url)
+        let previewValues = try? preview.resourceValues(forKeys: [.contentModificationDateKey])
         return RecentProject(
             url: url,
             name: url.deletingPathExtension().lastPathComponent,
             lastOpened: lastOpened,
             modified: values?.contentModificationDate,
-            previewURL: FileManager.default.fileExists(atPath: preview.path) ? preview : nil
+            previewURL: previewValues != nil ? preview : nil,
+            previewModified: previewValues?.contentModificationDate
         )
     }
+
+    /// The preview image, decoded once per written file.
+    @MainActor
+    var previewImage: NSImage? {
+        guard let previewURL else { return nil }
+        if let cached = Self.previews[previewURL], cached.modified == previewModified { return cached.image }
+        guard let image = NSImage(contentsOf: previewURL) else { return nil }
+        Self.previews[previewURL] = (previewModified, image)
+        return image
+    }
+
+    @MainActor private static var previews: [URL: (modified: Date?, image: NSImage)] = [:]
 }
 
 /// A rendered frame saved with the project (`previewImagePath`), shown on the project cards.
@@ -116,7 +132,8 @@ final class RecentProjectsPanel: NSPanel {
     func closeStrip() { onClose() }
 
     func present() {
-        model.reload()
+        // The list is read when the strip appears; while shown, only removals change it.
+        if !isVisible { model.reload() }
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         if let frame = screen?.frame {
@@ -262,7 +279,7 @@ private struct RecentProjectCard: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        if let url = project.previewURL, let image = NSImage(contentsOf: url) {
+        if let image = project.previewImage {
             Color.clear.overlay(Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)).clipped()
         } else {
             Color.clear.overlay(Image(systemName: "video.fill").font(.system(size: 28)).foregroundStyle(Theme.Colors.tertiary))
