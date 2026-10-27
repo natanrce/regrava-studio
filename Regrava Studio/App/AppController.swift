@@ -164,9 +164,13 @@ final class AppController {
         var paths = UserDefaults.standard.stringArray(forKey: "recentProjects") ?? []
         paths.removeAll { $0 == url.path }
         paths.insert(url.path, at: 0)
-        UserDefaults.standard.set(Array(paths.prefix(30)), forKey: "recentProjects")
+        let kept = Array(paths.prefix(30))
+        UserDefaults.standard.set(kept, forKey: "recentProjects")
         var opened = UserDefaults.standard.dictionary(forKey: "recentProjectsOpenedAt") as? [String: Double] ?? [:]
         opened[url.path] = Date().timeIntervalSince1970
+        // Only the listed projects keep their opening date.
+        let listed = Set(kept)
+        opened = opened.filter { listed.contains($0.key) }
         UserDefaults.standard.set(opened, forKey: "recentProjectsOpenedAt")
     }
 
