@@ -233,7 +233,7 @@ private struct WindowHighlight: View {
             if active {
                 VStack(spacing: Theme.gap(2)) {
                     if let path = window.appPath {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                        Image(nsImage: FileIcons.icon(forFile: path))
                             .resizable()
                             .frame(width: 96, height: 96)
                     }

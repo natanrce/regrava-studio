@@ -1,6 +1,19 @@
 import AppKit
 import SwiftUI
 
+/// Finder icons of apps, fetched once per path.
+@MainActor
+enum FileIcons {
+    private static var icons: [String: NSImage] = [:]
+
+    static func icon(forFile path: String) -> NSImage {
+        if let icon = icons[path] { return icon }
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icons[path] = icon
+        return icon
+    }
+}
+
 /// Builds native menus from an item model: commands with icon/badge/checked/destructive, section
 /// headers, submenus, and custom rows for toggles, segmented controls and audio levels. Groups are
 /// separated by dividers. Custom rows use standard AppKit controls.

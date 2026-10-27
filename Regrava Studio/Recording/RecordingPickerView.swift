@@ -342,7 +342,7 @@ private struct SystemAudioButton: View {
                 menu.header("Apps")
                 for app in coordinator.audioSourceApps {
                     let selected = all || (coordinator.systemAudioApps?.contains(app.bundleID) ?? false)
-                    menu.toggle(app.name, image: NSWorkspace.shared.icon(forFile: app.appPath), isOn: selected, enabled: !all) { on in
+                    menu.toggle(app.name, image: FileIcons.icon(forFile: app.appPath), isOn: selected, enabled: !all) { on in
                         coordinator.setSystemAudioApp(app.bundleID, on: on)
                     }
                 }
