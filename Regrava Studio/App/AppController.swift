@@ -152,7 +152,11 @@ final class AppController {
             .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    var lastProjectURL: URL? { recentProjects.first }
+    var lastProjectURL: URL? {
+        (UserDefaults.standard.stringArray(forKey: "recentProjects") ?? [])
+            .first { FileManager.default.fileExists(atPath: $0) }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
 
     private func rememberRecent(_ url: URL) {
         // Also listed by macOS in the Dock menu and "Open Recent".
