@@ -93,10 +93,12 @@ public final class FrameCompositor: @unchecked Sendable {
             let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), detections: sensitiveData, config: processing, videoSize: videoSize)
             src = AutoMaskRenderer.apply(covers, to: src, crop01: screenCrop01, videoSize: videoSize)
         }
-        var output = session(over: background, source: src, camera: cameraImage, frame: frame, quality: quality)
+        // The webcam frame is matted, sharpened and graded once, for the stage and the loupe.
+        let camera = cameraImage.map { image in PreparedCamera { self.preparedCamera(image, frame: frame, quality: quality) } }
+        var output = session(over: background, source: src, camera: camera, frame: frame, quality: quality)
         // The glass loupe over the whole session, camera and cursor included.
         if let lens = frame.loupe {
-            output = loupe(lens, over: output, source: src, camera: cameraImage, frame: frame, quality: quality)
+            output = loupe(lens, over: output, source: src, camera: camera, frame: frame, quality: quality)
         }
         if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs) }
         if let shortcuts { output = shortcuts.draw(over: output, atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
@@ -106,7 +108,7 @@ public final class FrameCompositor: @unchecked Sendable {
 
     /// Screen, cursor and camera over `base`, laid out through `perspective` (the loupe's
     /// magnification, identity on the stage).
-    private func session(over base: CIImage, source src: CIImage, camera cameraImage: CIImage?, frame: CameraFrame, quality: RenderQuality, perspective: Perspective = .identity) -> CIImage {
+    private func session(over base: CIImage, source src: CIImage, camera: PreparedCamera?, frame: CameraFrame, quality: RenderQuality, perspective: Perspective = .identity) -> CIImage {
         let strength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: frame.isInstantSnap)
 
         // Screen trail: from lerp(now, before, strength) to now (`rf.trailStart`).
@@ -180,8 +182,8 @@ public final class FrameCompositor: @unchecked Sendable {
         }
 
         // The webcam is drawn above everything.
-        if let cameraImage, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
-            output = cameraLayer(cameraImage, rect: rect, frame: frame, quality: quality, perspective: perspective).composited(over: output)
+        if let camera, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
+            output = cameraLayer(camera.image, rect: rect, frame: frame, quality: quality, perspective: perspective).composited(over: output)
         }
         return output
     }
@@ -217,7 +219,7 @@ public final class FrameCompositor: @unchecked Sendable {
     private static let glassKernel = RenderKernels.general("loupeGlass")
 
     /// The session magnified around the lens centre, read through the glass over `scene`.
-    private func loupe(_ lens: LoupeFrame, over scene: CIImage, source: CIImage, camera: CIImage?, frame: CameraFrame, quality: RenderQuality) -> CIImage {
+    private func loupe(_ lens: LoupeFrame, over scene: CIImage, source: CIImage, camera: PreparedCamera?, frame: CameraFrame, quality: RenderQuality) -> CIImage {
         guard let kernel = Self.glassKernel else { return scene }
         // The lens is placed over the video (inside a device frame's screen hole).
         let screen = videoRect(inBody: frame.screenRect)
@@ -314,9 +316,15 @@ public final class FrameCompositor: @unchecked Sendable {
         return image
     }
 
-    /// The webcam covering `rect` (centred focal point), cropped, mirrored, with rounded corners,
-    /// the screen's shadow, and faded and blurred while hiding.
-    private func cameraLayer(_ image: CIImage, rect: Rect2, frame: CameraFrame, quality: RenderQuality, perspective: Perspective = .identity) -> CIImage {
+    /// A webcam frame drawn once per `compose`, however many sessions show it.
+    private final class PreparedCamera {
+        private let make: () -> CIImage
+        private(set) lazy var image = make()
+        init(_ make: @escaping () -> CIImage) { self.make = make }
+    }
+
+    /// The webcam frame matted, sharpened, graded, cropped and mirrored, at footage scale.
+    private func preparedCamera(_ image: CIImage, frame: CameraFrame, quality: RenderQuality) -> CIImage {
         var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         // Cutout: the person matte goes first, before sharpen and the grade.
         if isCameraMatted, frame.cameraCutout01 > 0.001, let matte = PersonMatter.shared.matte(for: content, quality: quality) {
@@ -337,6 +345,12 @@ public final class FrameCompositor: @unchecked Sendable {
         if camera.mirror {
             content = content.transformed(by: CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -content.extent.width, y: 0))
         }
+        return content
+    }
+
+    /// The webcam covering `rect` (centred focal point), cropped, mirrored, with rounded corners,
+    /// the screen's shadow, and faded and blurred while hiding.
+    private func cameraLayer(_ content: CIImage, rect: Rect2, frame: CameraFrame, quality: RenderQuality, perspective: Perspective = .identity) -> CIImage {
         // Only position and size trail; radius, focal point, cutout and shadow keep their
         // current values.
         let now = ciRect(rect)
