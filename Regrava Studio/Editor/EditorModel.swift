@@ -1788,7 +1788,12 @@ final class EditorModel: ObservableObject {
     private var mediaKeyTargets: [(MPRemoteCommand, Any)] = []
 
     /// The OS media controls drive the preview, titled "Regrava Studio Preview".
+    /// The editor whose handlers are registered: only the front one gets the media keys.
+    private static weak var mediaKeysOwner: EditorModel?
+
     func registerMediaKeys() {
+        if let owner = Self.mediaKeysOwner, owner !== self { owner.unregisterMediaKeys() }
+        Self.mediaKeysOwner = self
         unregisterMediaKeys()
         let center = MPRemoteCommandCenter.shared()
         func on(_ command: MPRemoteCommand, _ action: @escaping @MainActor (MPRemoteCommandEvent) -> Void) {
@@ -1821,7 +1826,10 @@ final class EditorModel: ObservableObject {
 
     func tearDown() {
         unregisterMediaKeys()
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        if Self.mediaKeysOwner === self {
+            Self.mediaKeysOwner = nil
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        }
         scrubPreview?.close()
         scrubPreview = nil
         // A pending transcript edit is written right away.
