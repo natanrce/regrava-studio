@@ -631,9 +631,27 @@ struct SliceInspector: View {
 
 // MARK: - Mask inspector
 
-struct MaskInspector: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
+/// Shown while the playhead is outside the mask; only this note redraws with the playhead.
+private struct MaskOutsideNote: View {
     @EnvironmentObject private var clock: PlaybackClock
+    var resolver: TimeResolver
+    var mask: MaskRange
+    var focus: () -> Void
+
+    var body: some View {
+        if !mask.contains(resolver.playbackToSource(clock.currentTimeMs)) {
+            VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                Text("Preview is showing different part of the recording than the one covered by the mask.")
+                    .font(Theme.Typo.label)
+                    .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                RSButton(title: "Focus the timeline on the mask", kind: .secondary, action: focus)
+            }
+            .padding(.bottom, Theme.gap(3))
+        }
+    }
+}
+
+struct MaskInspector: View {
     @ObservedObject var editor: EditorModel
     var maskID: UUID
 
@@ -642,15 +660,7 @@ struct MaskInspector: View {
     var body: some View {
         if let mask {
             VStack(alignment: .leading, spacing: 0) {
-                if !mask.contains(editor.currentSourceTimeMs) {
-                    VStack(alignment: .leading, spacing: Theme.gap(1)) {
-                        Text("Preview is showing different part of the recording than the one covered by the mask.")
-                            .font(Theme.Typo.label)
-                            .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
-                        RSButton(title: "Focus the timeline on the mask", kind: .secondary) { focus(mask, at: mask.startMs + mask.durationMs / 2) }
-                    }
-                    .padding(.bottom, Theme.gap(3))
-                }
+                MaskOutsideNote(resolver: editor.resolver, mask: mask) { focus(mask, at: mask.startMs + mask.durationMs / 2) }
                 SidebarSection {
                     NamedField(name: "Mask type") {
                         VStack(alignment: .leading, spacing: Theme.gap(1)) {
@@ -894,20 +904,26 @@ enum ClickSoundPreview {
     }
 }
 
-struct ClickSoundField: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
+/// Shown while paused over a part faster than 2× (`sourceRate > 2`); only this note redraws
+/// with the playhead.
+private struct ClickSoundSpeedWarning: View {
     @EnvironmentObject private var clock: PlaybackClock
+    var isPlaying: Bool
+    var playbackRate: Double
+    var resolver: TimeResolver
+
+    var body: some View {
+        if !isPlaying, resolver.speed(atSource: resolver.playbackToSource(clock.currentTimeMs)) * playbackRate > 2 {
+            Callout(message: "Sound will not be played for parts with a playback speed greater than 2x.")
+        }
+    }
+}
+
+struct ClickSoundField: View {
     @ObservedObject var editor: EditorModel
     @State private var isPreviewBusy = false
 
     private var audio: AudioConfig { editor.project.audio }
-
-    /// Shown while paused over a part faster than 2× (`sourceRate > 2`).
-    private var showsSpeedWarning: Bool {
-        guard !editor.isPlaying else { return false }
-        let resolver = editor.project.resolver
-        return resolver.speed(atSource: resolver.playbackToSource(editor.currentTimeMs)) * editor.playbackRate > 2
-    }
 
     var body: some View {
         NamedField(name: "Click sound") {
@@ -924,9 +940,7 @@ struct ClickSoundField: View {
                         }
                     )
                 )
-                if showsSpeedWarning {
-                    Callout(message: "Sound will not be played for parts with a playback speed greater than 2x.")
-                }
+                ClickSoundSpeedWarning(isPlaying: editor.isPlaying, playbackRate: editor.playbackRate, resolver: editor.resolver)
                 if let set = audio.clickSoundEffect {
                     SliderField(
                         name: "Click sound volume",
