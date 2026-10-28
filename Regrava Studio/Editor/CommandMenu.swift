@@ -179,6 +179,10 @@ struct CommandMenuOverlay: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
                                 let sections = self.sections
+                                // Each row's place in the flat result list (the first one with its id).
+                                let indices = sections.flatMap(\.actions).enumerated().reduce(into: [String: Int]()) { indices, entry in
+                                    if indices[entry.element.id] == nil { indices[entry.element.id] = entry.offset }
+                                }
                                 ForEach(sections, id: \.group) { section in
                                     Text(section.group)
                                         .font(Theme.Typo.copy)
@@ -187,7 +191,7 @@ struct CommandMenuOverlay: View {
                                         .padding(.top, 12)
                                         .padding(.bottom, 6)
                                     ForEach(section.actions) { action in
-                                        let index = results.firstIndex { $0.id == action.id } ?? 0
+                                        let index = indices[action.id] ?? 0
                                         row(action, isSelected: index == selection)
                                             .id(index)
                                             .onTapGesture {
