@@ -156,8 +156,9 @@ public enum ProjectExporter {
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         guard !videoTracks.isEmpty else { throw ExportError.cannotRead("no video track") }
 
+        // Composed at the export frame rate: every frame drawn is a frame written.
         let composition = try await CompositionFactory.make(
-            asset: asset, state: state, canvas: project.canvasSize, outputSize: outputSize
+            asset: asset, state: state, canvas: project.canvasSize, outputSize: outputSize, fps: settings.fps
         )
 
         let reader: AVAssetReader
@@ -299,15 +300,16 @@ public enum ProjectExporter {
         let asset = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: videoURL.deletingLastPathComponent())).asset
         let duration = try await asset.load(.duration).seconds
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
-        guard let firstTrack = videoTracks.first else { throw ExportError.cannotRead("no video track") }
+        guard !videoTracks.isEmpty else { throw ExportError.cannotRead("no video track") }
 
-        // Pass 1 (no decoding): which source frames are kept at the target frame rate.
-        // ImageIO needs the exact image count up front.
-        let kept = FrameRateLimiter.select(times: try sourceFrameTimes(asset: asset, track: firstTrack), fps: settings.fps, duration: duration)
+        // Composed at the GIF frame rate, one frame every 1/fps from 0. ImageIO needs the exact
+        // image count up front.
+        let fps = max(settings.fps, 1)
+        let kept = (0..<Int((duration * Double(fps)).rounded(.up))).map { Double($0) / Double(fps) }.filter { $0 < duration - 0.0005 }
         guard !kept.isEmpty else { throw ExportError.cannotRead("no frames") }
 
         let composition = try await CompositionFactory.make(
-            asset: asset, state: state, canvas: project.canvasSize, outputSize: outputSize
+            asset: asset, state: state, canvas: project.canvasSize, outputSize: outputSize, fps: fps
         )
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
@@ -371,22 +373,6 @@ public enum ProjectExporter {
         }
         guard CGImageDestinationFinalize(destination) else { throw ExportError.cannotWrite("could not finalize GIF") }
         progress(1)
-    }
-
-    /// Presentation times of the source frames, read without decoding.
-    static func sourceFrameTimes(asset: AVAsset, track: AVAssetTrack) throws -> [Double] {
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-        output.alwaysCopiesSampleData = false
-        reader.add(output)
-        guard reader.startReading() else { throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error") }
-        var times: [Double] = []
-        while let buffer = output.copyNextSampleBuffer() {
-            if CMSampleBufferGetNumSamples(buffer) > 0 {
-                times.append(CMSampleBufferGetPresentationTimeStamp(buffer).seconds)
-            }
-        }
-        return times.sorted()
     }
 }
 
