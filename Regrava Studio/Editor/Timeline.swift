@@ -19,8 +19,6 @@ enum TrackColors {
 
 /// Timeline: ruler, clip track, zoom track, playheads; scroll/zoom/scrub.
 struct EditorTimeline: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
-    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     @ObservedObject var viewport: TimelineViewport
     @StateObject private var hover = TimelineHover()
@@ -37,12 +35,11 @@ struct EditorTimeline: View {
 
     private var pxPerMs: CGFloat { max(width - 40, 1) / editor.visibleDurationMs }
 
-    private func x(_ ms: Double) -> CGFloat { Self.horizontalPadding + (ms - editor.scrollOffsetMs) * pxPerMs }
     private func time(_ x: CGFloat) -> Double { editor.scrollOffsetMs + (x - Self.horizontalPadding) / pxPerMs }
 
     var body: some View {
         GeometryReader { geometry in
-            let geo = TimelineGeometry(width: geometry.size.width, scrollOffsetMs: editor.scrollOffsetMs, pxPerMs: max(geometry.size.width - 40, 1) / editor.visibleDurationMs, resolver: editor.project.resolver)
+            let geo = TimelineGeometry(width: geometry.size.width, scrollOffsetMs: editor.scrollOffsetMs, pxPerMs: max(geometry.size.width - 40, 1) / editor.visibleDurationMs, resolver: editor.resolver)
             ZStack(alignment: .topLeading) {
                 GridLines(geometry: geo, duration: editor.durationMs).padding(.top, 32)
                 VStack(alignment: .leading, spacing: 11.3) {
@@ -74,9 +71,7 @@ struct EditorTimeline: View {
                 // Hover playhead over the tracks, under the playhead; it drops down to 18 px as it nears
                 // the playhead (`hideNear`).
                 HoverNeedle(editor: editor, hover: hover, geometry: geo, height: geometry.size.height)
-                Playhead(color: Theme.Colors.primary, height: geometry.size.height)
-                    .offset(x: x(editor.currentTimeMs))
-                    .allowsHitTesting(false)
+                TimelinePlayhead(geometry: geo, height: geometry.size.height)
             }
             .clipped()
             .contentShape(Rectangle())
@@ -309,6 +304,19 @@ private struct Playhead: View {
     }
 }
 
+/// The playhead over the timeline: the only part that redraws with the clock.
+private struct TimelinePlayhead: View {
+    @EnvironmentObject private var clock: PlaybackClock
+    var geometry: TimelineGeometry
+    var height: CGFloat
+
+    var body: some View {
+        Playhead(color: Theme.Colors.primary, height: height)
+            .offset(x: geometry.x(clock.currentTimeMs))
+            .allowsHitTesting(false)
+    }
+}
+
 /// Split tool beam: 1 px, #FF453A fading at both ends.
 private struct SplitBeam: View {
     var height: CGFloat
@@ -351,6 +359,22 @@ struct TrackItemBody: View {
                     .strokeBorder(isSelected ? color.mix(with: .white, by: 0.5).opacity(0.8) : .clear, lineWidth: 1)
                     .padding(-2)
             )
+    }
+}
+
+/// An item body lit while the playhead is inside the item; only it follows the clock, not the
+/// whole item.
+struct PlayheadTrackItemBody: View {
+    @EnvironmentObject private var clock: PlaybackClock
+    var color: Color
+    var resolver: TimeResolver
+    /// Whether the item contains a source time.
+    var contains: (Double) -> Bool
+    var isActive: Bool
+    var isSelected: Bool
+
+    var body: some View {
+        TrackItemBody(color: color, isPlayed: contains(resolver.playbackToSource(clock.currentTimeMs)), isActive: isActive, isSelected: isSelected)
     }
 }
 
@@ -513,8 +537,6 @@ private struct TimelineWordLabel: View {
 
 /// One clip: duration, speed and cursor chips; click opens the slice editor; edges trim.
 private struct SliceItem: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
-    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var slice: Slice
     var index: Int
@@ -541,9 +563,10 @@ private struct SliceItem: View {
         } else if slice.disableSmoothMouseMovement {
             chips.append(("cursorarrow.motionlines", ""))
         }
-        return TrackItemBody(
+        return PlayheadTrackItemBody(
             color: TrackColors.clip,
-            isPlayed: slice.contains(sourceTime: editor.currentSourceTimeMs),
+            resolver: geometry.resolver,
+            contains: { [slice] in slice.contains(sourceTime: $0) },
             isActive: isOpen,
             isSelected: isOpen
         )
@@ -912,8 +935,6 @@ private struct BobbingHint: View {
 }
 
 private struct ZoomItem: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
-    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var zoom: ZoomRange
     var geometry: TimelineGeometry
@@ -930,9 +951,10 @@ private struct ZoomItem: View {
     var body: some View {
         let width = max(geometry.sx(zoom.endMs) - geometry.sx(zoom.startMs) - 1, 1)
         let handle = floor(min(16, width / 3))
-        TrackItemBody(
+        PlayheadTrackItemBody(
             color: TrackColors.zoom,
-            isPlayed: zoom.contains(editor.currentSourceTimeMs),
+            resolver: geometry.resolver,
+            contains: { [zoom] in zoom.contains($0) },
             isActive: isOpen,
             isSelected: isSelected
         )
@@ -1107,8 +1129,6 @@ private struct MaskTrack: View {
 }
 
 private struct MaskItem: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
-    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var mask: MaskRange
     var geometry: TimelineGeometry
@@ -1124,7 +1144,7 @@ private struct MaskItem: View {
         let width = max(geometry.sx(mask.endMs) - geometry.sx(mask.startMs) - 1, 1)
         let handle = floor(min(16, width / 3))
         let chip = mask.type == .sensitiveData ? "Sensitive data" : "Highlight \(Int((mask.highlightMaskOpacity * 100).rounded()))%"
-        TrackItemBody(color: TrackColors.mask, isPlayed: mask.contains(editor.currentSourceTimeMs), isActive: isOpen, isSelected: isOpen)
+        PlayheadTrackItemBody(color: TrackColors.mask, resolver: geometry.resolver, contains: { [mask] in mask.contains($0) }, isActive: isOpen, isSelected: isOpen)
             .overlay { if isFocused { TrackItemLabels(kind: "Mask", chips: [("rectangle.fill", chip)], width: width) } }
             .overlay(alignment: .leading) { if handle >= 16 && isFocused { resizeHandle(leading: true, width: handle) } }
             .overlay(alignment: .trailing) { if handle >= 16 && isFocused { resizeHandle(leading: false, width: handle) } }
@@ -1271,8 +1291,6 @@ private struct LayoutTrack: View {
 }
 
 private struct LayoutItem: View {
-    /// Redraws with the playhead (`EditorModel.clock`).
-    @EnvironmentObject private var clock: PlaybackClock
     @ObservedObject var editor: EditorModel
     var layout: CameraLayoutRange
     var geometry: TimelineGeometry
@@ -1300,7 +1318,7 @@ private struct LayoutItem: View {
         let handle = floor(min(16, width / 3))
         // Disabled look when disabled or when it changes nothing over the default layout.
         let looksDisabled = layout.isDisabled || editor.project.isEqualToDefaultLayout(layout)
-        TrackItemBody(color: TrackColors.layout, isPlayed: layout.contains(editor.currentSourceTimeMs), isActive: isOpen, isSelected: isOpen)
+        PlayheadTrackItemBody(color: TrackColors.layout, resolver: geometry.resolver, contains: { [layout] in layout.contains($0) }, isActive: isOpen, isSelected: isOpen)
             .overlay { if isFocused { TrackItemLabels(kind: "Layout", chips: [("warninglight", Self.chip(layout.type))], width: width) } }
             .overlay(alignment: .leading) { if handle >= 16 && isFocused { resizeHandle(leading: true, width: handle) } }
             .overlay(alignment: .trailing) { if handle >= 16 && isFocused { resizeHandle(leading: false, width: handle) } }

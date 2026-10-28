@@ -44,7 +44,11 @@ final class EditorModel: ObservableObject {
     let exports = ExportController()
     private let preferences = Preferences.shared
 
-    @Published private(set) var project: Project
+    @Published private(set) var project: Project {
+        didSet { if project.slices != oldValue.slices { resolver = project.resolver } }
+    }
+    /// `project.resolver`, rebuilt only when the clips change (read every frame).
+    private(set) var resolver: TimeResolver
     @Published private(set) var isDirty = false
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
@@ -178,6 +182,7 @@ final class EditorModel: ObservableObject {
     init(bundleURL: URL, project: Project) {
         self.bundleURL = bundleURL
         self.project = project
+        resolver = project.resolver
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
         renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
         transcript = SessionTranscript.load(bundle: bundleURL)
@@ -190,7 +195,7 @@ final class EditorModel: ObservableObject {
     }
 
     /// Playback duration (clips sped up, slowed down or cut).
-    var durationMs: Double { project.playbackDurationMs }
+    var durationMs: Double { resolver.playbackDurationMs }
     var projectName: String { bundleURL.deletingPathExtension().lastPathComponent }
     var videoURL: URL { ProjectStore.videoURL(bundle: bundleURL, project: project) }
 
@@ -667,7 +672,7 @@ final class EditorModel: ObservableObject {
 
     /// The source time the preview shows: the hovered moment while scrubbing, else the playhead.
     var previewSourceTimeMs: Double {
-        isScrubbing ? project.resolver.playbackToSource(scrubTimeMs) : currentSourceTimeMs
+        isScrubbing ? resolver.playbackToSource(scrubTimeMs) : currentSourceTimeMs
     }
 
     func togglePlay() {
@@ -1163,7 +1168,7 @@ final class EditorModel: ObservableObject {
     }
 
     /// Recording time at the playhead.
-    var currentSourceTimeMs: Double { project.resolver.playbackToSource(currentTimeMs) }
+    var currentSourceTimeMs: Double { resolver.playbackToSource(currentTimeMs) }
 
     // MARK: Clips
 
