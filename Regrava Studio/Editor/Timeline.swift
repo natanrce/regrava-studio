@@ -21,7 +21,8 @@ enum TrackColors {
 struct EditorTimeline: View {
     @ObservedObject var editor: EditorModel
     @ObservedObject var viewport: TimelineViewport
-    @StateObject private var hover = TimelineHover()
+    /// Held without observing it: only the views given it follow the pointer.
+    @State private var hover = TimelineHover()
     @State private var width: CGFloat = 1
     @State private var wheelMonitor: Any?
     @State private var isHovering = false
