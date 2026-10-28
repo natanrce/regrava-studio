@@ -274,7 +274,6 @@ private struct GridLines: View {
 private struct Playhead: View {
     var color: Color
     var height: CGFloat
-    var isPrimary = true
 
     /// `backgroundAccent.active`, opaque so the line doesn't show through the head (shade approximated).
     static let secondaryColor = Color(hex: 0x4A4C53)
@@ -423,7 +422,7 @@ private struct HoverNeedle: View {
             if editor.isSplitToolActive {
                 SplitBeam(height: height).offset(x: geometry.x(editor.beamPlaybackMs(geometry.time(x)))).allowsHitTesting(false)
             } else if !editor.isPlaying {
-                Playhead(color: Playhead.secondaryColor, height: height, isPrimary: false)
+                Playhead(color: Playhead.secondaryColor, height: height)
                     .offset(x: x, y: Playhead.drop(distanceMs: abs(geometry.time(x) - clock.currentTimeMs), visibleDurationMs: editor.visibleDurationMs))
                     .allowsHitTesting(false)
             }
@@ -1346,12 +1345,6 @@ private struct LayoutItem: View {
             })
             .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.layoutMenu(layout) }
             .offset(x: geometry.sx(layout.startMs) + 1)
-    }
-
-    /// Palette [Overlay, Cutout, Fullscreen, Hide camera], split, remove.
-
-    private func setType(_ type: CameraLayoutType) {
-        editor.updateLayout(layout.id) { $0.type = type }
     }
 
     private func resizeHandle(leading: Bool, width: CGFloat) -> some View {

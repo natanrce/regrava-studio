@@ -151,8 +151,6 @@ final class EditorModel: ObservableObject {
     private var cursors: CursorLibrary
     private let renderState: RenderState
     private var baseConfiguration: AVVideoComposition.Configuration?
-    private var compositionCanvas: Size2?
-    private var compositionOutput: Size2?
     private var timeObserver: Any?
     private var refreshTask: Task<Void, Never>?
     private var autosaveTask: Task<Void, Never>?
@@ -466,8 +464,6 @@ final class EditorModel: ObservableObject {
             let composition = AVVideoComposition(configuration: configuration)
             baseConfiguration = configuration
             prewarmRenderer()
-            compositionCanvas = project.canvasSize
-            compositionOutput = output
             let replacesItem = itemReplacementPending
             itemReplacementPending = false
             if let item = player.currentItem, !replacesItem {
