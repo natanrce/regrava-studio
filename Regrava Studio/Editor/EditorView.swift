@@ -428,7 +428,7 @@ private struct PlaybackBar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: Theme.gap(2)) {
-                    if showsTimes { TimeLabel(editor: editor, ms: editor.currentTimeMs, duration: editor.durationMs, omitFrames: editor.isPlaying) }
+                    if showsTimes { TimeLabel(editor: editor, ms: nil, duration: editor.durationMs, omitFrames: editor.isPlaying) }
                     RSIconButton(icon: "backward.end", size: .toolbar, tooltip: "Go to first frame  ⌘←") { editor.seek(to: 0) }
                     Button(action: editor.togglePlay) {
                         Image(systemName: editor.isPlaying ? "pause.circle" : "play.circle")
@@ -486,13 +486,16 @@ private struct TimeLabel: View {
     /// Redraws with the playhead (`EditorModel.clock`).
     @EnvironmentObject private var clock: PlaybackClock
     let editor: EditorModel
-    var ms: Double
+    /// The time shown; nil follows the playhead.
+    var ms: Double?
     var duration: Double
     var omitFrames: Bool
     @State private var hovered = false
 
+    private var time: Double { ms ?? clock.currentTimeMs }
+
     var body: some View {
-        Text(Self.format(ms, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: omitFrames))
+        Text(Self.format(time, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: omitFrames))
             .font(Theme.Typo.copy.monospacedDigit())
             // Tertiary, brighter on hover.
             .foregroundStyle(hovered ? Theme.Colors.text.opacity(0.8) : Theme.Colors.tertiary)
@@ -502,7 +505,7 @@ private struct TimeLabel: View {
             .onHover { hovered = $0 }
             .onTapGesture {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(Self.format(ms, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: false), forType: .string)
+                NSPasteboard.general.setString(Self.format(time, duration: duration, fps: Double(editor.project.recording.fps), omitFrames: false), forType: .string)
                 editor.showToast("Copied to clipboard")
             }
     }
