@@ -144,6 +144,15 @@ struct TranscriptTextEditor: NSViewRepresentable {
         /// Visible tokens with their character ranges, in text order.
         private(set) var ranges: [(token: TranscriptToken, range: NSRange)] = []
         private var activeRange: NSRange?
+        /// What the highlights were last drawn for; nil after the text is rebuilt.
+        private var highlightKey: HighlightKey?
+
+        private struct HighlightKey: Equatable {
+            var active: NSRange?
+            var isPlayingWord: Bool
+            var cutPreview: TranscriptCutPreview?
+            var selection: NSRange
+        }
         private var panel: TranscriptActionPanel?
         /// Hovering "Cut video" or "Cut transcript" colours what it would cut (`data-cut-preview`).
         var cutPreview: TranscriptCutPreview? { didSet { highlightActive() } }
@@ -185,6 +194,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
             textView.textStorage?.setAttributedString(text)
             textView.setSelectedRange(NSRange(location: min(selection.location, text.length), length: 0))
             activeRange = nil
+            highlightKey = nil
             textView.invalidateIntrinsicContentSize()
         }
 
@@ -246,11 +256,20 @@ struct TranscriptTextEditor: NSViewRepresentable {
         /// playing or not.
         func highlightActive() {
             guard let editor, let textView, let manager = textView.layoutManager else { return }
+            let t = editor.previewSourceTimeMs
+            let active = ranges.first(where: { $0.token.sourceStartMs <= t && t <= $0.token.sourceEndMs })
+            // Clearing the highlights redraws the whole text: only when they change. The dot
+            // still follows the layout.
+            let key = HighlightKey(active: active?.range, isPlayingWord: editor.isPlaying && active?.token.kind == .word, cutPreview: cutPreview, selection: textView.selectedRange())
+            if key == highlightKey {
+                if let active { textView.moveDot(to: active.range) }
+                return
+            }
+            highlightKey = key
             let full = NSRange(location: 0, length: textView.textStorage?.length ?? 0)
             manager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
             manager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
-            let t = editor.previewSourceTimeMs
-            if let active = ranges.first(where: { $0.token.sourceStartMs <= t && t <= $0.token.sourceEndMs }) {
+            if let active {
                 if editor.isPlaying && active.token.kind == .word {
                     manager.addTemporaryAttribute(.backgroundColor, value: NSColor(Theme.Colors.primary).withAlphaComponent(0.25), forCharacterRange: active.range)
                     if activeRange != active.range && !textView.recentlyScrolled { textView.scrollRangeToVisible(active.range) }
