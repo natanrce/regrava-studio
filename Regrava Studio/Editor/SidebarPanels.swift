@@ -154,11 +154,22 @@ private struct BackgroundImagePicker: View {
     @ObservedObject var editor: EditorModel
     @State private var hovered = false
 
+    /// Decoded images by path: each copied image gets a new file name, so a path never changes
+    /// content, and the panel redraws on every editor change.
+    private static let images = NSCache<NSURL, NSImage>()
+
+    private static func image(at url: URL) -> NSImage? {
+        if let cached = images.object(forKey: url as NSURL) { return cached }
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        images.setObject(image, forKey: url as NSURL)
+        return image
+    }
+
     var body: some View {
         Button(action: choose) {
             VStack(spacing: Theme.gap(1)) {
                 if let name = editor.project.style.background.imageFileName,
-                   let image = NSImage(contentsOf: editor.bundleURL.appendingPathComponent(name)) {
+                   let image = Self.image(at: editor.bundleURL.appendingPathComponent(name)) {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).frame(height: 90).clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
