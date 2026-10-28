@@ -155,7 +155,7 @@ public final class FrameCompositor: @unchecked Sendable {
             if let previous = frame.previousCursor {
                 tipBefore = layout.canvasPoint(videoPoint: previous, screenRect: frame.previousScreenRect ?? frame.screenRect)
             }
-            let cursorStrength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false)
+            let cursorStrength = motionBlurStrength
             let trailTip = tip.lerp(to: tipBefore, cursorStrength)
             let scaleNow = frame.cursorScale
             let trailScale = scaleNow + (frame.previousCursorScale - scaleNow) * cursorStrength
@@ -381,22 +381,19 @@ public final class FrameCompositor: @unchecked Sendable {
         }
         var layer = placedLayer(rect)
         // The trail from lerp(now, before, strength) to now; instant zoom snaps don't turn it off.
-        let strength = MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false)
+        let strength = motionBlurStrength
+        var trailPx = 0.0
         if strength > 0, let before = frame.previousCameraRect {
             let trailStart = rect.lerp(to: before, strength)
             if !rect.isClose(to: trailStart, tolerance: 1) {
+                trailPx = rect.cornerTravel(to: trailStart)
                 let reach = style.shadow.intensity > 0 ? (style.shadow.blur * 8 * frame.cameraSizeFactor + style.shadow.distance * 6 + 16) * layout.scale + 8 : 8
                 let bounds = now.union(ciRect(trailStart)).insetBy(dx: -reach, dy: -reach).integral
-                let samples = MotionBlur.sampleCount(travel: rect.cornerTravel(to: trailStart), quality: quality)
+                let samples = MotionBlur.sampleCount(travel: trailPx, quality: quality)
                 if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in placedLayer(trailStart.lerp(to: rect, t)) }) {
                     layer = blurred
                 }
             }
-        }
-        var trailPx = 0.0
-        if strength > 0, let before = frame.previousCameraRect {
-            let trailStart = rect.lerp(to: before, strength)
-            if !rect.isClose(to: trailStart, tolerance: 1) { trailPx = rect.cornerTravel(to: trailStart) }
         }
         let opacity = frame.cameraOpacity
         if opacity < 1 {
