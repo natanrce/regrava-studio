@@ -1789,6 +1789,11 @@ final class EditorModel: ObservableObject {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         player.pause()
+        // Reverse and fast playback run on a main run loop timer.
+        stopManualPlayback()
+        refreshTask?.cancel()
+        prewarmTask?.cancel()
+        audioMixTask?.cancel()
         autosaveTask?.cancel()
     }
 }
