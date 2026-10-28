@@ -120,9 +120,11 @@ extension CompositionFactory {
     /// Core Image compiles a program the first time it sees a graph, which took 40–1000 ms and
     /// stalled playback whenever a zoom or a cursor trail first needed a new number of motion
     /// blur samples. This draws one moving frame per screen/cursor sample count at playback
-    /// quality with the compositor's context, so those programs exist before playing.
+    /// quality with the compositor's context, so those programs exist before playing. Stops
+    /// early when the calling task is cancelled.
     public static func prewarm(state: RenderState, outputSize: Size2, cameraSize: Size2? = nil) {
         prewarmCutout(state: state, outputSize: outputSize, cameraSize: cameraSize)
+        if Task.isCancelled { return }
         let snapshot = state.current
         let compositor = snapshot.compositor
         let strength = compositor.motionBlurStrength
@@ -147,6 +149,7 @@ extension CompositionFactory {
         let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
         for screenSamples in counts {
             for cursorSamples in counts {
+                if Task.isCancelled { return }
                 var frame = base
                 let screenTravel = screenSamples == 0 ? 0 : (Double(screenSamples) - 0.5) * texels
                 var previous = base.screenRect
@@ -181,6 +184,7 @@ extension CompositionFactory {
         let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
         for quality in [RenderQuality.playing, .pausedHigh] {
             for cutout in [1.0, 0.5] {
+                if Task.isCancelled { return }
                 frame.cameraCutout01 = cutout
                 frame.cameraOpacity = 1
                 let image = snapshot.compositor.compose(source: CIImage(cvPixelBuffer: screenBuffer), camera: CIImage(cvPixelBuffer: cameraBuffer), frame: frame, quality: quality)
