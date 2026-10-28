@@ -14,14 +14,15 @@ struct PreviewMarkers: View {
     var body: some View {
         if !editor.isPlaying && !editor.isAddZoomToolArmed && !editor.isAddMaskToolArmed && editor.openMaskID == nil {
             GeometryReader { geometry in
-                let area = editor.recordingAreaRect
+                let targets = editor.previewTargets
+                let area = targets.recording
                 ZStack(alignment: .topLeading) {
                     MarkerArea(rect: CGRect(origin: .zero, size: geometry.size), cornerRadius: 4) {
                         open(.background, "Opened background settings")
                     }
                     MarkerArea(
                         rect: CGRect(x: area.x * scale, y: area.y * scale, width: area.width * scale, height: area.height * scale),
-                        cornerRadius: editor.recordingAreaCornerRadius * scale
+                        cornerRadius: targets.recordingCornerRadius * scale
                     ) {
                         if editor.project.isUsingDeviceFrame {
                             open(.deviceFrame, "Opened device frame settings")
@@ -30,7 +31,7 @@ struct PreviewMarkers: View {
                         }
                     }
                     // The webcam: opens Camera Layout, or Camera Style when Camera Layout is already open.
-                    if let camera = editor.cameraAreaRect {
+                    if let camera = targets.camera {
                         MarkerArea(rect: CGRect(x: camera.rect.x * scale, y: camera.rect.y * scale, width: camera.rect.width * scale, height: camera.rect.height * scale), cornerRadius: camera.cornerRadius * scale) {
                             if editor.sidebarRoot == .cameraLayout {
                                 open(.cameraStyle, "Opened camera style settings")
@@ -39,18 +40,18 @@ struct PreviewMarkers: View {
                             }
                         }
                     }
-                    if let lens = editor.loupeAreaRect {
+                    if let lens = targets.loupe {
                         MarkerArea(rect: CGRect(x: lens.x * scale, y: lens.y * scale, width: lens.width * scale, height: lens.height * scale), cornerRadius: lens.width * scale / 2) {
                             editor.openLoupeAtPlayhead()
                         }
                     }
                     // The shortcut keys.
-                    if let keys = editor.shortcutsAreaRect {
-                        MarkerArea(rect: CGRect(x: keys.x * scale, y: keys.y * scale, width: keys.width * scale, height: keys.height * scale), cornerRadius: editor.shortcutsCornerRadius * scale) {
+                    if let keys = targets.shortcuts {
+                        MarkerArea(rect: CGRect(x: keys.x * scale, y: keys.y * scale, width: keys.width * scale, height: keys.height * scale), cornerRadius: targets.shortcutsCornerRadius * scale) {
                             open(.shortcuts, "Opened keyboard shortcuts settings")
                         }
                     }
-                    if let cursor = editor.cursorAreaRect {
+                    if let cursor = targets.cursor {
                         MarkerArea(rect: CGRect(x: cursor.x * scale, y: cursor.y * scale, width: cursor.width * scale, height: cursor.height * scale), cornerRadius: 4) {
                             open(.cursor, "Opened cursor settings")
                         }

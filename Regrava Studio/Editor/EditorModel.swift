@@ -116,8 +116,14 @@ final class EditorModel: ObservableObject {
         didSet {
             clientTranscriptCache = nil
             transcriptTokensCache = nil
+            visibleCaptionWordsCache = nil
         }
     }
+    struct CaptionWordsKey: Equatable {
+        var resolver: TimeResolver
+        var showSoundLabels: Bool
+    }
+    private var visibleCaptionWordsCache: (key: CaptionWordsKey, value: Bool)?
     /// `clientTranscript` and `transcriptTokens`, kept until the transcript changes.
     var clientTranscriptCache: [TranscriptWord]?
     var transcriptTokensCache: [TranscriptToken]?
@@ -1017,10 +1023,34 @@ final class EditorModel: ObservableObject {
         focusedTrack = "masks"
     }
 
-    /// Where the cursor image is drawn right now (canvas pixels), if visible.
-    var cursorAreaRect: Rect2? {
+    /// The paused preview's click targets right now (canvas pixels), from one evaluation of the
+    /// current frame.
+    struct PreviewTargets {
+        var recording: Rect2
+        var recordingCornerRadius: Double
+        var camera: (rect: Rect2, cornerRadius: Double)?
+        var loupe: Rect2?
+        var shortcuts: Rect2?
+        var shortcutsCornerRadius: Double
+        var cursor: Rect2?
+    }
+
+    var previewTargets: PreviewTargets {
         let snapshot = renderState.current
         let frame = snapshot.track.frame(at: currentTimeMs)
+        return PreviewTargets(
+            recording: frame.screenRect,
+            recordingCornerRadius: recordingAreaCornerRadius(snapshot, frame),
+            camera: cameraArea(frame),
+            loupe: loupeArea(frame),
+            shortcuts: shortcutsArea(snapshot),
+            shortcutsCornerRadius: shortcutsCornerRadius(snapshot),
+            cursor: cursorArea(snapshot, frame)
+        )
+    }
+
+    /// Where the cursor image is drawn right now (canvas pixels), if visible.
+    private func cursorArea(_ snapshot: RenderState.Snapshot, _ frame: CameraFrame) -> Rect2? {
         guard !project.cursor.hide, frame.cursorOpacity > 0.01, let position = frame.cursor else { return nil }
         let layout = snapshot.track.layout
         let asset = cursors.asset(named: frame.cursorName)
@@ -1029,31 +1059,37 @@ final class EditorModel: ObservableObject {
         return asset.rect(tip: tip, visibleHeight: project.cursor.size * videoToCanvas * frame.cursorScale)
     }
 
-    var recordingAreaCornerRadius: Double {
-        let snapshot = renderState.current
-        let area = snapshot.track.frame(at: currentTimeMs).screenRect
+    private func recordingAreaCornerRadius(_ snapshot: RenderState.Snapshot, _ frame: CameraFrame) -> Double {
+        let area = frame.screenRect
         let zoom = area.width / max(snapshot.track.layout.restScreen.width, 1)
         return min(project.style.cornerRadius * zoom, min(area.width, area.height) / 2)
     }
 
     /// Where the recording is drawn on the canvas right now (canvas pixels), for overlays. The
     /// current press's keys in canvas units, for the paused preview's click target.
-    var shortcutsAreaRect: Rect2? {
+    private func shortcutsArea(_ snapshot: RenderState.Snapshot) -> Rect2? {
         guard project.captions.enableShortcuts else { return nil }
-        let canvas = renderState.current.track.layout.canvas
-        let captionsShown = project.captions.enableTranscript
-            && !CaptionWords.visible(clientTranscript, resolver: project.resolver, showSoundLabels: project.captions.showSoundLabels).isEmpty
+        let canvas = snapshot.track.layout.canvas
+        let captionsShown = project.captions.enableTranscript && hasVisibleCaptionWords
         return ShortcutTrack(project: project, canvas: canvas, captionsShown: captionsShown)?.currentRect(atPlayback: currentTimeMs)
     }
 
     /// The keys' corner radius in canvas units (`ratio × 128` stage units).
-    var shortcutsCornerRadius: Double {
-        project.captions.shortcutsSizeRatio * 128 * renderState.current.track.layout.canvas.height / 1080
+    private func shortcutsCornerRadius(_ snapshot: RenderState.Snapshot) -> Double {
+        project.captions.shortcutsSizeRatio * 128 * snapshot.track.layout.canvas.height / 1080
+    }
+
+    /// Whether any caption word shows, kept until the transcript, clips or sound labels change.
+    private var hasVisibleCaptionWords: Bool {
+        let key = CaptionWordsKey(resolver: resolver, showSoundLabels: project.captions.showSoundLabels)
+        if let cached = visibleCaptionWordsCache, cached.key == key { return cached.value }
+        let value = !CaptionWords.visible(clientTranscript, resolver: resolver, showSoundLabels: key.showSoundLabels).isEmpty
+        visibleCaptionWordsCache = (key, value)
+        return value
     }
 
     /// The lens circle in canvas units while it is mostly there (`LOUPE` marker).
-    var loupeAreaRect: Rect2? {
-        let frame = renderState.current.track.frame(at: currentTimeMs)
+    private func loupeArea(_ frame: CameraFrame) -> Rect2? {
         guard let lens = frame.loupe, lens.radius > 0, lens.presence >= 0.5 else { return nil }
         let s = project.videoRect(inScreen: frame.screenRect)
         let r = lens.radius * s.width
@@ -1070,8 +1106,7 @@ final class EditorModel: ObservableObject {
     }
 
     /// The webcam on the canvas while it is shown (canvas pixels).
-    var cameraAreaRect: (rect: Rect2, cornerRadius: Double)? {
-        let frame = renderState.current.track.frame(at: currentTimeMs)
+    private func cameraArea(_ frame: CameraFrame) -> (rect: Rect2, cornerRadius: Double)? {
         guard !project.camera.hide, let rect = frame.cameraRect, frame.cameraOpacity > 0.5, rect.width > 1, rect.height > 1 else { return nil }
         return (rect, min(frame.cameraCornerRadius, min(rect.width, rect.height) / 2))
     }
