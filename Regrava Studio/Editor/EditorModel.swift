@@ -348,10 +348,12 @@ final class EditorModel: ObservableObject {
         transcriptSaveTask?.cancel()
         guard let updated else { return }
         let bundle = bundleURL
-        transcriptSaveTask = Task {
+        transcriptSaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
             try? updated.save(bundle: bundle)
+            // Captions draw the saved transcript.
+            self?.scheduleRefresh()
         }
     }
 
