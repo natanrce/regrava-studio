@@ -311,6 +311,12 @@ final class EditorModel: ObservableObject {
         if updatedProject != project { apply(updatedProject) }
     }
 
+    /// Published only when they change: every set redraws the editor.
+    private func updateHistoryFlags() {
+        if canUndo != !undoStack.isEmpty { canUndo = !undoStack.isEmpty }
+        if canRedo != !redoStack.isEmpty { canRedo = !redoStack.isEmpty }
+    }
+
     private func recordHistory(coalesce key: String?) {
         let now = Date()
         if !(key != nil && key == lastCoalesceKey && now.timeIntervalSince(lastChangeAt) < 1) {
@@ -342,8 +348,7 @@ final class EditorModel: ObservableObject {
     private func applyTranscript(_ updated: SessionTranscript?) {
         guard updated != transcript else { return }
         transcript = updated
-        canUndo = !undoStack.isEmpty
-        canRedo = !redoStack.isEmpty
+        updateHistoryFlags()
         scheduleRefresh()
         transcriptSaveTask?.cancel()
         guard let updated else { return }
@@ -382,14 +387,14 @@ final class EditorModel: ObservableObject {
         project = updated
         // A new cursor style means new images (picked before the next snapshot is made).
         if cursorStyleChanged { cursors = CursorLibrary.make(project: project, bundle: bundleURL) }
-        canUndo = !undoStack.isEmpty
-        canRedo = !redoStack.isEmpty
+        updateHistoryFlags()
         if case .zoom(let id) = sidebarItem, !project.zooms.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .slice(let id) = sidebarItem, !project.slices.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .mask(let id) = sidebarItem, !project.masks.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .layout(let id) = sidebarItem, !project.cameraLayouts.contains(where: { $0.id == id }) { sidebarItem = nil }
-        selectedZoomIDs = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
-        isDirty = true
+        let selected = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
+        if selected != selectedZoomIDs { selectedZoomIDs = selected }
+        if !isDirty { isDirty = true }
         scheduleAutosave()
         rememberLastProjectConfig()
         if micModeChanged {
@@ -534,7 +539,7 @@ final class EditorModel: ObservableObject {
     /// A context menu option under the pointer (`highlight` → `preview()`); not part of history,
     /// cleared when the pointer leaves it or the menu closes.
     var menuPreview: ((inout Project) -> Void)? {
-        didSet { scheduleRefresh() }
+        didSet { if oldValue != nil || menuPreview != nil { scheduleRefresh() } }
     }
 
     /// The project as rendered (with the hovered preset or menu option, if any).
@@ -728,8 +733,9 @@ final class EditorModel: ObservableObject {
     func pause() {
         player.pause()
         stopManualPlayback()
-        shuttleRate = nil
-        isPlaying = false
+        // Only changes are published: arrow-key steps pause first.
+        if shuttleRate != nil { shuttleRate = nil }
+        if isPlaying { isPlaying = false }
     }
 
     /// `playToward(dir)` for L (+1) and J (−1): the same direction doubles the speed up to
