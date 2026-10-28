@@ -32,8 +32,6 @@ public enum ProjectExporter {
         }
     }
 
-    /// Exports and returns the written files (two files for codec "Both").
-    @discardableResult
     /// Finishes the webcam's face detection before rendering when face tracking is on.
     public static func completeFaceTracking(project: Project, bundle: URL) async throws {
         guard project.camera.enableFaceTracking, let name = project.recording.cameraFileName else { return }
@@ -68,6 +66,8 @@ public enum ProjectExporter {
                               finalUpToMs: project.recording.durationMs, isComplete: true).save(bundle: bundle)
     }
 
+    /// Exports and returns the written files (two files for codec "Both").
+    @discardableResult
     public static func export(
         project: Project,
         videoURL: URL,
