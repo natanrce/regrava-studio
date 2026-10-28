@@ -188,8 +188,8 @@ final class EditorModel: ObservableObject {
         transcript = SessionTranscript.load(bundle: bundleURL)
         let saved = UserDefaults.standard.double(forKey: "project-view-timeline-zoom.\(bundleURL.path)")
         visibleDurationMs = clampVisibleDuration(saved > 0 ? saved : 30_000)
-        Publishers.Merge(preferences.$playbackPreviewResolution.map { _ in () }, preferences.$playbackPreviewMaxHeight.map { _ in () })
-            .dropFirst()
+        // Each publisher sends its current value first; only later changes rebuild.
+        Publishers.Merge(preferences.$playbackPreviewResolution.dropFirst().map { _ in () }, preferences.$playbackPreviewMaxHeight.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { Task { await self?.rebuildComposition() } } }
             .store(in: &cancellables)
     }
