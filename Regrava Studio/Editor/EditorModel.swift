@@ -425,8 +425,18 @@ final class EditorModel: ObservableObject {
     /// New composition (canvas or preview size changed); keeps the playhead. With
     /// `replacingItem` the player gets a new item, needed when clips change the timing.
     func rebuildComposition(replacingItem: Bool = false) async {
-        let snapshot = RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundleURL)
-        renderState.replace(with: snapshot)
+        compositionGeneration += 1
+        let generation = compositionGeneration
+        itemReplacementPending = itemReplacementPending || replacingItem
+        snapshotRequests += 1
+        let request = snapshotRequests
+        let project = self.project, cursors = self.cursors, bundle = bundleURL
+        let snapshot = await Task.detached(priority: .userInitiated) {
+            RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle)
+        }.value
+        // A newer rebuild supersedes this one.
+        guard generation == compositionGeneration else { return }
+        installSnapshot(snapshot, request: request)
         // New timing, camera delay or preview size: scrubbers start over.
         scrubPreview?.close()
         scrubPreview = nil
@@ -439,12 +449,15 @@ final class EditorModel: ObservableObject {
             // Frames at the display's refresh rate: screen recordings have a variable, lower frame rate,
             // which made zooms and the cursor judder.
             let configuration = try await CompositionFactory.configuration(asset: asset, state: renderState, canvas: project.canvasSize, outputSize: output, fps: Self.displayFrameRate)
+            guard generation == compositionGeneration else { return }
             let composition = AVVideoComposition(configuration: configuration)
             baseConfiguration = configuration
             prewarmRenderer()
             compositionCanvas = project.canvasSize
             compositionOutput = output
-            if let item = player.currentItem, !replacingItem {
+            let replacesItem = itemReplacementPending
+            itemReplacementPending = false
+            if let item = player.currentItem, !replacesItem {
                 item.videoComposition = composition
                 item.audioMix = media.audioMix
             } else {
@@ -456,8 +469,26 @@ final class EditorModel: ObservableObject {
             }
             if !isPlaying { seek(to: min(currentTimeMs, durationMs)) }
         } catch {
+            guard generation == compositionGeneration else { return }
             errorMessage = "Could not load the recording: \(error.localizedDescription)"
         }
+    }
+
+    /// Rebuilds asked for so far; only the latest one installs its composition.
+    private var compositionGeneration = 0
+    /// A superseded rebuild that needed a new player item passes that need on.
+    private var itemReplacementPending = false
+    /// Render snapshots asked for so far, and the latest one shown: one made for an older
+    /// request never replaces a newer one, whichever finishes first.
+    private var snapshotRequests = 0
+    private var installedSnapshotRequest = 0
+
+    @discardableResult
+    private func installSnapshot(_ snapshot: RenderState.Snapshot, request: Int) -> Bool {
+        guard request > installedSnapshotRequest else { return false }
+        installedSnapshotRequest = request
+        renderState.replace(with: snapshot)
+        return true
     }
 
     /// Volumes and mutes only change the mix of the current item.
@@ -522,14 +553,15 @@ final class EditorModel: ObservableObject {
         let project = self.renderedProject
         let cursors = self.cursors
         let bundle = bundleURL
+        snapshotRequests += 1
+        let request = snapshotRequests
         refreshTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 30_000_000)
             guard !Task.isCancelled else { return }
             let snapshot = await Task.detached(priority: .userInitiated) {
                 RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle)
             }.value
-            guard !Task.isCancelled, let self else { return }
-            self.renderState.replace(with: snapshot)
+            guard !Task.isCancelled, let self, self.installSnapshot(snapshot, request: request) else { return }
             self.prewarmRenderer()
             // Re-assigning the composition drops cached frames.
             if let base = self.baseConfiguration, let item = self.player.currentItem {
