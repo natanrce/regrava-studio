@@ -375,6 +375,10 @@ final class EditorModel: ObservableObject {
         let oldProcessing = project.processing
         let micModeChanged = updated.audio.microphoneAudioPreset != project.audio.microphoneAudioPreset
             || updated.audio.muteMicrophone != project.audio.muteMicrophone
+        // Frames never depend on the audio settings.
+        var updatedVideo = updated
+        updatedVideo.audio = project.audio
+        let onlyAudioChanged = audioChanged && updatedVideo == project
         project = updated
         // A new cursor style means new images (picked before the next snapshot is made).
         if cursorStyleChanged { cursors = CursorLibrary.make(project: project, bundle: bundleURL) }
@@ -400,11 +404,13 @@ final class EditorModel: ObservableObject {
         if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
             Task { await rebuildComposition(replacingItem: slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged) }
         } else {
-            if audioChanged {
+            // A new microphone mode already rebuilds the composition, mix and waveforms included.
+            if audioChanged && !micModeChanged {
                 waveforms.update(project: project, bundle: bundleURL, video: videoURL)
-                Task { await refreshAudioMix() }
+                audioMixTask?.cancel()
+                audioMixTask = Task { await refreshAudioMix() }
             }
-            scheduleRefresh()
+            if !onlyAudioChanged { scheduleRefresh() }
         }
     }
 
@@ -425,6 +431,8 @@ final class EditorModel: ObservableObject {
     /// New composition (canvas or preview size changed); keeps the playhead. With
     /// `replacingItem` the player gets a new item, needed when clips change the timing.
     func rebuildComposition(replacingItem: Bool = false) async {
+        // The new composition carries the current mix.
+        audioMixTask?.cancel()
         compositionGeneration += 1
         let generation = compositionGeneration
         itemReplacementPending = itemReplacementPending || replacingItem
@@ -493,9 +501,13 @@ final class EditorModel: ObservableObject {
 
     /// Volumes and mutes only change the mix of the current item.
     private func refreshAudioMix() async {
-        guard let media = try? await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL)) else { return }
+        guard let media = try? await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundleURL)),
+              !Task.isCancelled else { return }
         player.currentItem?.audioMix = media.audioMix
     }
+
+    /// The latest mix refresh; a newer volume change cancels it.
+    private var audioMixTask: Task<Void, Never>?
 
     // MARK: Presets
 
