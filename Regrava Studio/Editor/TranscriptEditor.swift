@@ -23,7 +23,7 @@ struct TranscriptEditPanel: View {
             }
         } else {
             let tokens = editor.transcriptTokens
-            let deleted = tokens.contains { !TranscriptEditing.isPresent($0, in: editor.project) }
+            let deleted = tokens.contains { !editor.isPresent($0) }
             let hidden = tokens.contains { $0.isHidden }
             SidebarSection(title: "Edit by transcript", showsDivider: false) {
                 bulkActions
@@ -153,7 +153,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
         func rebuild(showDeleted: Bool, showHidden: Bool) {
             guard let editor, let textView else { return }
             let tokens = editor.transcriptTokens
-            let project = editor.project
+            let project = editor.project, resolver = editor.resolver
             let text = NSMutableAttributedString()
             let paragraph = NSMutableParagraphStyle()
             // `typo.copy` 13 px at line-height 1.75; 16 px between paragraphs.
@@ -170,7 +170,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
             for para in TranscriptEditing.paragraphs(tokens) {
                 var pieces: [(TranscriptToken, NSAttributedString)] = []
                 for token in para {
-                    if let piece = attributed(token, project: project, showDeleted: showDeleted, showHidden: showHidden, base: base) { pieces.append((token, piece)) }
+                    if let piece = attributed(token, project: project, resolver: resolver, showDeleted: showDeleted, showHidden: showHidden, base: base) { pieces.append((token, piece)) }
                 }
                 guard !pieces.isEmpty else { continue }
                 if text.length > 0 { text.append(NSAttributedString(string: "\n", attributes: base)) }
@@ -189,11 +189,10 @@ struct TranscriptTextEditor: NSViewRepresentable {
         }
 
         /// Word and pause styles.
-        private func attributed(_ token: TranscriptToken, project: Project, showDeleted: Bool, showHidden: Bool, base: [NSAttributedString.Key: Any]) -> NSAttributedString? {
+        private func attributed(_ token: TranscriptToken, project: Project, resolver: TimeResolver, showDeleted: Bool, showHidden: Bool, base: [NSAttributedString.Key: Any]) -> NSAttributedString? {
             var attrs = base
-            let present = TranscriptEditing.isPresent(token, in: project)
+            let present = resolver.isSourceRangePresent(token.sourceStartMs, token.sourceEndMs)
             if token.kind == .gap {
-                let resolver = project.resolver
                 let playDuration = resolver.sourceToPlayback(token.sourceEndMs) - resolver.sourceToPlayback(token.sourceStartMs)
                 let deleted = playDuration < 50
                 if deleted && !showDeleted { return nil }
@@ -260,7 +259,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
                 textView.moveDot(to: active.range)
             }
             if let cutPreview {
-                for item in targets() where TranscriptEditing.isPresent(item, in: editor.project) && (cutPreview == .video || (item.kind == .word && !item.isHidden)) {
+                for item in targets() where editor.isPresent(item) && (cutPreview == .video || (item.kind == .word && !item.isHidden)) {
                     if let r = ranges.first(where: { $0.token.id == item.id })?.range {
                         manager.addTemporaryAttribute(.foregroundColor, value: NSColor(Theme.Colors.dangerActiveText), forCharacterRange: r)
                     }
@@ -317,7 +316,7 @@ struct TranscriptTextEditor: NSViewRepresentable {
                 // The separator before the caret: the adjacent token.
                 targets = [before.token]
             }
-            let present = targets.filter { TranscriptEditing.isPresent($0, in: editor.project) }
+            let present = targets.filter { editor.isPresent($0) }
             if present.isEmpty {
                 textView?.setSelectedRange(NSRange(location: range.location, length: 0))
                 return

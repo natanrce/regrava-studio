@@ -112,7 +112,15 @@ final class EditorModel: ObservableObject {
     /// Layout add tool (`activeAddTool = "layout"`); only camera overlay arms it.
     @Published var isAddLayoutToolArmed = false
     /// The microphone transcript (`transcripts/microphone-session-0.json`), nil until generated.
-    @Published var transcript: SessionTranscript?
+    @Published var transcript: SessionTranscript? {
+        didSet {
+            clientTranscriptCache = nil
+            transcriptTokensCache = nil
+        }
+    }
+    /// `clientTranscript` and `transcriptTokens`, kept until the transcript changes.
+    var clientTranscriptCache: [TranscriptWord]?
+    var transcriptTokensCache: [TranscriptToken]?
     /// "Generating transcript" task running.
     @Published var isGeneratingTranscript = false
     /// Last layout type chosen from the add tools (`addLayoutType`), used by ⌃L.

@@ -10,8 +10,11 @@ import UniformTypeIdentifiers
 extension EditorModel {
     /// Words in source time with the onset estimate (`client.transcript`).
     var clientTranscript: [TranscriptWord] {
+        if let clientTranscriptCache { return clientTranscriptCache }
         guard let transcript else { return [] }
-        return TranscriptTiming.clientTranscript([(0, transcript.transcript)])
+        let words = TranscriptTiming.clientTranscript([(0, transcript.transcript)])
+        clientTranscriptCache = words
+        return words
     }
 
     /// `generate({type:"system", locale})`: replaces the transcript and every edit made to it.

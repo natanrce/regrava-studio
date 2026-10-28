@@ -7,8 +7,16 @@ import RegravaCore
 extension EditorModel {
     /// Word and pause tokens of the transcript, in source time.
     var transcriptTokens: [TranscriptToken] {
+        if let transcriptTokensCache { return transcriptTokensCache }
         guard let transcript else { return [] }
-        return TranscriptEditing.tokens(transcript.transcript, locale: transcript.generator.locale)
+        let tokens = TranscriptEditing.tokens(transcript.transcript, locale: transcript.generator.locale)
+        transcriptTokensCache = tokens
+        return tokens
+    }
+
+    /// Whether any of the token is still in the video (`TranscriptEditing.isPresent`).
+    func isPresent(_ token: TranscriptToken) -> Bool {
+        resolver.isSourceRangePresent(token.sourceStartMs, token.sourceEndMs)
     }
 
     /// Keeps the playhead on the same recording moment across cuts (`stickyAction`).
@@ -38,7 +46,7 @@ extension EditorModel {
     /// `cutTargetFromTranscript`: hidden from captions, the video plays them.
     func cutFromTranscript(_ target: [TranscriptToken]) {
         guard let words = transcript?.transcript else { return }
-        let picked = target.filter { $0.kind == .word && !$0.isHidden && TranscriptEditing.isPresent($0, in: project) }
+        let picked = target.filter { $0.kind == .word && !$0.isHidden && isPresent($0) }
         guard let first = picked.compactMap(\.wordIndex).min(), let last = picked.compactMap(\.wordIndex).max() else { return }
         changeTranscript(TranscriptEditing.setHidden(words, from: first, to: last, hidden: true))
         let n = picked.count
@@ -64,11 +72,11 @@ extension EditorModel {
     }
 
     var presentFillerTokens: [TranscriptToken] {
-        transcriptTokens.filter { $0.kind == .word && $0.fillerTier == 1 && TranscriptEditing.isPresent($0, in: project) }
+        transcriptTokens.filter { $0.kind == .word && $0.fillerTier == 1 && isPresent($0) }
     }
 
     var tightenablePauseTokens: [TranscriptToken] {
-        transcriptTokens.filter { $0.kind == .gap && TranscriptEditing.isPresent($0, in: project) && TranscriptEditing.canTighten($0, in: project) }
+        transcriptTokens.filter { $0.kind == .gap && isPresent($0) && TranscriptEditing.canTighten($0, in: project) }
     }
 
     /// "Play": this part once, then back to its start (40 ms minimum).
