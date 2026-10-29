@@ -28,7 +28,8 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     private let input: AVAssetWriterInput
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var segmentIndex = 0
-    private var entries: [(file: String, seconds: Double)] = []
+    /// The playlist's `#EXTINF` lines so far, grown as segments are written.
+    private var entryLines = ""
     private var initFile: String?
     private let lock = NSLock()
     /// Host time (seconds) of the first sample written.
@@ -121,7 +122,7 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
             segmentIndex += 1
             file = String(format: "%@-%04d.m4s", name, segmentIndex)
             let seconds = segmentReport?.trackReports.first.map { $0.duration.seconds } ?? Self.segmentSeconds
-            entries.append((file, seconds))
+            entryLines += String(format: "#EXTINF:%1.5f,\n", seconds) + file + "\n"
         @unknown default:
             return
         }
@@ -148,7 +149,7 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     private func writePlaylistLocked(ended: Bool) {
         var text = "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:\(Int(Self.segmentSeconds))\n#EXT-X-VERSION:6\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-INDEPENDENT-SEGMENTS\n"
         if let initFile { text += "#EXT-X-MAP:URI=\"\(initFile)\"\n" }
-        for entry in entries { text += String(format: "#EXTINF:%1.5f,\n", entry.seconds) + entry.file + "\n" }
+        text += entryLines
         if ended { text += "#EXT-X-ENDLIST\n" }
         try? text.write(to: playlistURL, atomically: true, encoding: .utf8)
     }
