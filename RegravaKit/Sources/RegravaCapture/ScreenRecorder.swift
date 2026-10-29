@@ -493,8 +493,9 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
         guard sampleBuffer.isValid, let writer = writers[type] else { return }
         if type == .screen {
             // Only complete frames carry a picture; idle ones repeat the last.
-            guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-                  let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete else { return }
+            guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as NSArray?,
+                  let info = attachments.firstObject as? NSDictionary,
+                  let raw = info[SCStreamFrameInfo.status.rawValue] as? Int, SCFrameStatus(rawValue: raw) == .complete else { return }
             guard writer.append(sampleBuffer) else { return }
             if let waiter {
                 self.waiter = nil
