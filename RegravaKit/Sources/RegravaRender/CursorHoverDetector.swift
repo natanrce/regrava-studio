@@ -57,7 +57,7 @@ public enum CursorHoverDetector {
     public static func detect(video: URL, events: [MouseEvent], pointPixelScale: Double, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [Double] {
         let settings = Settings()
         let moves = events.filter { $0.kind == .move }.sorted { $0.timeMs < $1.timeMs }
-        let clicks = events.filter { $0.kind == .down || $0.kind == .up }.map(\.timeMs)
+        let clicks = events.filter { $0.kind == .down || $0.kind == .up }.map(\.timeMs).sorted()
         guard !moves.isEmpty else { return [] }
         let spans = movementSpans(moves, joinGapMs: settings.spanJoinGapMs, tailMs: settings.freeMovementWindowMs)
         guard !spans.isEmpty else { return [] }
@@ -165,7 +165,8 @@ public enum CursorHoverDetector {
         // 1. The mouse moved at least 3 pt over the last 150 ms.
         guard freeMovementPt(endingAt: t, windowMs: settings.freeMovementWindowMs, moves: moves, pointPixelScale: pointPixelScale) >= settings.minimumMovePt else { return false }
         // 2. No click from 300 ms before to 80 ms after.
-        guard !clicks.contains(where: { $0 >= t - settings.clickBeforeMs && $0 <= t + settings.clickAfterMs }) else { return false }
+        let firstClick = firstIndex(in: clicks) { $0 >= t - settings.clickBeforeMs }
+        guard firstClick == clicks.count || !(clicks[firstClick] <= t + settings.clickAfterMs) else { return false }
         // 3. The frame 120 ms before, and the one 270 ms before.
         guard let beforeIndex = history.lastIndex(where: { $0.timeMs <= t - settings.lookBackMs }) else { return false }
         let before = history[beforeIndex]
@@ -182,11 +183,25 @@ public enum CursorHoverDetector {
         return !isExplainedByScrolling(from: before, to: frame, around: cursorPx, pxPerPt: pxPerPt, settings: settings)
     }
 
+    /// First index whose element passes `predicate`, for a predicate that is false then true
+    /// along the sorted array; `array.count` when none does.
+    private static func firstIndex<T>(in array: [T], where predicate: (T) -> Bool) -> Int {
+        var lo = 0, hi = array.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if predicate(array[mid]) { hi = mid } else { lo = mid + 1 }
+        }
+        return lo
+    }
+
     /// `CursorPath.freeMovementPt(endingAtMs:windowMs:)`: path length of the moves in (t − w, t].
+    /// `moves` is sorted by time.
     static func freeMovementPt(endingAt t: Double, windowMs: Double, moves: [MouseEvent], pointPixelScale: Double) -> Double {
         var distance = 0.0
         var previous: Vec2?
-        for move in moves where move.timeMs > t - windowMs - 50 && move.timeMs <= t {
+        let first = firstIndex(in: moves) { $0.timeMs > t - windowMs - 50 }
+        for move in moves[first...] {
+            guard move.timeMs <= t else { break }
             if let previous, move.timeMs > t - windowMs {
                 distance += hypot(move.position.x - previous.x, move.position.y - previous.y) / pointPixelScale
             }
