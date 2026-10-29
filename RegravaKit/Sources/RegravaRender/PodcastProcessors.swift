@@ -11,14 +11,30 @@ struct Stft {
     let hop: Int
     let window: [Float]
     let rate: Double
-    private let setup: vDSP_DFT_Setup
+    private let setups: Setups
+
+    /// The forward and inverse DFT setups, destroyed with the last copy of the `Stft`.
+    private final class Setups {
+        let forward: vDSP_DFT_Setup
+        let inverse: vDSP_DFT_Setup
+
+        init(frame: Int) {
+            forward = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frame), .FORWARD)!
+            inverse = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frame), .INVERSE)!
+        }
+
+        deinit {
+            vDSP_DFT_DestroySetup(inverse)
+            vDSP_DFT_DestroySetup(forward)
+        }
+    }
 
     init(frame: Int, rate: Double = MicrophoneRenderer.sampleRate) {
         self.frame = frame
         hop = frame / 4
         self.rate = rate
         window = (0..<frame).map { Float(sqrt(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / Double(frame)))) }
-        setup = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frame), .FORWARD)!
+        setups = Setups(frame: frame)
     }
 
     var bins: Int { frame / 2 + 1 }
@@ -49,79 +65,112 @@ struct Stft {
         return 10 * log10(4 * Double(sum) / Double(range.count) / Double(frame * frame) + 1e-20)
     }
 
+    /// Scratch buffers of the packed real DFT.
+    private struct Scratch {
+        var inRe, inIm, outRe, outIm: [Float]
+        init(half: Int) {
+            inRe = [Float](repeating: 0, count: half)
+            inIm = inRe
+            outRe = inRe
+            outIm = inRe
+        }
+    }
+
+    /// One channel zero-padded for framing: `frame − hop` before, a frame after.
+    private func padded(_ x: [Float]) -> [Float] {
+        [Float](repeating: 0, count: frame - hop) + x + [Float](repeating: 0, count: frame)
+    }
+
+    /// Frames of a channel of `length` samples, in the padded signal.
+    private func frameStarts(length: Int, padded: Int) -> StrideTo<Int> {
+        let lead = frame - hop
+        // Frames start every hop while a whole frame fits and the start is inside the signal.
+        return stride(from: 0, to: max(0, min(padded - frame + 1, lead + length)), by: hop)
+    }
+
+    /// The spectrum of the frame at `start` into `re`/`im` (`bins` values each; the imaginary
+    /// parts of bin 0 and Nyquist are left untouched).
+    private func analyzeFrame(_ padded: [Float], at start: Int, re: inout [Float], im: inout [Float], scratch: inout Scratch) {
+        let half = frame / 2
+        // Even/odd split for the packed real DFT.
+        for n in 0..<half {
+            scratch.inRe[n] = padded[start + 2 * n] * window[2 * n]
+            scratch.inIm[n] = padded[start + 2 * n + 1] * window[2 * n + 1]
+        }
+        vDSP_DFT_Execute(setups.forward, scratch.inRe, scratch.inIm, &scratch.outRe, &scratch.outIm)
+        // Unpack: bin 0 and Nyquist share the first slot; values come out doubled.
+        re[0] = scratch.outRe[0] / 2
+        re[half] = scratch.outIm[0] / 2
+        for k in 1..<half {
+            re[k] = scratch.outRe[k] / 2
+            im[k] = scratch.outIm[k] / 2
+        }
+    }
+
+    /// Overlap-adds the frame `index` back into `out` (padded like the input).
+    private func synthesizeFrame(re: [Float], im: [Float], index: Int, into out: inout [Float], scratch: inout Scratch) {
+        let half = frame / 2
+        // The inverse real DFT gives 2N·x, and sqrt-Hann analysis × synthesis at 75% overlap sums to 2.
+        let scale = 1 / (Float(frame) * 4)
+        scratch.inRe[0] = re[0] * 2
+        scratch.inIm[0] = re[half] * 2
+        for k in 1..<half {
+            scratch.inRe[k] = re[k] * 2
+            scratch.inIm[k] = im[k] * 2
+        }
+        vDSP_DFT_Execute(setups.inverse, scratch.inRe, scratch.inIm, &scratch.outRe, &scratch.outIm)
+        let start = index * hop
+        for n in 0..<half where start + 2 * n + 1 < out.count {
+            out[start + 2 * n] += scratch.outRe[n] * scale * window[2 * n]
+            out[start + 2 * n + 1] += scratch.outIm[n] * scale * window[2 * n + 1]
+        }
+    }
+
     /// Spectra of one channel, frame by frame (zero-padded edges, lead-in frame − hop).
     func analyze(_ x: [Float]) -> [(re: [Float], im: [Float])] {
-        let lead = frame - hop
-        let padded = [Float](repeating: 0, count: lead) + x + [Float](repeating: 0, count: frame)
-        var frames: [(re: [Float], im: [Float])] = []
-        var start = 0
-        let half = frame / 2
-        var inRe = [Float](repeating: 0, count: half), inIm = [Float](repeating: 0, count: half)
-        var outRe = [Float](repeating: 0, count: half), outIm = [Float](repeating: 0, count: half)
-        while start + frame <= padded.count && start < lead + x.count {
-            // Even/odd split for the packed real DFT.
-            for n in 0..<half {
-                inRe[n] = padded[start + 2 * n] * window[2 * n]
-                inIm[n] = padded[start + 2 * n + 1] * window[2 * n + 1]
-            }
-            vDSP_DFT_Execute(setup, inRe, inIm, &outRe, &outIm)
-            // Unpack: bin 0 and Nyquist share the first slot; values come out doubled.
+        let signal = padded(x)
+        var scratch = Scratch(half: frame / 2)
+        return frameStarts(length: x.count, padded: signal.count).map { start in
             var re = [Float](repeating: 0, count: bins), im = [Float](repeating: 0, count: bins)
-            re[0] = outRe[0] / 2
-            re[half] = outIm[0] / 2
-            for k in 1..<half {
-                re[k] = outRe[k] / 2
-                im[k] = outIm[k] / 2
-            }
-            frames.append((re, im))
-            start += hop
+            analyzeFrame(signal, at: start, re: &re, im: &im, scratch: &scratch)
+            return (re, im)
         }
-        return frames
     }
 
     /// Weighted overlap-add back to `length` samples.
     func synthesize(_ frames: [(re: [Float], im: [Float])], length: Int) -> [Float] {
         let lead = frame - hop
         var out = [Float](repeating: 0, count: lead + length + frame)
-        let inverse = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frame), .INVERSE)!
-        defer { vDSP_DFT_DestroySetup(inverse) }
-        let half = frame / 2
-        var inRe = [Float](repeating: 0, count: half), inIm = [Float](repeating: 0, count: half)
-        var outRe = [Float](repeating: 0, count: half), outIm = [Float](repeating: 0, count: half)
-        // The inverse real DFT gives 2N·x, and sqrt-Hann analysis × synthesis at 75% overlap sums to 2.
-        let scale = 1 / (Float(frame) * 4)
+        var scratch = Scratch(half: frame / 2)
         for (index, spectrum) in frames.enumerated() {
-            inRe[0] = spectrum.re[0] * 2
-            inIm[0] = spectrum.re[half] * 2
-            for k in 1..<half {
-                inRe[k] = spectrum.re[k] * 2
-                inIm[k] = spectrum.im[k] * 2
-            }
-            vDSP_DFT_Execute(inverse, inRe, inIm, &outRe, &outIm)
-            let start = index * hop
-            for n in 0..<half where start + 2 * n + 1 < out.count {
-                out[start + 2 * n] += outRe[n] * scale * window[2 * n]
-                out[start + 2 * n + 1] += outIm[n] * scale * window[2 * n + 1]
-            }
+            synthesizeFrame(re: spectrum.re, im: spectrum.im, index: index, into: &out, scratch: &scratch)
         }
         return Array(out[lead..<(lead + length)])
     }
 
     /// `Equalizer.process`: the same real gain on both channels per bin, from their average power.
+    /// Frame by frame: each is analysed, scaled and added back before the next.
     func equalize(_ audio: MicrophoneRenderer.Stereo, gains: ([Float]) -> [Float]) -> MicrophoneRenderer.Stereo {
-        var left = analyze(audio.left), right = analyze(audio.right)
-        for i in 0..<min(left.count, right.count) {
-            var power = [Float](repeating: 0, count: bins)
+        let lead = frame - hop, length = audio.count
+        let left = padded(audio.left), right = padded(audio.right)
+        var outLeft = [Float](repeating: 0, count: lead + length + frame), outRight = outLeft
+        var reL = [Float](repeating: 0, count: bins), imL = reL, reR = reL, imR = reL, power = reL
+        var scratch = Scratch(half: frame / 2)
+        for (index, start) in frameStarts(length: length, padded: left.count).enumerated() {
+            analyzeFrame(left, at: start, re: &reL, im: &imL, scratch: &scratch)
+            analyzeFrame(right, at: start, re: &reR, im: &imR, scratch: &scratch)
             for k in 0..<bins {
-                power[k] = 0.5 * (left[i].re[k] * left[i].re[k] + left[i].im[k] * left[i].im[k] + right[i].re[k] * right[i].re[k] + right[i].im[k] * right[i].im[k])
+                power[k] = 0.5 * (reL[k] * reL[k] + imL[k] * imL[k] + reR[k] * reR[k] + imR[k] * imR[k])
             }
             let g = gains(power)
             for k in 0..<bins {
-                left[i].re[k] *= g[k]; left[i].im[k] *= g[k]
-                right[i].re[k] *= g[k]; right[i].im[k] *= g[k]
+                reL[k] *= g[k]; imL[k] *= g[k]
+                reR[k] *= g[k]; imR[k] *= g[k]
             }
+            synthesizeFrame(re: reL, im: imL, index: index, into: &outLeft, scratch: &scratch)
+            synthesizeFrame(re: reR, im: imR, index: index, into: &outRight, scratch: &scratch)
         }
-        return MicrophoneRenderer.Stereo(left: synthesize(left, length: audio.count), right: synthesize(right, length: audio.count))
+        return MicrophoneRenderer.Stereo(left: Array(outLeft[lead..<(lead + length)]), right: Array(outRight[lead..<(lead + length)]))
     }
 }
 
