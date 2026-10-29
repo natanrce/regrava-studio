@@ -26,9 +26,8 @@ final class MouseTracker {
         var isARepeat: Bool
     }
 
-    private var samples: [Sample] = []
-    /// Key presses and releases with their characters and modifiers.
-    private(set) var keySamples: [KeySample] = []
+    /// Cursor of the last sample written (`.none` before the first).
+    private var lastSampledCursorID: String??
     private var timer: Timer?
     private var monitors: [Any] = []
     private var lastLocation: CGPoint?
@@ -39,13 +38,9 @@ final class MouseTracker {
     var journal: RecordingJournal?
     private var savedCursorCount = 0
 
-    /// Cursor images that are not standard system cursors, by id.
-    var customCursors: [CapturedCursorImage] { cursors.customImages }
-
     func start(pollHz: Double = 120) {
         stop()
-        samples.removeAll()
-        keySamples.removeAll()
+        lastSampledCursorID = .none
         lastLocation = nil
         lastCursorID = nil
         pollCount = 0
@@ -87,13 +82,11 @@ final class MouseTracker {
         }
     }
 
-    @discardableResult
-    func stop() -> [Sample] {
+    func stop() {
         timer?.invalidate()
         timer = nil
         monitors.forEach(NSEvent.removeMonitor)
         monitors.removeAll()
-        return samples
     }
 
     private func poll() {
@@ -101,7 +94,7 @@ final class MouseTracker {
         // The cursor type is sampled at 30 Hz; position at the poll rate.
         if pollCount % 4 == 0 { lastCursorID = cursors.currentID() ?? lastCursorID }
         pollCount += 1
-        let cursorChanged = samples.last.map { $0.cursorID != lastCursorID } ?? true
+        let cursorChanged = lastSampledCursorID.map { $0 != lastCursorID } ?? true
         guard location != lastLocation || cursorChanged else { return }
         lastLocation = location
         // Movement while a button is held is a drag ("mouseDragged").
@@ -131,12 +124,11 @@ final class MouseTracker {
             modifiers: Self.modifiers(event.modifierFlags),
             isARepeat: event.isARepeat
         )
-        keySamples.append(sample)
         journal?.record(sample)
     }
 
     private func add(_ sample: Sample) {
-        samples.append(sample)
+        lastSampledCursorID = .some(sample.cursorID)
         journal?.record(sample)
         let custom = cursors.customImages
         if custom.count != savedCursorCount {
