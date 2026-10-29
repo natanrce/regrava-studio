@@ -335,7 +335,6 @@ public final class ScreenRecorder: NSObject {
                         guard let s = metadata.sessions.firstIndex(where: { $0.index == index }),
                               let c = metadata.sessions[s].channels.firstIndex(where: { $0.playlist == name }) else { return }
                         metadata.sessions[s].channels[c].startUptime = start
-                        if name == display.name { metadata.sessions[s].startUptime = start }
                     }
                 }
             }
