@@ -159,7 +159,7 @@ extension CompositionFactory {
                 frame.previousCursor = Vec2(cursor.x + cursorTravel / strength / max(videoToCanvas, 0.0001), cursor.y)
                 let image = compositor.compose(source: source, frame: frame, quality: .playing)
                     .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
             }
         }
     }
@@ -189,7 +189,7 @@ extension CompositionFactory {
                 frame.cameraOpacity = 1
                 let image = snapshot.compositor.compose(source: CIImage(cvPixelBuffer: screenBuffer), camera: CIImage(cvPixelBuffer: cameraBuffer), frame: frame, quality: quality)
                     .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
             }
         }
     }
@@ -223,6 +223,8 @@ final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
 /// output size.
 final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     static let context = CIContext(options: [.cacheIntermediates: false])
+    /// The colour space every composed frame is rendered in.
+    static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
     let sourcePixelBufferAttributes: [String: any Sendable]? = [
         kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
@@ -264,7 +266,7 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
             image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
         }
         let bounds = CGRect(origin: .zero, size: instruction.renderSize)
-        Self.context.render(image.cropped(to: bounds), to: output, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        Self.context.render(image.cropped(to: bounds), to: output, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
         request.finish(withComposedVideoFrame: output)
     }
 

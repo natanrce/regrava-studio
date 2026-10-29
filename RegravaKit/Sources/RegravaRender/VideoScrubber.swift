@@ -327,13 +327,11 @@ public final class ScrubPreview: @unchecked Sendable {
         let scaleX = output.width / max(canvas.width, 1), scaleY = output.height / max(canvas.height, 1)
         if scaleX != 1 || scaleY != 1 { image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY)) }
         let bounds = CGRect(origin: .zero, size: output)
-        CanvasCompositor.context.render(image.cropped(to: bounds), to: buffer, bounds: bounds, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        CanvasCompositor.context.render(image.cropped(to: bounds), to: buffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
         // Tagged, so the layer showing it matches the player's colours.
-        if let sRGB = CGColorSpace(name: CGColorSpace.sRGB) {
-            CVBufferSetAttachment(buffer, kCVImageBufferCGColorSpaceKey, sRGB, .shouldPropagate)
-            if let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() {
-                IOSurfaceSetValue(surface, kIOSurfaceColorSpace, CGColorSpace.sRGB)
-            }
+        CVBufferSetAttachment(buffer, kCVImageBufferCGColorSpaceKey, CanvasCompositor.sRGB, .shouldPropagate)
+        if let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() {
+            IOSurfaceSetValue(surface, kIOSurfaceColorSpace, CGColorSpace.sRGB)
         }
         nonisolated(unsafe) let result = buffer
         let callback = onImage

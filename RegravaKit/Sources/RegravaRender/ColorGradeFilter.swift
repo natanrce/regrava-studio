@@ -26,8 +26,11 @@ public enum ColorGradeFilter {
         return values.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
+    /// The grade's lookup space, made once rather than per frame.
+    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)
+
     public static func apply(data: Data, size: Int, to image: CIImage) -> CIImage {
-        guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return image }
+        guard let space = sRGB else { return image }
         let filter = CIFilter.colorCubeWithColorSpace()
         filter.inputImage = image
         filter.cubeDimension = Float(size)
