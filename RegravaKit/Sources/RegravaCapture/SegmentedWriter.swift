@@ -149,7 +149,7 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
         var text = "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:\(Int(Self.segmentSeconds))\n#EXT-X-VERSION:6\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-INDEPENDENT-SEGMENTS\n"
         if let initFile { text += "#EXT-X-MAP:URI=\"\(initFile)\"\n" }
         text += entryLines
-        if ended { text += "#EXT-X-ENDLIST\n" }
+        if ended { text += "#EXT-X-ENDLIST" }
         try? text.write(to: playlistURL, atomically: true, encoding: .utf8)
     }
 }
