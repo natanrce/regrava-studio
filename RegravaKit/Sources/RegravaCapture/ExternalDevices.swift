@@ -147,7 +147,6 @@ final class MobileDeviceObserver {
         var disconnect: DeviceCall
         var isPaired: DeviceCall
         var copyValue: CopyValue
-        var retain: DeviceCall?
     }
 
     private var api: API?
@@ -168,7 +167,7 @@ final class MobileDeviceObserver {
               let disconnect = symbol("AMDeviceDisconnect", as: DeviceCall.self),
               let isPaired = symbol("AMDeviceIsPaired", as: DeviceCall.self),
               let copyValue = symbol("AMDeviceCopyValue", as: CopyValue.self) else { return }
-        api = API(subscribe: subscribe, copyIdentifier: copyIdentifier, connect: connect, disconnect: disconnect, isPaired: isPaired, copyValue: copyValue, retain: symbol("AMDeviceRetain", as: DeviceCall.self))
+        api = API(subscribe: subscribe, copyIdentifier: copyIdentifier, connect: connect, disconnect: disconnect, isPaired: isPaired, copyValue: copyValue)
         let context = Unmanaged.passUnretained(self).toOpaque()
         _ = subscribe({ info, context in
             guard let info, let context else { return }
@@ -186,7 +185,6 @@ final class MobileDeviceObserver {
         if message == 2 {
             infos[identifier] = nil
         } else if message == 1 {
-            _ = api.retain?(device)
             var info = Info(identifier: identifier, isPaired: api.isPaired(device) != 0)
             if api.connect(device) == 0 {
                 func value(_ key: String) -> String? {
