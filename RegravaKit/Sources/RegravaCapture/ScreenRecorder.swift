@@ -197,6 +197,9 @@ public final class ScreenRecorder: NSObject {
                         journal.update { $0.continuous.append(.init(source: AudioSource.systemAudio.rawValue, playlist: "channel-4-system-audio-apps-0", startUptime: start)) }
                     }
                 }
+                recorder.onStop = { [weak self] error in
+                    Task { @MainActor in self?.streamStopped(error) }
+                }
                 try await recorder.start(processIDs: pids, content: content)
                 systemAudio = recorder
             }
@@ -438,10 +441,13 @@ public final class ScreenRecorder: NSObject {
 
 extension ScreenRecorder: SCStreamDelegate {
     nonisolated public func stream(_ stream: SCStream, didStopWithError error: Error) {
-        Task { @MainActor in
-            self.channels.failPending(error)
-            if self.phase == .recording || self.phase == .paused { self.onUnexpectedStop?(error) }
-        }
+        Task { @MainActor in self.streamStopped(error) }
+    }
+
+    /// The screen's or the apps' sound stream stopped on its own: the recording is aborted.
+    private func streamStopped(_ error: Error) {
+        channels.failPending(error)
+        if phase == .recording || phase == .paused { onUnexpectedStop?(error) }
     }
 }
 

@@ -5,11 +5,13 @@ import Foundation
 /// System audio of selected apps only, in its own stream. An app filter on the screen's own
 /// stream would also limit the picture to those apps, so the sound is captured apart and
 /// written to its own file, on the host clock so it can be cut to the screen's segments.
-final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
+final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let directory: URL
     private let name: String
     /// First sample's host time (for the recording's metadata).
     var onStart: (@Sendable (TimeInterval) -> Void)?
+    /// The stream stopped on its own; the recording is aborted as when the screen's stream stops.
+    var onStop: (@Sendable (Error) -> Void)?
     private let queue = DispatchQueue(label: "regrava.capture.system-audio", qos: .userInitiated)
     private let frames = FrameSink()
     private var stream: SCStream?
@@ -38,11 +40,15 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
         let filter = SCContentFilter(display: display, including: apps, exceptingWindows: [])
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(frames, type: .screen, sampleHandlerQueue: frames.queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try await stream.startCapture()
         self.stream = stream
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        onStop?(error)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

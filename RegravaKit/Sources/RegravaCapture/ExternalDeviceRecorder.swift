@@ -186,7 +186,7 @@ public final class ExternalDeviceRecorder {
 }
 
 /// The capture sessions and the segment writer, confined to one serial queue.
-final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, SCStreamOutput, @unchecked Sendable {
+final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     struct OrientationChange {
         var uptime: TimeInterval
         var contentRect: Rect2
@@ -296,7 +296,7 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         configuration.capturesAudio = true
         configuration.excludesCurrentProcessAudio = true
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(frameSink, type: .screen, sampleHandlerQueue: frameSink.queue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try await stream.startCapture()
@@ -374,6 +374,11 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         } else if output === microphoneOutput {
             append(sampleBuffer, source: .microphone)
         }
+    }
+
+    /// The system audio stream stopped on its own: the recording is aborted.
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        onFailure?(error)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
