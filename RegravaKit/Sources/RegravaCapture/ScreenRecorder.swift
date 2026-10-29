@@ -187,7 +187,7 @@ public final class ScreenRecorder: NSObject {
                         journal.update { $0.continuous.append(.init(source: "webcam", playlist: "channel-3-webcam-0", startUptime: start, width: Double(size.width), height: Double(size.height))) }
                     }
                 }
-                try camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
+                try await camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
                 self.camera = camera
             }
             if options.capturesSystemAudio, let pids = options.systemAudioProcessIDs {

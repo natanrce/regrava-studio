@@ -10,6 +10,8 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "regrava.camera.recorder")
+    /// `startRunning`/`stopRunning` block until the camera is up or down; they run here.
+    private let sessionQueue = DispatchQueue(label: "regrava.camera.session", qos: .userInitiated)
     private let directory: URL
     private let name: String
     private var writer: SegmentedWriter?
@@ -23,7 +25,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     /// Opens the camera at the largest format no taller than `maxHeight` and starts writing.
-    func start(deviceID: String, maxHeight: Int) throws {
+    func start(deviceID: String, maxHeight: Int) async throws {
         guard let device = AVCaptureDevice(uniqueID: deviceID) else {
             throw CaptureError.failed("The selected camera is not connected.")
         }
@@ -52,7 +54,17 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         output.setSampleBufferDelegate(self, queue: queue)
         session.addOutput(output)
         session.commitConfiguration()
-        session.startRunning()
+        await run { $0.startRunning() }
+    }
+
+    private func run(_ change: @escaping @Sendable (AVCaptureSession) -> Void) async {
+        let session = session
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                change(session)
+                continuation.resume()
+            }
+        }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -80,7 +92,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 continuation.resume()
             }
         }
-        session.stopRunning()
+        await run { $0.stopRunning() }
         await writer?.finish()
     }
 }

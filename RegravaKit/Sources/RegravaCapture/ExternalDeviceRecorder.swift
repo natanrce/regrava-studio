@@ -93,10 +93,10 @@ public final class ExternalDeviceRecorder {
                         journal.update { $0.continuous.append(.init(source: "webcam", playlist: "channel-3-webcam-0", startUptime: start, width: Double(size.width), height: Double(size.height))) }
                     }
                 }
-                try camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
+                try await camera.start(deviceID: cameraID, maxHeight: options.cameraMaxHeight)
                 self.camera = camera
             }
-            core.startRunning()
+            await core.startRunning()
             try await beginSegment()
             phase = .recording
         } catch {
@@ -195,6 +195,8 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     }
 
     let queue = DispatchQueue(label: "regrava.device.capture", qos: .userInitiated)
+    /// `startRunning`/`stopRunning` block until the sessions are up or down; they run here.
+    private let sessionQueue = DispatchQueue(label: "regrava.device.session", qos: .userInitiated)
     private let deviceSession = AVCaptureSession()
     private let microphoneSession = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -302,18 +304,31 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         hasSystemAudio = true
     }
 
-    func startRunning() {
-        deviceSession.startRunning()
-        if hasMicrophone { microphoneSession.startRunning() }
+    func startRunning() async {
+        await onSessionQueue {
+            self.deviceSession.startRunning()
+            if self.hasMicrophone { self.microphoneSession.startRunning() }
+        }
     }
 
     func stopRunning() async {
-        deviceSession.stopRunning()
-        if hasMicrophone { microphoneSession.stopRunning() }
+        await onSessionQueue {
+            self.deviceSession.stopRunning()
+            if self.hasMicrophone { self.microphoneSession.stopRunning() }
+        }
         try? await systemAudioStream?.stopCapture()
         systemAudioStream = nil
         synchronizer.setRate(0, time: .zero)
         audioRenderer.flush()
+    }
+
+    private func onSessionQueue(_ work: @escaping @Sendable () -> Void) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                work()
+                continuation.resume()
+            }
+        }
     }
 
     /// Opens a segment at the next video frame and returns its uptime. Fails when no frame
