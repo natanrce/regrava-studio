@@ -272,13 +272,38 @@ public struct SensitiveDataScan: Codable, Sendable {
     /// Recording time up to which results are final.
     public var finalUpToMs: Double
     public var isComplete: Bool
+    /// While scanning: the detections of the chunks scanned ahead, resolved on their own.
+    public var provisionalDetections: [SensitiveDataDetection]
+    /// While scanning: the result of the last finished scan of this project with other inputs.
+    public var previousDetections: [SensitiveDataDetection]
 
-    public init(customPhrases: [String], detectFaces: Bool, detections: [SensitiveDataDetection], finalUpToMs: Double, isComplete: Bool) {
+    public init(customPhrases: [String], detectFaces: Bool, detections: [SensitiveDataDetection], finalUpToMs: Double, isComplete: Bool,
+                provisionalDetections: [SensitiveDataDetection] = [], previousDetections: [SensitiveDataDetection] = []) {
         self.customPhrases = customPhrases
         self.detectFaces = detectFaces
         self.detections = detections.sorted { $0.startMs < $1.startMs }
         self.finalUpToMs = finalUpToMs
         self.isComplete = isComplete
+        self.provisionalDetections = provisionalDetections
+        self.previousDetections = previousDetections
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        customPhrases = try c.decode([String].self, forKey: .customPhrases)
+        detectFaces = try c.decode(Bool.self, forKey: .detectFaces)
+        detections = try c.decode([SensitiveDataDetection].self, forKey: .detections)
+        finalUpToMs = try c.decode(Double.self, forKey: .finalUpToMs)
+        isComplete = try c.decode(Bool.self, forKey: .isComplete)
+        provisionalDetections = try c.decodeIfPresent([SensitiveDataDetection].self, forKey: .provisionalDetections) ?? []
+        previousDetections = try c.decodeIfPresent([SensitiveDataDetection].self, forKey: .previousDetections) ?? []
+    }
+
+    /// What the preview covers: the finished result; while scanning, the partial detections, those
+    /// scanned ahead and the last finished result, in start order.
+    public var previewDetections: [SensitiveDataDetection] {
+        if isComplete { return detections }
+        return (detections + provisionalDetections + previousDetections).sorted { $0.startMs < $1.startMs }
     }
 
     public static func url(bundle: URL) -> URL {

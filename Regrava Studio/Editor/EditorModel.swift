@@ -658,29 +658,46 @@ final class EditorModel: ObservableObject {
         sensitiveDataTask?.cancel()
         sensitiveDataKey = key
         let bundle = bundleURL, video = videoURL, durationMs = project.recording.durationMs
-        if let stored = SensitiveDataScan.load(bundle: bundle), stored.isComplete, stored.matches(processing) {
+        let stored = SensitiveDataScan.load(bundle: bundle)
+        if let stored, stored.isComplete, stored.matches(processing) {
+            lastSensitiveDataResult = stored.detections
             scheduleRefresh()
             return
         }
+        // Until the new scan has results, the last one finished in this session stays shown.
+        let previous = lastSensitiveDataResult ?? []
         let phrases = processing.sensitiveDataCustomPhrases, faces = processing.autoMaskFaces
+        try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: [], finalUpToMs: 0, isComplete: false,
+                               previousDetections: previous).save(bundle: bundle)
+        scheduleRefresh()
         // "Detecting sensitive data", shown after 500 ms.
         tasks.finish("sensitive-data")
         tasks.register("sensitive-data", name: "Detecting sensitive data", showAfterMs: 500, progress01: 0)
         sensitiveDataTask = Task.detached(priority: .utility) { [weak self] in
             defer { Task { @MainActor [weak self] in self?.tasks.finish("sensitive-data") } }
-            let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces, bundle: bundle) { partial, finalUpTo in
-                // Partial results show as they come (`project.sensitiveDataPartial`).
-                try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: partial, finalUpToMs: finalUpTo, isComplete: false).save(bundle: bundle)
+            let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces, bundle: bundle, onPartialResult: { partial in
+                // Partial results show as they come (`project.sensitiveDataPartial`), with those
+                // scanned ahead and the last finished result.
+                try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: partial.detections, finalUpToMs: partial.finalUpToMs,
+                                       isComplete: false, provisionalDetections: partial.provisionalDetections,
+                                       previousDetections: previous).save(bundle: bundle)
+                let finalUpTo = partial.finalUpToMs
                 Task { @MainActor [weak self] in
                     self?.tasks.update("sensitive-data", progress01: durationMs > 0 ? finalUpTo / durationMs : nil)
                     self?.scheduleRefresh()
                 }
-            }
+            })
             guard let detections, !Task.isCancelled else { return }
             try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: detections, finalUpToMs: durationMs, isComplete: true).save(bundle: bundle)
-            await MainActor.run { [weak self] in self?.scheduleRefresh() }
+            await MainActor.run { [weak self] in
+                self?.lastSensitiveDataResult = detections
+                self?.scheduleRefresh()
+            }
         }
     }
+
+    /// The last finished scan's detections in this session, shown while a new scan runs.
+    private var lastSensitiveDataResult: [SensitiveDataDetection]?
 
     private var hoverDetectionTask: Task<Void, Never>?
 
