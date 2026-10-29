@@ -203,8 +203,17 @@ final class StreamingJSONWriter: @unchecked Sendable {
     }
 
     static func read<T: Decodable>(_ type: T.Type, from url: URL) -> [T] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
+        // Whole: the array closed after its last `,` (and `]` added when a crash left it open).
+        var body = data[...]
+        func trimEnd() { while let last = body.last, last == 0x20 || last == 0x0A || last == 0x0D || last == 0x09 { body.removeLast() } }
+        trimEnd()
+        if body.last == UInt8(ascii: "]") { body.removeLast(); trimEnd() }
+        if body.last == UInt8(ascii: ",") { body.removeLast() }
+        if let all = try? decoder.decode([T].self, from: body + Data("]".utf8)) { return all }
+        // A torn line: one object per line, skipping what does not decode.
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
         return text.split(whereSeparator: \.isNewline).compactMap { raw in
             var line = raw.trimmingCharacters(in: .whitespaces)
             if line == "[" || line == "]" || line.isEmpty { return nil }

@@ -137,4 +137,16 @@ struct RecordingFinalizerTests {
         #expect(audio.count == 1)
         #expect(abs((range?.duration.seconds ?? 0) - 5) < 0.1)
     }
+
+    /// Closed, open, and torn event logs all read back every whole object.
+    @Test func readsEventLogsWhateverTheirEnd() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("log-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let line = { (t: Int) in "{\"kind\":\"down\",\"uptime\":\(t),\"character\":\"a\",\"modifiers\":[],\"isARepeat\":false}," }
+        for text in ["[\n\(line(1))\n\(line(2))\n]\n", "[\n\(line(1))\n\(line(2))\n", "[\n\(line(1))\n\(line(2))\n{\"kind\":\"do", "[\n]\n", "[\n"] {
+            try Data(text.utf8).write(to: url)
+            let keys = StreamingJSONWriter.read(JournalKey.self, from: url)
+            #expect(keys.map(\.uptime) == (text.count > 6 ? [1, 2] : []), "\(text)")
+        }
+    }
 }
