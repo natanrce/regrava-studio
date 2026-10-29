@@ -148,9 +148,13 @@ struct JournalCursor: Codable {
 /// accepts, as it skips a torn last line.
 final class StreamingJSONWriter: @unchecked Sendable {
     static let commitInterval = 1.0
+    private static let separator = Data(",\n".utf8)
 
     private let handle: FileHandle
+    /// Disk writes, in order; `pending` is only swapped under `lock`, so appends never wait on them.
+    private let queue = DispatchQueue(label: "regrava.capture.journal", qos: .utility)
     private let lock = NSLock()
+    private let encoder = JSONEncoder()
     private var pending = Data()
     private var timer: DispatchSourceTimer?
     private var isClosed = false
@@ -159,40 +163,43 @@ final class StreamingJSONWriter: @unchecked Sendable {
         FileManager.default.createFile(atPath: url.path, contents: Data("[\n".utf8))
         handle = try FileHandle(forWritingTo: url)
         try handle.seekToEnd()
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.commitInterval, repeating: Self.commitInterval)
-        timer.setEventHandler { [weak self] in self?.commit() }
+        timer.setEventHandler { [weak self] in self?.write() }
         timer.resume()
         self.timer = timer
     }
 
     func append<T: Encodable>(_ value: T) {
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        lock.lock()
-        pending.append(data)
-        pending.append(Data(",\n".utf8))
-        lock.unlock()
-    }
-
-    func commit() {
         lock.lock()
         defer { lock.unlock() }
-        guard !isClosed, !pending.isEmpty else { return }
-        try? handle.write(contentsOf: pending)
-        pending.removeAll(keepingCapacity: true)
+        guard let data = try? encoder.encode(value) else { return }
+        pending.append(data)
+        pending.append(Self.separator)
+    }
+
+    /// On `queue`.
+    private func write() {
+        guard !isClosed else { return }
+        lock.lock()
+        let data = pending
+        pending = Data()
+        lock.unlock()
+        guard !data.isEmpty else { return }
+        try? handle.write(contentsOf: data)
     }
 
     func close() {
         timer?.cancel()
         timer = nil
-        commit()
-        lock.lock()
-        if !isClosed {
-            try? handle.write(contentsOf: Data("]\n".utf8))
-            try? handle.close()
-            isClosed = true
+        queue.sync {
+            write()
+            if !isClosed {
+                try? handle.write(contentsOf: Data("]\n".utf8))
+                try? handle.close()
+                isClosed = true
+            }
         }
-        lock.unlock()
     }
 
     static func read<T: Decodable>(_ type: T.Type, from url: URL) -> [T] {
