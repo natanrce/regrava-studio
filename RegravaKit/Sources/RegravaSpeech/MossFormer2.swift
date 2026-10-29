@@ -48,33 +48,37 @@ final class MossFormer2 {
         if length == 0 { return [] }
         let w = Self.window, s = Self.stride
         let count = length <= w ? 1 : (length - w + s - 1) / s + 1
-        var windows: [[Float]] = []
-        for k in 0 ..< count {
+        func window(_ k: Int) -> [Float] {
             let start = k * s
-            var segment = Array(samples[start ..< min(start + w, length)])
-            if segment.count < w { segment = Self.reflectFill(segment, to: w) }
-            windows.append(segment)
+            let segment = Array(samples[start ..< min(start + w, length)])
+            return segment.count < w ? Self.reflectFill(segment, to: w) : segment
         }
-        var outputs: [[Float]] = []
+        // Batches are built as they run and each output is placed at once, so only one batch
+        // of windows is held. `place(_:at:)`: out[i] = (1 − i/n)·old[i] + (i/n)·new[i] over the
+        // overlap, then append.
+        let overlap = w - s
+        var out: [Float] = []
+        out.reserveCapacity((count - 1) * s + w)
         var k = 0
-        while k < windows.count {
-            let group = Array(windows[k ..< min(k + Self.batch, windows.count)])
-            outputs += try enhance(windows: group)
+        while k < count {
+            let group = (k ..< min(k + Self.batch, count)).map(window)
+            for (j, new) in try enhance(windows: group).enumerated() {
+                let index = k + j
+                if index == 0 {
+                    out += new
+                    continue
+                }
+                let start = index * s
+                for i in 0 ..< overlap {
+                    let a = Float(i) / Float(overlap)
+                    out[start + i] = (1 - a) * out[start + i] + a * new[i]
+                }
+                out += new[overlap...]
+            }
             k += Self.batch
         }
-        // `place(_:at:)`: out[i] = (1 − i/n)·old[i] + (i/n)·new[i] over the overlap, then append.
-        var out = outputs[0]
-        let overlap = w - s
-        for k in 1 ..< max(outputs.count, 1) {
-            let new = outputs[k]
-            let start = k * s
-            for i in 0 ..< overlap {
-                let a = Float(i) / Float(overlap)
-                out[start + i] = (1 - a) * out[start + i] + a * new[i]
-            }
-            out += new[overlap...]
-        }
-        return Array(out.prefix(length))
+        out.removeLast(max(out.count - length, 0))
+        return out
     }
 
     /// Appends the reversed tail (`Sequence.reversed()`, `flush`). A take shorter than half a window
