@@ -490,19 +490,23 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
     let queue = DispatchQueue(label: "regrava.capture.channels", qos: .userInitiated)
     private var writers: [SCStreamOutputType: SegmentedWriter] = [:]
     private var waiter: CheckedContinuation<TimeInterval, Error>?
+    /// Counts attaches, so a timeout only fails the attach that scheduled it.
+    private var generation = 0
 
     /// Starts routing to `writers`; returns the host time of the first picture.
     func attach(_ writers: [SCStreamOutputType: SegmentedWriter], timeout: TimeInterval) async throws -> TimeInterval {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
+                self.generation += 1
+                let generation = self.generation
                 self.writers = writers
                 self.waiter = continuation
-            }
-            queue.asyncAfter(deadline: .now() + timeout) {
-                guard let waiter = self.waiter else { return }
-                self.waiter = nil
-                self.writers = [:]
-                waiter.resume(throwing: CaptureError.failed("The recording did not start. Check the Screen Recording permission."))
+                self.queue.asyncAfter(deadline: .now() + timeout) {
+                    guard generation == self.generation, let waiter = self.waiter else { return }
+                    self.waiter = nil
+                    self.writers = [:]
+                    waiter.resume(throwing: CaptureError.failed("The recording did not start. Check the Screen Recording permission."))
+                }
             }
         }
     }
