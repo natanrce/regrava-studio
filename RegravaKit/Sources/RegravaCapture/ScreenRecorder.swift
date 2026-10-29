@@ -223,13 +223,20 @@ public final class ScreenRecorder: NSObject {
         guard phase == .recording else { throw CaptureError.notRecording }
         phase = .pausing
         try await endSegment()
+        mouse.isPaused = true
         phase = .paused
     }
 
     public func resume() async throws {
         guard phase == .paused else { throw CaptureError.notRecording }
         phase = .resuming
-        try await beginSegment()
+        mouse.isPaused = false
+        do {
+            try await beginSegment()
+        } catch {
+            mouse.isPaused = true
+            throw error
+        }
         phase = .recording
     }
 

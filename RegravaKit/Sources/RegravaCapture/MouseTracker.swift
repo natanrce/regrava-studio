@@ -36,11 +36,14 @@ final class MouseTracker {
     private let cursors = CursorIdentifier()
     /// Where samples are written as they come (the recording folder's event logs).
     var journal: RecordingJournal?
+    /// While paused nothing is written: the joined timeline has no room for it.
+    var isPaused = false
     private var savedCursorCount = 0
 
     func start(pollHz: Double = 120) {
         stop()
         lastSampledCursorID = .none
+        isPaused = false
         lastLocation = nil
         lastCursorID = nil
         pollCount = 0
@@ -124,12 +127,12 @@ final class MouseTracker {
             modifiers: Self.modifiers(event.modifierFlags),
             isARepeat: event.isARepeat
         )
-        journal?.record(sample)
+        if !isPaused { journal?.record(sample) }
     }
 
     private func add(_ sample: Sample) {
         lastSampledCursorID = .some(sample.cursorID)
-        journal?.record(sample)
+        if !isPaused { journal?.record(sample) }
         let custom = cursors.customImages
         if custom.count != savedCursorCount {
             savedCursorCount = custom.count
