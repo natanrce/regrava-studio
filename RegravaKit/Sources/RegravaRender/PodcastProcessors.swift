@@ -269,8 +269,20 @@ enum RestoreSibilance {
         let half = Int((floorWindowMs / 1000 * fps).rounded()) / 2
         let count = takeLevels.detector.count
         var isS = [Bool](repeating: false, count: count)
+        // The detector levels of frames i − half … i + half, kept sorted as the window slides.
+        var window: [Double] = []
+        window.reserveCapacity(2 * half + 1)
+        func upperBound(_ v: Double) -> Int {
+            var lo = 0, hi = window.count
+            while lo < hi { let mid = (lo + hi) / 2; if window[mid] > v { hi = mid } else { lo = mid + 1 } }
+            return lo
+        }
+        if count > 0 { for j in 0...min(count - 1, half) { window.insert(takeLevels.detector[j], at: upperBound(takeLevels.detector[j])) } }
         for i in 0..<count {
-            let window = takeLevels.detector[max(0, i - half)...min(count - 1, i + half)].sorted()
+            if i > 0 {
+                if i + half <= count - 1 { window.insert(takeLevels.detector[i + half], at: upperBound(takeLevels.detector[i + half])) }
+                if i - 1 - half >= 0 { window.remove(at: upperBound(takeLevels.detector[i - 1 - half]) - 1) }
+            }
             let floor = window[min(window.count - 1, Int(floorShare * Double(window.count)))]
             isS[i] = takeLevels.detector[i] > takeLevels.reference[i] + overReferenceDb && takeLevels.detector[i] > floor + overFloorDb
         }
@@ -295,16 +307,21 @@ enum RestoreSibilance {
         let fade = Int((fadeMs / 1000 * fps).rounded()), near = Int((nearSpeechMs / 1000 * fps).rounded())
         let pause = speechLevelDb - pauseBelowSpeechDb
         let frames = min(left.count, right.count, count)
-        func needsFill(_ m: Int) -> Bool {
-            guard m >= 0, m < frames, kept[m] else { return false }
-            let speechNear = (max(0, m - near)...min(frames - 1, m + near)).contains { outLevels.reference[$0] > pause }
-            return speechNear && outLevels.fill[m] < takeLevels.fill[m] + gain - underRecordingDb
+        // Prefix counts: output frames with speech, then frames needing a fill (a kept S with
+        // speech within `near` frames and the output's fill band too quiet).
+        var speechBefore = [Int](repeating: 0, count: frames + 1)
+        for m in 0..<frames { speechBefore[m + 1] = speechBefore[m] + (outLevels.reference[m] > pause ? 1 : 0) }
+        var fillsBefore = [Int](repeating: 0, count: frames + 1)
+        for m in 0..<frames {
+            let speechNear = speechBefore[min(frames - 1, m + near) + 1] - speechBefore[max(0, m - near)] > 0
+            let needsFill = kept[m] && speechNear && outLevels.fill[m] < takeLevels.fill[m] + gain - underRecordingDb
+            fillsBefore[m + 1] = fillsBefore[m] + (needsFill ? 1 : 0)
         }
         let f = stft.bins(in: fillHz)
         let n = takeLevels.slices.first?.count ?? 0
         var seed: UInt32 = 0x9E37_79B9
         for frameIndex in 0..<frames {
-            let hits = (frameIndex - fade...frameIndex + fade).filter(needsFill).count
+            let hits = fillsBefore[min(frames - 1, frameIndex + fade) + 1] - fillsBefore[max(0, frameIndex - fade)]
             guard hits > 0 else { continue }
             let wet = Float(min(1, Double(hits) / Double(fade + 1)))
             // The recorded S nearest this frame.
