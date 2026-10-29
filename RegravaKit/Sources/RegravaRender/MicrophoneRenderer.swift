@@ -483,6 +483,7 @@ enum AppleUnits {
         let player = AVAudioPlayerNode()
         engine.attach(player)
         var previous: AVAudioNode = player
+        var chainLatency: TimeInterval = 0
         for case let .audioUnit(unit, params) in units {
             let description = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: fourCC(unit.rawValue), componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
             let effect = AVAudioUnitEffect(audioComponentDescription: description)
@@ -492,6 +493,7 @@ enum AppleUnits {
             }
             engine.connect(previous, to: effect, format: format)
             previous = effect
+            chainLatency += effect.auAudioUnit.latency
         }
         engine.connect(previous, to: engine.mainMixerNode, format: format)
         try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
@@ -504,9 +506,9 @@ enum AppleUnits {
         player.scheduleBuffer(input, completionHandler: nil)
         player.play()
 
-        // Render the take plus the units' latency, then drop the latency from the front.
-        let latency = Int(((previous as? AVAudioUnit)?.auAudioUnit.latency ?? 0) * MicrophoneRenderer.sampleRate)
-            + units.indices.reduce(0) { _, _ in 0 }
+        // Render the take plus the units' latency, then drop the latency from the front. The
+        // units run in series, so their latencies add up.
+        let latency = Int(chainLatency * MicrophoneRenderer.sampleRate)
         var left: [Float] = [], right: [Float] = []
         left.reserveCapacity(audio.count + latency)
         right.reserveCapacity(audio.count + latency)
