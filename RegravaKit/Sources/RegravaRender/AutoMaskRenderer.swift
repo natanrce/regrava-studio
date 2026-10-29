@@ -40,9 +40,18 @@ enum AutoMaskRenderer {
         if let largest = faces.map({ max($0.width * videoSize.width, $0.height * videoSize.height) * 0.65 }).max() {
             blurred = source.applyingGaussianBlur(sigma: max(largest * 0.5 * 0.5, 1)).cropped(to: extent)
         }
+        // The blur is read only inside the face circles (radius 0.65 of the larger side, plus
+        // the 0.75 px edge and 2 px for linear sampling).
+        let faceReach = faces.reduce(CGRect.null) { union, r in
+            let p = pixels(r)
+            let radius = Double(max(p.z, p.w)) * 0.65 + 0.75 + 2
+            let cx = Double(p.x) + Double(p.z) / 2, cy = Double(p.y) + Double(p.w) / 2
+            return union.union(CGRect(x: cx - radius, y: cy - radius, width: 2 * radius, height: 2 * radius))
+        }
         return applyKernel.apply(extent: extent, roiCallback: { index, rect in
             switch index {
-            case 0, 1: return rect
+            case 0: return rect
+            case 1: return rect.intersection(faceReach)
             case 2: return boxesRect
             default: return colorsRect
             }
