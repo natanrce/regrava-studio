@@ -290,9 +290,12 @@ struct GatedFSMNBlock {
     let toU: FFConvM
     let toV: FFConvM
     let fsmnLinear: Linear
-    let fsmnProject: Linear
-    let fsmnConv: MLXArray  // [256, 39, 1]
-    let norm2: LayerNorm
+    /// The f32 tail's weights, cast once: `[256, 256]`, `[256, 39, 1]`, and norm2's.
+    let fsmnProject: MLXArray
+    let fsmnConv: MLXArray
+    let norm2Weight: MLXArray
+    let norm2Bias: MLXArray
+    let norm2Eps: Float
     let conv2: Linear
 
     init(_ w: Weights, _ prefix: String) throws {
@@ -302,9 +305,14 @@ struct GatedFSMNBlock {
         toU = try FFConvM(w, prefix + ".gated_fsmn.to_u", 256, 256, scaleNorm: false)
         toV = try FFConvM(w, prefix + ".gated_fsmn.to_v", 256, 256, scaleNorm: false)
         fsmnLinear = try Linear(w, prefix + ".gated_fsmn.fsmn.linear", 256, 256)
-        fsmnProject = try Linear(w, prefix + ".gated_fsmn.fsmn.project", 256, 256, bias: false)
-        fsmnConv = depthwiseKernel(try w(prefix + ".gated_fsmn.fsmn.conv1.weight", [39, 256]))
-        norm2 = try LayerNorm(w, prefix + ".norm2", 256, eps: 1e-5)
+        let f32 = DType.float32
+        fsmnProject = try Linear(w, prefix + ".gated_fsmn.fsmn.project", 256, 256, bias: false).weight.asType(f32)
+        fsmnConv = depthwiseKernel(try w(prefix + ".gated_fsmn.fsmn.conv1.weight", [39, 256])).asType(f32)
+        let norm2 = try LayerNorm(w, prefix + ".norm2", 256, eps: 1e-5)
+        norm2Weight = norm2.weight.asType(f32)
+        norm2Bias = norm2.bias.asType(f32)
+        norm2Eps = norm2.eps
+        eval(fsmnProject, fsmnConv, norm2Weight, norm2Bias)
         conv2 = try Linear(w, prefix + ".conv2", 256, 512)
     }
 
@@ -316,11 +324,11 @@ struct GatedFSMNBlock {
         // Precision: the FSMN memory and the gate `xv · xu` exceed float16's range (≈1e7 on speech),
         // so this tail runs in f32.
         let f32 = DType.float32
-        var f = matmul(relu(fsmnLinear(xu)).asType(f32), fsmnProject.weight.asType(f32))
-        f = f + conv1d(f, fsmnConv.asType(f32), padding: 19, groups: 256)
+        var f = matmul(relu(fsmnLinear(xu)).asType(f32), fsmnProject)
+        f = f + conv1d(f, fsmnConv, padding: 19, groups: 256)
         let u = xu.asType(f32) + f
         let g = xv.asType(f32) * u + n1.asType(f32)
-        return x + conv2(layerNorm(g, weight: norm2.weight.asType(f32), bias: norm2.bias.asType(f32), eps: norm2.eps).asType(x.dtype))
+        return x + conv2(layerNorm(g, weight: norm2Weight, bias: norm2Bias, eps: norm2Eps).asType(x.dtype))
     }
 }
 
