@@ -280,10 +280,6 @@ public struct PlaybackMedia: @unchecked Sendable {
 /// The recording rearranged into playback time: each clip's source range, in order, scaled
 /// to its speed (gaps between clips are left out). Composition time is playback time.
 public enum PlaybackComposition {
-    public static func make(asset: AVAsset, slices: [Slice]) async throws -> AVAsset {
-        try await composition(asset: asset, slices: slices, camera: nil, backgroundAudio: nil, clicks: [], playbackDurationMs: 0)?.asset ?? asset
-    }
-
     /// The webcam movie of a project: saved beside the screen recording.
     static func cameraAsset(project: Project, recording: AVAsset) -> AVAsset? {
         guard let name = project.recording.cameraFileName, let screen = (recording as? AVURLAsset)?.url else { return nil }

@@ -28,8 +28,7 @@ public final class VideoScrubber: @unchecked Sendable {
 
     private var reader: AVAssetReader?
     private var output: AVAssetReaderTrackOutput?
-    private var stream: Int = 0
-    /// Index in `frames` of the stream's last frame.
+    /// Time in ms of the stream's last frame.
     private var streamLastMs: Double?
     private var streamEnded = false
     private var track: AVAssetTrack?
@@ -179,7 +178,6 @@ public final class VideoScrubber: @unchecked Sendable {
         self.reader = reader
         self.output = output
         lock.lock()
-        stream += 1
         streamLastMs = nil
         streamEnded = false
         lock.unlock()

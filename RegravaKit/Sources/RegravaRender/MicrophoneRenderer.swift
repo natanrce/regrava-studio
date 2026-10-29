@@ -289,12 +289,6 @@ struct Measure {
 }
 
 enum ChannelFix {
-    static func rmsDb(_ x: [Float]) -> Double {
-        var ms: Float = 0
-        vDSP_measqv(x, 1, &ms, vDSP_Length(x.count))
-        return 10 * log10(Double(ms) + 1e-12)
-    }
-
     /// `Normalize`: gain = 10^(peakDb/20) ÷ the take's sample peak; a channel whose whole-take RMS is
     /// `silentChannelBelowDb` under the other becomes a copy of it. Returns the gain.
     static func normalize(_ audio: MicrophoneRenderer.Stereo, measure: Measure, peakDb: Double?, silentChannelBelowDb: Double) -> (MicrophoneRenderer.Stereo, gain: Float) {
