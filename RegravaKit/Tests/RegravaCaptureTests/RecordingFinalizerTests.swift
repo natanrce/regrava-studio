@@ -79,4 +79,62 @@ struct RecordingFinalizerTests {
         #expect(result.mouseEvents.count == 1)
         #expect(abs((result.mouseEvents.first?.timeMs ?? 0) - 4500) < 1)
     }
+
+    /// 48 kHz stereo PCM (a tone) on the host clock, in 1024-frame buffers.
+    static func sound(_ writer: SegmentedWriter, from start: Double, seconds: Double) async throws {
+        var asbd = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+                                               mBytesPerPacket: 8, mFramesPerPacket: 1, mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
+        var format: CMAudioFormatDescription?
+        CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format)
+        let frames = 1024
+        let total = Int(seconds * 48_000)
+        var written = 0
+        while written < total {
+            var block: CMBlockBuffer?
+            CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: frames * 8, blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: frames * 8, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
+            var values = [Float](repeating: 0, count: frames * 2)
+            for i in 0 ..< frames { let v = Float(sin(Double(written + i) * 2 * .pi * 440 / 48_000)) * 0.2; values[2 * i] = v; values[2 * i + 1] = v }
+            values.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0, dataLength: frames * 8) }
+            var sample: CMSampleBuffer?
+            CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!, formatDescription: format!, sampleCount: frames,
+                                                                 presentationTimeStamp: CMTime(value: CMTimeValue(Int(start * 48_000) + written), timescale: 48_000),
+                                                                 packetDescriptions: nil, sampleBufferOut: &sample)
+            while !writer.append(sample!) { try await Task.sleep(nanoseconds: 2_000_000) }
+            written += frames
+        }
+    }
+
+    /// The selected apps' sound runs through the pause and is cut to the two sessions.
+    @Test func cutsContinuousSoundToTheSessions() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rec-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let journal = try RecordingJournal(folder: folder)
+        journal.update { $0.videoSize = Size2(width: 320, height: 200); $0.fps = 30 }
+        let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 200]
+        let first = try SegmentedWriter(directory: folder, name: "channel-1-display-0", mediaType: .video, outputSettings: settings)
+        try await Self.frames(first, from: 100, seconds: 3)
+        await first.finish()
+        let second = try SegmentedWriter(directory: folder, name: "channel-1-display-1", mediaType: .video, outputSettings: settings)
+        try await Self.frames(second, from: 110, seconds: 3)
+        await second.finish()
+        let apps = try SegmentedWriter(directory: folder, name: "channel-4-system-audio-apps-0", mediaType: .audio, outputSettings: SegmentedWriter.audioSettings)
+        try await Self.sound(apps, from: 99, seconds: 13)
+        await apps.finish()
+        journal.update {
+            $0.sessions = [
+                .init(index: 0, startUptime: 100, endUptime: 103, channels: [.init(source: "display", playlist: "channel-1-display-0", startUptime: 100)]),
+                .init(index: 1, startUptime: 110, endUptime: 113, channels: [.init(source: "display", playlist: "channel-1-display-1", startUptime: 110)]),
+            ]
+            $0.continuous = [.init(source: AudioSource.systemAudio.rawValue, playlist: "channel-4-system-audio-apps-0", startUptime: 99)]
+        }
+        journal.close()
+        let result = try await RecordingFinalizer.finalize(folder: folder)
+        let asset = AVURLAsset(url: result.videoURL)
+        let audio = try await asset.loadTracks(withMediaType: .audio)
+        let range = try await audio.first?.load(.timeRange)
+        print("CONTINUOUS sources \(result.audioSources) tracks \(audio.count) range \(range.map { ($0.start.seconds, $0.duration.seconds) } as Any) movie \(try await asset.load(.duration).seconds)")
+        #expect(result.audioSources == [.systemAudio])
+        #expect(audio.count == 1)
+        #expect(abs((range?.duration.seconds ?? 0) - 5) < 0.1)
+    }
 }

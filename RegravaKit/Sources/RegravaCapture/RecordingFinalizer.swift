@@ -94,13 +94,49 @@ public enum RecordingFinalizer {
             offsets.append((flat.start, cursor, flat.duration))
             cursor += flat.duration
         }
+        let ranges = { (start: Double) in offsets.map { (sourceStart: $0.start - start, duration: $0.duration, at: $0.offset) } }
+
+        // Streams that ran through pauses, cut to the sessions: the selected apps' sound joins
+        // the movie as a track after the sessions' own; the webcam is a movie of its own.
+        var cameraStream: (flat: URL, stream: RecordingMetadata.Continuous, start: Double)?
+        for stream in metadata.continuous {
+            guard let start = stream.startUptime else { continue }
+            let flat = work.appendingPathComponent("\(stream.playlist).mp4")
+            guard (try? RecordingFolder.flatten(folder.appendingPathComponent("\(stream.playlist).m3u8"), to: flat)) != nil else { continue }
+            if stream.source == "webcam" {
+                cameraStream = (flat, stream, start)
+            } else if let source = AudioSource(rawValue: stream.source) {
+                let asset = AVURLAsset(url: flat)
+                guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+                      let total = try? await asset.load(.duration).seconds,
+                      let target = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                var inserted = false
+                do {
+                    for range in ranges(start) {
+                        let from = max(range.sourceStart, 0)
+                        let end = min(range.sourceStart + range.duration, total)
+                        guard end > from else { continue }
+                        try target.insertTimeRange(CMTimeRange(start: time(from), end: time(end)), of: track, at: time(range.at + (from - range.sourceStart)))
+                        inserted = true
+                    }
+                } catch {
+                    inserted = false
+                }
+                if inserted {
+                    audioTracks.append((source, target))
+                } else {
+                    composition.removeTrack(target)
+                }
+            }
+        }
+
         let output = folder.appendingPathComponent(videoFileName)
         try? FileManager.default.removeItem(at: output)
         guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
             throw CaptureError.failed("Could not join the recording segments.")
         }
         try await session.export(to: output, as: .mov)
-        var audioSources = audioTracks.map(\.0)
+        let audioSources = audioTracks.map(\.0)
 
         func timelineMs(_ uptime: Double) -> Double? {
             for entry in offsets {
@@ -109,27 +145,14 @@ public enum RecordingFinalizer {
             }
             return nil
         }
-        let ranges = { (start: Double) in offsets.map { (sourceStart: $0.start - start, duration: $0.duration, at: $0.offset) } }
 
-        // Streams that ran through pauses, cut to the sessions.
         var cameraURL: URL?
         var cameraSize: Size2?
-        for stream in metadata.continuous {
-            guard let start = stream.startUptime else { continue }
-            let flat = work.appendingPathComponent("\(stream.playlist).mp4")
-            guard (try? RecordingFolder.flatten(folder.appendingPathComponent("\(stream.playlist).m3u8"), to: flat)) != nil else { continue }
-            if stream.source == "webcam" {
-                let target = folder.appendingPathComponent(cameraFileName)
-                if (try? await ScreenRecorder.cut(flat, ranges: ranges(start), to: target)) != nil {
-                    cameraURL = target
-                    if let width = stream.width, let height = stream.height { cameraSize = Size2(width: width, height: height) }
-                }
-            } else if let source = AudioSource(rawValue: stream.source) {
-                let cut = work.appendingPathComponent("\(stream.playlist)-cut.mov")
-                if (try? await ScreenRecorder.cut(flat, ranges: ranges(start), to: cut)) != nil,
-                   (try? await ScreenRecorder.addAudioTrack(from: cut, to: output)) != nil {
-                    audioSources.append(source)
-                }
+        if let (flat, stream, start) = cameraStream {
+            let target = folder.appendingPathComponent(cameraFileName)
+            if (try? await cut(flat, ranges: ranges(start), to: target)) != nil {
+                cameraURL = target
+                if let width = stream.width, let height = stream.height { cameraSize = Size2(width: width, height: height) }
             }
         }
 
@@ -175,5 +198,27 @@ public enum RecordingFinalizer {
             result.externalDevice = device
         }
         return result
+    }
+
+    /// Copies ranges of a movie (seconds) to new positions on a new timeline.
+    static func cut(_ url: URL, ranges: [(sourceStart: Double, duration: Double, at: Double)], to outputURL: URL) async throws {
+        try? FileManager.default.removeItem(at: outputURL)
+        let asset = AVURLAsset(url: url)
+        let total = try await asset.load(.duration).seconds
+        let composition = AVMutableComposition()
+        for range in ranges {
+            let start = max(range.sourceStart, 0)
+            let end = min(range.sourceStart + range.duration, total)
+            guard end > start else { continue }
+            try await composition.insertTimeRange(
+                CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600)),
+                of: asset,
+                at: CMTime(seconds: range.at + (start - range.sourceStart), preferredTimescale: 600)
+            )
+        }
+        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            throw CaptureError.failed("Could not save the camera recording.")
+        }
+        try await session.export(to: outputURL, as: .mov)
     }
 }

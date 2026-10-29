@@ -434,54 +434,6 @@ public final class ScreenRecorder: NSObject {
         }
         return (filter, configuration)
     }
-
-    // MARK: Joining
-
-    /// Copies ranges of a movie (seconds) to new positions on a new timeline.
-    static func cut(_ url: URL, ranges: [(sourceStart: Double, duration: Double, at: Double)], to outputURL: URL) async throws {
-        try? FileManager.default.removeItem(at: outputURL)
-        let asset = AVURLAsset(url: url)
-        let total = try await asset.load(.duration).seconds
-        let composition = AVMutableComposition()
-        for range in ranges {
-            let start = max(range.sourceStart, 0)
-            let end = min(range.sourceStart + range.duration, total)
-            guard end > start else { continue }
-            try await composition.insertTimeRange(
-                CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600)),
-                of: asset,
-                at: CMTime(seconds: range.at + (start - range.sourceStart), preferredTimescale: 600)
-            )
-        }
-        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
-            throw CaptureError.failed("Could not save the camera recording.")
-        }
-        try await session.export(to: outputURL, as: .mov)
-    }
-
-    /// Rewrites `movie` with the first audio track of `audio` added after its own tracks.
-    static func addAudioTrack(from audio: URL, to movie: URL) async throws {
-        let base = AVURLAsset(url: movie)
-        let extra = AVURLAsset(url: audio)
-        let duration = try await base.load(.duration)
-        let composition = AVMutableComposition()
-        for track in try await base.load(.tracks) {
-            guard let target = composition.addMutableTrack(withMediaType: track.mediaType, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-            try target.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: .zero)
-        }
-        if let track = try await extra.loadTracks(withMediaType: .audio).first,
-           let target = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            let length = min(try await extra.load(.duration), duration)
-            try target.insertTimeRange(CMTimeRange(start: .zero, duration: length), of: track, at: .zero)
-        }
-        let joined = movie.deletingLastPathComponent().appendingPathComponent("joined-\(UUID().uuidString).mov")
-        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
-            throw CaptureError.failed("Could not join the recording segments.")
-        }
-        try await session.export(to: joined, as: .mov)
-        _ = try FileManager.default.replaceItemAt(movie, withItemAt: joined)
-    }
-
 }
 
 extension ScreenRecorder: SCStreamDelegate {
