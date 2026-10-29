@@ -27,13 +27,15 @@ public enum WaveformReader {
         var peaks: [Float] = []
         var current: Float = 0
         var filled = 0
+        // Reused across sample buffers.
+        var samples: [Float] = []
         while let buffer = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
             guard let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
             let count = CMBlockBufferGetDataLength(block) / MemoryLayout<Float>.size
-            var samples = [Float](repeating: 0, count: count)
+            if samples.count < count { samples = [Float](repeating: 0, count: count) }
             guard samples.withUnsafeMutableBytes({ CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 4, destination: $0.baseAddress!) }) == noErr else { continue }
-            for sample in samples {
+            for sample in samples[..<count] {
                 current = max(current, abs(sample))
                 filled += 1
                 if filled == window {

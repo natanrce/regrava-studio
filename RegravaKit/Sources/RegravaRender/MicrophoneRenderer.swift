@@ -140,16 +140,20 @@ public enum MicrophoneRenderer {
         reader.add(output)
         guard reader.startReading() else { throw RenderError.failed(reader.error?.localizedDescription ?? "Could not read the microphone.") }
         var left: [Float] = [], right: [Float] = []
+        // One interleaved buffer reused across sample buffers, split with strided copies.
+        var data: [Float] = []
         while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
-            let length = CMBlockBufferGetDataLength(block)
-            var data = [Float](repeating: 0, count: length / 4)
-            data.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
-            let frames = data.count / 2
-            left.reserveCapacity(left.count + frames)
-            right.reserveCapacity(right.count + frames)
-            for i in 0..<frames {
-                left.append(data[2 * i])
-                right.append(data[2 * i + 1])
+            let count = CMBlockBufferGetDataLength(block) / 4
+            if data.count < count { data = [Float](repeating: 0, count: count) }
+            data.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 4, destination: $0.baseAddress!) }
+            let frames = count / 2
+            guard frames > 0 else { continue }
+            let start = left.count
+            left.append(contentsOf: repeatElement(0, count: frames))
+            right.append(contentsOf: repeatElement(0, count: frames))
+            data.withUnsafeBufferPointer { interleaved in
+                left.withUnsafeMutableBufferPointer { cblas_scopy(Int32(frames), interleaved.baseAddress!, 2, $0.baseAddress! + start, 1) }
+                right.withUnsafeMutableBufferPointer { cblas_scopy(Int32(frames), interleaved.baseAddress! + 1, 2, $0.baseAddress! + start, 1) }
             }
         }
         if reader.status == .failed { throw RenderError.failed(reader.error?.localizedDescription ?? "Could not read the microphone.") }
