@@ -33,12 +33,16 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     private let lock = NSLock()
     /// Host time (seconds) of the first sample written.
     private(set) var startTime: Double?
+    /// Keeps the last sample so `finish(endTime:)` can hold the picture until the end.
+    private let holdsLastSample: Bool
+    private var lastSample: CMSampleBuffer?
 
     var playlistURL: URL { directory.appendingPathComponent("\(name).m3u8") }
 
-    init(directory: URL, name: String, mediaType: AVMediaType, outputSettings: [String: Any]?, sourceFormatHint: CMFormatDescription? = nil, transform: CGAffineTransform = .identity) throws {
+    init(directory: URL, name: String, mediaType: AVMediaType, outputSettings: [String: Any]?, sourceFormatHint: CMFormatDescription? = nil, transform: CGAffineTransform = .identity, holdsLastSample: Bool = false) throws {
         self.directory = directory
         self.name = name
+        self.holdsLastSample = holdsLastSample
         writer = AVAssetWriter(contentType: .mpeg4Movie)
         writer.outputFileTypeProfile = .mpeg4AppleHLS
         writer.preferredOutputSegmentInterval = CMTime(seconds: Self.segmentSeconds, preferredTimescale: 600)
@@ -57,6 +61,7 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     func append(_ sample: CMSampleBuffer) -> Bool {
         guard begin(at: CMSampleBufferGetPresentationTimeStamp(sample)), input.isReadyForMoreMediaData else { return false }
         lastTime = CMSampleBufferGetPresentationTimeStamp(sample)
+        if holdsLastSample { lastSample = sample }
         return input.append(sample)
     }
 
@@ -85,9 +90,20 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
         return writer.status == .writing
     }
 
-    /// Flushes the last segment and closes the playlist (`#EXT-X-ENDLIST`).
-    func finish() async {
+    /// Flushes the last segment and closes the playlist (`#EXT-X-ENDLIST`). With `endTime` (and
+    /// `holdsLastSample`) the last picture is repeated at `endTime`, so a picture that stood still
+    /// at the end still lasts until the session ended.
+    func finish(endTime: CMTime? = nil) async {
         guard startTime != nil, writer.status == .writing else { return }
+        if let endTime, let last = lastSample, let lastTime, endTime > lastTime {
+            var timing = CMSampleTimingInfo(duration: CMSampleBufferGetDuration(last), presentationTimeStamp: endTime, decodeTimeStamp: .invalid)
+            var copy: CMSampleBuffer?
+            if CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: last, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr, let copy {
+                for _ in 0 ..< 100 where !input.isReadyForMoreMediaData { try? await Task.sleep(nanoseconds: 2_000_000) }
+                if input.isReadyForMoreMediaData { input.append(copy) }
+            }
+        }
+        lastSample = nil
         input.markAsFinished()
         await writer.finishWriting()
         writePlaylist(ended: true)

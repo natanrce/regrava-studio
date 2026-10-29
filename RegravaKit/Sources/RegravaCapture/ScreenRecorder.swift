@@ -321,7 +321,7 @@ public final class ScreenRecorder: NSObject {
                 AVVideoExpectedSourceFrameRateKey: fps,
                 AVVideoAllowFrameReorderingKey: false,
             ],
-        ])
+        ], holdsLastSample: true)
         writers[.screen] = display
         entries.append(.init(source: "display", playlist: display.name))
         if options.capturesSystemAudio && options.systemAudioProcessIDs == nil {
@@ -359,7 +359,8 @@ public final class ScreenRecorder: NSObject {
         let writers = await channels.detach()
         guard !writers.isEmpty else { return }
         let endUptime = ProcessInfo.processInfo.systemUptime
-        for writer in writers { await writer.finish() }
+        let endTime = CMTime(seconds: endUptime, preferredTimescale: 1_000_000_000)
+        for writer in writers { await writer.finish(endTime: endTime) }
         guard !segments.isEmpty else { return }
         segments[segments.count - 1].endUptime = endUptime
         let index = segments.count - 1

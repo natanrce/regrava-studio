@@ -49,4 +49,24 @@ struct SegmentedWriterTests {
         #expect(ended?.ended == true)
         #expect(abs(full - 7) < 0.2)
     }
+
+    /// A session whose picture stood still at the end runs until the session's end time.
+    @Test func finishingAtAnEndTimeHoldsTheLastFrame() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("seg-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let writer = try SegmentedWriter(directory: dir, name: "channel-1-display-0", mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 200,
+        ], holdsLastSample: true)
+        try await RecordingFinalizerTests.frames(writer, from: 100, seconds: 3)
+        await writer.finish(endTime: CMTime(seconds: 105.5, preferredTimescale: 1_000_000_000))
+        let out = dir.appendingPathComponent("flat.mp4")
+        try RecordingFolder.flatten(writer.playlistURL, to: out)
+        let asset = AVURLAsset(url: out)
+        let duration = try await asset.load(.duration).seconds
+        let range = try await asset.loadTracks(withMediaType: .video)[0].load(.timeRange)
+        print("END-TIME duration \(duration) track \(range.duration.seconds)")
+        #expect(duration >= 5.5 && duration < 5.6)
+        #expect(range.duration.seconds >= 5.5 && range.duration.seconds < 5.6)
+    }
 }

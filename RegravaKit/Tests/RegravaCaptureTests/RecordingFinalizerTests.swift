@@ -54,4 +54,29 @@ struct RecordingFinalizerTests {
         let asset = AVURLAsset(url: result.videoURL)
         #expect(try await asset.loadTracks(withMediaType: .video).count == 1)
     }
+
+    /// The picture stood still for the last two seconds: the session still lasts until it
+    /// ended, and so do its events.
+    @Test func sessionLastsUntilItsEndTime() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rec-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let journal = try RecordingJournal(folder: folder)
+        journal.update { $0.videoSize = Size2(width: 320, height: 200); $0.fps = 30 }
+        let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 200]
+        let display = try SegmentedWriter(directory: folder, name: "channel-1-display-0", mediaType: .video, outputSettings: settings, holdsLastSample: true)
+        try await Self.frames(display, from: 100, seconds: 3)
+        await display.finish(endTime: CMTime(seconds: 105, preferredTimescale: 1_000_000_000))
+        journal.update {
+            $0.sessions = [.init(index: 0, startUptime: 100, endUptime: 105, channels: [.init(source: "display", playlist: "channel-1-display-0", startUptime: 100)])]
+        }
+        journal.record(MouseTracker.Sample(kind: .down, uptime: 104.5, location: CGPoint(x: 30, y: 40), button: 0, cursorID: "arrow", modifiers: []))
+        journal.close()
+        let result = try await RecordingFinalizer.finalize(folder: folder)
+        let duration = try await AVURLAsset(url: result.videoURL).load(.duration).seconds
+        print("END-TIME final \(result.durationMs) movie \(duration) events \(result.mouseEvents.map(\.timeMs))")
+        #expect(abs(result.durationMs - 5000) < 1)
+        #expect(abs(duration - 5) < 0.05)
+        #expect(result.mouseEvents.count == 1)
+        #expect(abs((result.mouseEvents.first?.timeMs ?? 0) - 4500) < 1)
+    }
 }

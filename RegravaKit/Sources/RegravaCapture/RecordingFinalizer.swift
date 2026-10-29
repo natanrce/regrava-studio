@@ -31,7 +31,10 @@ public enum RecordingFinalizer {
             var session: RecordingMetadata.Session
             var picture: AVURLAsset
             var start: Double
+            /// Length on the joined timeline.
             var duration: Double
+            /// Length of the picture's file, at most `duration`.
+            var pictureDuration: Double
             var audio: [(source: AudioSource, asset: AVURLAsset, start: Double)]
         }
         var sessions: [Flat] = []
@@ -41,7 +44,11 @@ public enum RecordingFinalizer {
             let pictureURL = work.appendingPathComponent("\(picture.playlist).mp4")
             guard (try? RecordingFolder.flatten(folder.appendingPathComponent("\(picture.playlist).m3u8"), to: pictureURL)) != nil else { continue }
             let asset = AVURLAsset(url: pictureURL)
-            guard let duration = try? await asset.load(.duration).seconds, duration > 0 else { continue }
+            guard let fileDuration = try? await asset.load(.duration).seconds, fileDuration > 0 else { continue }
+            // A display session lasts until it ended, even when the picture stood still before
+            // that and its file stopped at the last changed frame.
+            var duration = fileDuration
+            if picture.source == "display", let end = session.endUptime, end - start > 0 { duration = end - start }
             var audio: [(AudioSource, AVURLAsset, Double)] = []
             for channel in session.channels {
                 guard let source = AudioSource(rawValue: channel.source), let channelStart = channel.startUptime else { continue }
@@ -49,7 +56,7 @@ public enum RecordingFinalizer {
                 guard (try? RecordingFolder.flatten(folder.appendingPathComponent("\(channel.playlist).m3u8"), to: url)) != nil else { continue }
                 audio.append((source, AVURLAsset(url: url), channelStart))
             }
-            sessions.append(Flat(session: session, picture: asset, start: start, duration: duration, audio: audio))
+            sessions.append(Flat(session: session, picture: asset, start: start, duration: duration, pictureDuration: min(fileDuration, duration), audio: audio))
         }
         guard !sessions.isEmpty else { throw CaptureError.failed("\(folder.lastPathComponent) holds no recording.") }
 
@@ -65,7 +72,7 @@ public enum RecordingFinalizer {
         for flat in sessions {
             if let track = try await flat.picture.loadTracks(withMediaType: .video).first {
                 if videoTrack.preferredTransform == .identity { videoTrack.preferredTransform = try await track.load(.preferredTransform) }
-                try videoTrack.insertTimeRange(CMTimeRange(start: .zero, duration: time(flat.duration)), of: track, at: time(cursor))
+                try videoTrack.insertTimeRange(CMTimeRange(start: .zero, duration: time(flat.pictureDuration)), of: track, at: time(cursor))
             }
             for (source, asset, start) in flat.audio {
                 guard let track = try await asset.loadTracks(withMediaType: .audio).first else { continue }
