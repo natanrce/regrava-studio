@@ -21,18 +21,28 @@ final class CursorIdentifier {
         var hotSpot: CGPoint
 
         func matches(_ other: Fingerprint) -> Bool {
-            guard abs(size.width - other.size.width) < 0.5, abs(size.height - other.size.height) < 0.5,
-                  abs(hotSpot.x - other.hotSpot.x) < 0.5, abs(hotSpot.y - other.hotSpot.y) < 0.5 else { return false }
+            other.pixels.withUnsafeBufferPointer { matches($0, size: other.size, hotSpot: other.hotSpot) }
+        }
+
+        func matches(_ otherPixels: UnsafeBufferPointer<UInt8>, size otherSize: CGSize, hotSpot otherHotSpot: CGPoint) -> Bool {
+            guard abs(size.width - otherSize.width) < 0.5, abs(size.height - otherSize.height) < 0.5,
+                  abs(hotSpot.x - otherHotSpot.x) < 0.5, abs(hotSpot.y - otherHotSpot.y) < 0.5 else { return false }
             var difference = 0
-            for i in 0..<pixels.count { difference += abs(Int(pixels[i]) - Int(other.pixels[i])) }
+            for i in 0..<pixels.count { difference += abs(Int(pixels[i]) - Int(otherPixels[i])) }
             // Same artwork rasterized from different representations differs only slightly.
             return Double(difference) / Double(pixels.count) < 6
         }
     }
 
     private static let side = 24
+    /// One bitmap every cursor is rasterized into, cleared each time.
+    private let canvas = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: 4,
+        hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: side * 4, bitsPerPixel: 32
+    )
+    private lazy var canvasContext = canvas.flatMap { NSGraphicsContext(bitmapImageRep: $0) }
     private lazy var standard: [(id: String, fingerprint: Fingerprint)] = Self.standardCursors().compactMap { id, cursor in
-        Self.fingerprint(cursor).map { (id, $0) }
+        fingerprint(cursor).map { (id, $0) }
     }
     private var custom: [(id: String, fingerprint: Fingerprint)] = []
     private(set) var customImages: [CapturedCursorImage] = []
@@ -46,8 +56,9 @@ final class CursorIdentifier {
 
     /// Id of the cursor on screen now, or nil when the system does not report one.
     func currentID() -> String? {
-        guard let cursor = NSCursor.currentSystem, let print = Self.fingerprint(cursor) else { return last?.id }
-        if let last, last.fingerprint.matches(print) { return last.id }
+        guard let cursor = NSCursor.currentSystem, let pixels = rasterize(cursor) else { return last?.id }
+        if let last, last.fingerprint.matches(pixels, size: cursor.image.size, hotSpot: cursor.hotSpot) { return last.id }
+        let print = Fingerprint(pixels: Array(pixels), size: cursor.image.size, hotSpot: cursor.hotSpot)
         let id = identify(cursor, print)
         last = (print, id)
         return id
@@ -69,22 +80,23 @@ final class CursorIdentifier {
         return id
     }
 
-    private static func fingerprint(_ cursor: NSCursor) -> Fingerprint? {
+    private func fingerprint(_ cursor: NSCursor) -> Fingerprint? {
+        rasterize(cursor).map { Fingerprint(pixels: Array($0), size: cursor.image.size, hotSpot: cursor.hotSpot) }
+    }
+
+    /// The cursor's image drawn into `canvas`; valid until the next call.
+    private func rasterize(_ cursor: NSCursor) -> UnsafeBufferPointer<UInt8>? {
         let image = cursor.image
+        let side = Self.side
         guard image.size.width > 0, image.size.height > 0,
-              let rep = NSBitmapImageRep(
-                bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: 4,
-                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: side * 4, bitsPerPixel: 32
-              ),
-              let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+              let canvas, let context = canvasContext, let data = canvas.bitmapData else { return nil }
+        memset(data, 0, side * side * 4)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
-        guard let data = rep.bitmapData else { return nil }
-        let pixels = Array(UnsafeBufferPointer(start: data, count: side * side * 4))
-        return Fingerprint(pixels: pixels, size: image.size, hotSpot: cursor.hotSpot)
+        return UnsafeBufferPointer(start: data, count: side * side * 4)
     }
 
     private static func pngData(_ image: NSImage) -> Data? {
