@@ -421,8 +421,19 @@ enum Keep {
         }
         let within = sounds.nearSpeechWithinMs / 1000, shortestCut = sounds.shortestCutMs / 1000
         let speech = windows.filter { $0.speech >= sounds.speechConfidence }.map { ($0.start, $0.end) }
+        // Speech windows by start, with the latest end among each prefix: a window is near speech
+        // when one starting no later than `within` after it ends no earlier than `within` before.
+        let byStart = speech.sorted { $0.0 < $1.0 }
+        var latestEnd: [Double] = []
+        latestEnd.reserveCapacity(byStart.count)
+        for s in byStart { latestEnd.append(max(latestEnd.last ?? -.infinity, s.1)) }
+        func isNearSpeech(_ w: (start: Double, end: Double)) -> Bool {
+            var lo = 0, hi = byStart.count
+            while lo < hi { let mid = (lo + hi) / 2; if byStart[mid].0 - w.end <= within { lo = mid + 1 } else { hi = mid } }
+            return lo > 0 && w.start - latestEnd[lo - 1] <= within
+        }
         let near = windows.filter { $0.speech < sounds.speechConfidence && $0.near >= sounds.nearSpeechConfidence }
-            .filter { w in speech.contains { s in max(s.0 - w.end, w.start - s.1) <= within } }
+            .filter { isNearSpeech(($0.start, $0.end)) }
             .map { ($0.start, $0.end) }
         var merged: [(Double, Double)] = []
         for r in (speech + near).sorted(by: { $0.0 < $1.0 }) {
