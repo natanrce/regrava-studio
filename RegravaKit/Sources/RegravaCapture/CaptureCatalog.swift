@@ -39,14 +39,14 @@ public enum CaptureCatalog {
         "com.apple.controlcenter",
     ]
 
-    public static func displays() async throws -> [DisplayInfo] {
+    /// Displays, and on-screen application windows front-most first, from one query.
+    public static func sources() async throws -> (displays: [DisplayInfo], windows: [WindowInfo]) {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-        return await MainActor.run { content.displays.map(describe) }
+        let displays = await MainActor.run { content.displays.map(describe) }
+        return (displays, windows(in: content))
     }
 
-    /// On-screen application windows, front-most first.
-    public static func windows() async throws -> [WindowInfo] {
-        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+    static func windows(in content: SCShareableContent) -> [WindowInfo] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let order = frontToBackWindowIDs()
         let windows = content.windows.compactMap { window -> WindowInfo? in

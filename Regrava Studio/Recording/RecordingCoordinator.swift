@@ -306,8 +306,9 @@ final class RecordingCoordinator: ObservableObject {
 
     func refreshSources() async {
         do {
-            displays = try await CaptureCatalog.displays()
-            windows = try await CaptureCatalog.windows()
+            let sources = try await CaptureCatalog.sources()
+            displays = sources.displays
+            windows = sources.windows
         } catch {
             Dialogs.info(
                 title: "Regrava Studio does not have permission to record your screen",
