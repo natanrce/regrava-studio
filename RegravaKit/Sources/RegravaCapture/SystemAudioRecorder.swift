@@ -6,12 +6,6 @@ import Foundation
 /// stream would also limit the picture to those apps, so the sound is captured apart and
 /// written to its own file, on the host clock so it can be cut to the screen's segments.
 final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
-    struct Result {
-        var playlist: URL
-        /// Uptime of the file's first sample.
-        var startUptime: TimeInterval
-    }
-
     private let directory: URL
     private let name: String
     /// First sample's host time (for the recording's metadata).
@@ -20,7 +14,6 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     private let frames = FrameSink()
     private var stream: SCStream?
     private var writer: SegmentedWriter?
-    private var startUptime: TimeInterval?
     private var isStopping = false
 
     init(directory: URL, name: String = "channel-4-system-audio-apps-0") {
@@ -58,24 +51,21 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         if writer == nil {
             guard let writer = try? SegmentedWriter(directory: directory, name: name, mediaType: .audio, outputSettings: SegmentedWriter.audioSettings) else { return }
             self.writer = writer
-            startUptime = time.seconds
             onStart?(time.seconds)
         }
         writer?.append(sampleBuffer)
     }
 
-    /// Stops the stream and closes the file; nil when no sound arrived.
-    func stop() async -> Result? {
+    /// Stops the stream and closes the file, if any sound arrived.
+    func stop() async {
         try? await stream?.stopCapture()
         stream = nil
-        let (writer, start): (SegmentedWriter?, TimeInterval?) = await withCheckedContinuation { continuation in
+        let writer: SegmentedWriter? = await withCheckedContinuation { continuation in
             queue.async {
                 self.isStopping = true
-                continuation.resume(returning: (self.writer, self.startUptime))
+                continuation.resume(returning: self.writer)
             }
         }
-        guard let writer, let start else { return nil }
-        await writer.finish()
-        return Result(playlist: writer.playlistURL, startUptime: start)
+        await writer?.finish()
     }
 }

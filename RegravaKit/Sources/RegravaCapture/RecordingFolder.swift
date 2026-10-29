@@ -43,9 +43,4 @@ public enum RecordingFolder {
         try? FileManager.default.removeItem(at: output)
         try FileManager.default.moveItem(at: partial, to: output)
     }
-
-    /// Seconds a playlist lists (`#EXTINF` sum), for sessions a crash left without a duration.
-    static func playlistDuration(_ playlist: URL) -> Double? {
-        playlistFiles(playlist).map { $0.segments.reduce(0) { $0 + $1.seconds } }
-    }
 }

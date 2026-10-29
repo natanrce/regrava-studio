@@ -102,7 +102,7 @@ public final class ExternalDeviceRecorder {
         } catch {
             await core?.stopRunning()
             core = nil
-            _ = await camera?.stop()
+            await camera?.stop()
             camera = nil
             journal?.close()
             journal = nil
@@ -161,7 +161,7 @@ public final class ExternalDeviceRecorder {
         defer { phase = .idle }
         if !wasPaused { try await endSegment() }
         await core.stopRunning()
-        _ = await camera?.stop()
+        await camera?.stop()
         camera = nil
         self.core = nil
         journal?.close()
@@ -175,7 +175,7 @@ public final class ExternalDeviceRecorder {
         _ = try? await core?.endSegment()
         await core?.stopRunning()
         core = nil
-        _ = await camera?.stop()
+        await camera?.stop()
         camera = nil
         journal?.close()
         journal = nil
@@ -242,7 +242,6 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     private var isRotated = false
     private var pool: CVPixelBufferPool?
     private(set) var initialSize = CGSize.zero
-    private(set) var orientationChanges: [OrientationChange] = []
 
     /// Track order of the written audio.
     var audioSources: [AudioSource] {
@@ -394,7 +393,6 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
                 angle: rotated ? 90 : 0,
                 animation: rotated ? .clockwise : .counterClockwise
             )
-            orientationChanges.append(change)
             onOrientationChange?(change)
         }
 

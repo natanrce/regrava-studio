@@ -7,14 +7,6 @@ import Foundation
 /// The camera runs continuously (through pauses); sample times use the host clock, the same
 /// clock as `ProcessInfo.systemUptime`, so the file can be cut to the screen's segments.
 final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
-    struct Result {
-        /// The flattened-later playlist.
-        var playlist: URL
-        /// Uptime of the movie's first frame.
-        var startUptime: TimeInterval
-        var size: CGSize
-    }
-
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "regrava.camera.recorder")
@@ -23,8 +15,6 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var writer: SegmentedWriter?
     /// First frame: its host time and size (for the recording's metadata).
     var onStart: (@Sendable (TimeInterval, CGSize) -> Void)?
-    private var startUptime: TimeInterval?
-    private var size: CGSize = .zero
     private var isStopping = false
 
     init(directory: URL, name: String = "channel-3-webcam-0") {
@@ -77,15 +67,13 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: width * height * 6],
             ]) else { return }
             self.writer = writer
-            startUptime = time.seconds
-            size = CGSize(width: width, height: height)
-            onStart?(time.seconds, size)
+            onStart?(time.seconds, CGSize(width: width, height: height))
         }
         writer?.append(sampleBuffer)
     }
 
-    /// Stops the camera and closes the movie; nil when nothing was recorded.
-    func stop() async -> Result? {
+    /// Stops the camera and closes the movie, if anything was recorded.
+    func stop() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async {
                 self.isStopping = true
@@ -93,8 +81,6 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
         }
         session.stopRunning()
-        guard let writer, let startUptime else { return nil }
-        await writer.finish()
-        return Result(playlist: writer.playlistURL, startUptime: startUptime, size: size)
+        await writer?.finish()
     }
 }

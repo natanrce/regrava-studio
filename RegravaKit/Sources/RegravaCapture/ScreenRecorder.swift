@@ -205,9 +205,9 @@ public final class ScreenRecorder: NSObject {
             phase = .recording
         } catch {
             mouse.stop()
-            _ = await camera?.stop()
+            await camera?.stop()
             camera = nil
-            _ = await systemAudio?.stop()
+            await systemAudio?.stop()
             systemAudio = nil
             _ = await channels.detach()
             try? await stream?.stopCapture()
@@ -256,9 +256,9 @@ public final class ScreenRecorder: NSObject {
         defer { phase = .idle }
         if !wasPaused { try await endSegment() }
         mouse.stop()
-        _ = await camera?.stop()
+        await camera?.stop()
         camera = nil
-        _ = await systemAudio?.stop()
+        await systemAudio?.stop()
         systemAudio = nil
         try? await stream?.stopCapture()
         stream = nil
@@ -289,9 +289,9 @@ public final class ScreenRecorder: NSObject {
     /// Stops and deletes everything recorded so far.
     public func cancel() async {
         mouse.stop()
-        _ = await camera?.stop()
+        await camera?.stop()
         camera = nil
-        _ = await systemAudio?.stop()
+        await systemAudio?.stop()
         systemAudio = nil
         for writer in await channels.detach() { await writer.finish() }
         try? await stream?.stopCapture()

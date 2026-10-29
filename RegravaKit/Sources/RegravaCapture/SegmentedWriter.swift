@@ -40,16 +40,15 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
 
     var playlistURL: URL { directory.appendingPathComponent("\(name).m3u8") }
 
-    init(directory: URL, name: String, mediaType: AVMediaType, outputSettings: [String: Any]?, sourceFormatHint: CMFormatDescription? = nil, transform: CGAffineTransform = .identity, holdsLastSample: Bool = false) throws {
+    init(directory: URL, name: String, mediaType: AVMediaType, outputSettings: [String: Any]?, holdsLastSample: Bool = false) throws {
         self.directory = directory
         self.name = name
         self.holdsLastSample = holdsLastSample
         writer = AVAssetWriter(contentType: .mpeg4Movie)
         writer.outputFileTypeProfile = .mpeg4AppleHLS
         writer.preferredOutputSegmentInterval = CMTime(seconds: Self.segmentSeconds, preferredTimescale: 600)
-        input = AVAssetWriterInput(mediaType: mediaType, outputSettings: outputSettings, sourceFormatHint: sourceFormatHint)
+        input = AVAssetWriterInput(mediaType: mediaType, outputSettings: outputSettings)
         input.expectsMediaDataInRealTime = true
-        input.transform = transform
         adaptor = mediaType == .video ? AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil) : nil
         super.init()
         writer.delegate = self
