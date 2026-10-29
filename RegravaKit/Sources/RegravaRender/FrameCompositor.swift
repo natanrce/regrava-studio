@@ -29,7 +29,7 @@ public final class FrameCompositor: @unchecked Sendable {
     private let screenCrop01: Rect2
     /// Hide sensitive data / Hide faces: the scan's detections, drawn by source time.
     private let processing: ProcessingConfig
-    private let sensitiveData: [SensitiveDataDetection]
+    private let sensitiveData: AutoMaskTimeline
     private let resolver: TimeResolver
     private let videoSize: Size2
     /// The colour grade already mixed with the identity by `lutIntensity`.
@@ -38,7 +38,7 @@ public final class FrameCompositor: @unchecked Sendable {
     /// `assetsDirectory` is the project folder (for background images).
     public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = []) {
         processing = project.processing
-        self.sensitiveData = project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : []
+        self.sensitiveData = AutoMaskTimeline(detections: project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : [])
         resolver = project.resolver
         videoSize = project.recording.videoSize
         self.layout = layout
@@ -90,7 +90,7 @@ public final class FrameCompositor: @unchecked Sendable {
         var src = MaskRenderer.apply(frame.mask, to: cropped(source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))))
         // Auto masks after the manual one, never on the timeline.
         if !sensitiveData.isEmpty {
-            let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), detections: sensitiveData, config: processing, videoSize: videoSize)
+            let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), timeline: sensitiveData, config: processing, videoSize: videoSize)
             src = AutoMaskRenderer.apply(covers, to: src, crop01: screenCrop01, videoSize: videoSize)
         }
         // The webcam frame is matted, sharpened and graded once, for the stage and the loupe.

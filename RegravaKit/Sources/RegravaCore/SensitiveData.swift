@@ -107,21 +107,56 @@ public struct AutoMaskFrame: Hashable, Sendable {
     }
 }
 
+/// Detections in start order, indexed so a frame skips the ones that have already ended.
+public struct AutoMaskTimeline: Sendable {
+    public let detections: [SensitiveDataDetection]
+    /// `latestEnd[i]`: the latest `endMs` among `detections[0...i]`; empty when the detections
+    /// are not in start order, so nothing is skipped.
+    let latestEnd: [Double]
+    /// Whether each detection's keyframes are in time order.
+    let keyframesSorted: [Bool]
+
+    /// `detections` should be sorted by `startMs`.
+    public init(detections: [SensitiveDataDetection]) {
+        self.detections = detections
+        let inStartOrder = zip(detections, detections.dropFirst()).allSatisfy { $0.startMs <= $1.startMs }
+        var latest: [Double] = []
+        if inStartOrder {
+            latest.reserveCapacity(detections.count)
+            for d in detections { latest.append(Swift.max(latest.last ?? -.infinity, d.endMs)) }
+        }
+        latestEnd = latest
+        keyframesSorted = detections.map { d in zip(d.keyframes, d.keyframes.dropFirst()).allSatisfy { $0.timeMs <= $1.timeMs } }
+    }
+
+    public var isEmpty: Bool { detections.isEmpty }
+
+    /// Every detection before this index has ended by `t` (`endMs <= t`).
+    func firstUnended(at t: Double) -> Int {
+        var lo = 0, hi = latestEnd.count
+        while lo < hi { let mid = (lo + hi) / 2; if latestEnd[mid] > t { hi = mid } else { lo = mid + 1 } }
+        return lo
+    }
+}
+
 public enum AutoMasks {
     /// Text and face covers the GPU takes at most.
     public static let maxTextBoxes = 32
     public static let maxFaceBoxes = 16
 
     /// The detections covering `sourceMs`, as boxes.
-    public static func frame(at sourceMs: Double, detections: [SensitiveDataDetection], config: ProcessingConfig, videoSize: Size2) -> AutoMaskFrame {
+    public static func frame(at sourceMs: Double, timeline: AutoMaskTimeline, config: ProcessingConfig, videoSize: Size2) -> AutoMaskFrame {
         guard config.isAutoMasking, videoSize.width > 0, videoSize.height > 0 else { return AutoMaskFrame() }
         var text: [Rect2] = []
         var faces: [Rect2] = []
-        for detection in detections {
+        let detections = timeline.detections
+        for index in timeline.firstUnended(at: sourceMs)..<detections.count {
+            let detection = detections[index]
             if detection.startMs > sourceMs { break }
             guard detection.endMs > sourceMs else { continue }
             let isFace = detection.kind == .face
-            guard isFace ? config.autoMaskFaces : config.autoMaskSensitiveData, var rect = rect(of: detection, at: sourceMs) else { continue }
+            guard isFace ? config.autoMaskFaces : config.autoMaskSensitiveData,
+                  var rect = rect(of: detection, at: sourceMs, keyframesSorted: timeline.keyframesSorted[index]) else { continue }
             // Entirely outside the video.
             guard rect.x < videoSize.width, rect.y < videoSize.height, rect.x + rect.width > 0, rect.y + rect.height > 0 else { continue }
             if isFace {
@@ -140,14 +175,30 @@ public enum AutoMasks {
         return AutoMaskFrame(bounds01: capped(text, max: maxTextBoxes).map(normalized), faceBounds01: capped(faces, max: maxFaceBoxes).map(normalized))
     }
 
+    /// `frame(at:timeline:…)` over detections sorted by `startMs`, indexed for this call only.
+    public static func frame(at sourceMs: Double, detections: [SensitiveDataDetection], config: ProcessingConfig, videoSize: Size2) -> AutoMaskFrame {
+        frame(at: sourceMs, timeline: AutoMaskTimeline(detections: detections), config: config, videoSize: videoSize)
+    }
+
     /// A face holds its last keyframe; text between two keyframes covers both (never interpolated).
-    static func rect(of detection: SensitiveDataDetection, at t: Double) -> Rect2? {
+    /// Keyframes in time order are found by binary search.
+    static func rect(of detection: SensitiveDataDetection, at t: Double, keyframesSorted: Bool = false) -> Rect2? {
         let keys = detection.keyframes
         guard let first = keys.first else { return nil }
-        if detection.kind == .face {
-            return (keys.last { $0.timeMs <= t } ?? first).rect
+        /// First index whose keyframe passes `isAfter`, which is false then true along `keys`.
+        func boundary(_ isAfter: (SensitiveDataKeyframe) -> Bool) -> Int {
+            var lo = 0, hi = keys.count
+            while lo < hi { let mid = (lo + hi) / 2; if isAfter(keys[mid]) { hi = mid } else { lo = mid + 1 } }
+            return lo
         }
-        guard let i = keys.firstIndex(where: { $0.timeMs >= t }) else { return keys.last?.rect }
+        if detection.kind == .face {
+            guard keyframesSorted else { return (keys.last { $0.timeMs <= t } ?? first).rect }
+            let after = boundary { !($0.timeMs <= t) }
+            return (after > 0 ? keys[after - 1] : first).rect
+        }
+        let found = keyframesSorted ? boundary { $0.timeMs >= t } : (keys.firstIndex { $0.timeMs >= t } ?? keys.count)
+        guard found < keys.count else { return keys.last?.rect }
+        let i = found
         if i == 0 || keys[i].timeMs == t { return keys[i].rect }
         return union(keys[i - 1].rect, keys[i].rect)
     }
