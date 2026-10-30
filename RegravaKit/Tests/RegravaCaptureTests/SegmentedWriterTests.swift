@@ -107,4 +107,50 @@ struct SegmentedWriterTests {
         print("STILL duration \(duration)")
         #expect(duration >= 1)
     }
+
+    /// While no new picture arrives the last one is written again every second.
+    @Test func stillScreenRepeatsTheLastPictureEverySecond() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("seg-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let channels = StreamChannels()
+        let stream = SCStream(filter: SCContentFilter(), configuration: SCStreamConfiguration(), delegate: nil)
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 320, 200, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+        var format: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer!, formatDescriptionOut: &format)
+        let display = try SegmentedWriter(directory: dir, name: "channel-1-display-0", mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 200,
+        ])
+        async let started = channels.attach([.screen: display])
+        try await Task.sleep(nanoseconds: 100_000_000)
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer!, formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &sample)
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sample!, createIfNecessary: true)! as NSArray
+        (attachments[0] as! NSMutableDictionary)[SCStreamFrameInfo.status.rawValue] = SCFrameStatus.complete.rawValue
+        channels.queue.async { channels.stream(stream, didOutputSampleBuffer: sample!, of: .screen) }
+        let start = try await started
+        #expect(abs(start - timing.presentationTimeStamp.seconds) < 0.001)
+        try await Task.sleep(nanoseconds: 2_400_000_000)
+        _ = await channels.detach()
+        channels.reset()
+        await display.finish()
+        let out = dir.appendingPathComponent("flat.mp4")
+        try RecordingFolder.flatten(display.playlistURL, to: out)
+        let asset = AVURLAsset(url: out)
+        let track = try await asset.loadTracks(withMediaType: .video)[0]
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        reader.add(output)
+        reader.startReading()
+        var times: [Double] = []
+        while let next = output.copyNextSampleBuffer() {
+            if CMSampleBufferGetNumSamples(next) > 0 { times.append(CMSampleBufferGetPresentationTimeStamp(next).seconds) }
+        }
+        times = times.map { $0 - (times.first ?? 0) }
+        print("REPEAT times \(times)")
+        #expect(times.count == 3)
+        #expect(times.count == 3 && abs(times[1] - 1) < 0.15 && abs(times[2] - 2) < 0.3)
+    }
 }

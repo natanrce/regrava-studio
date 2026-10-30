@@ -459,15 +459,25 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
     /// How long the stream's first picture is waited for.
     static let firstFrameTimeout: TimeInterval = 3
     static let firstFrameTimeoutMessage = "Cannot record your screen. If this error persists, try rebooting your computer."
+    /// While no new picture arrives, the last one is delivered again this often.
+    static let repeatInterval: TimeInterval = 1
+    /// A first picture this close to the host clock has its own time trusted.
+    static let trustedClockDelta = 0.1
 
     let queue = DispatchQueue(label: "regrava.capture.channels", qos: .userInitiated)
     private var writers: [SCStreamOutputType: SegmentedWriter] = [:]
     private var waiter: CheckedContinuation<TimeInterval, Error>?
     /// Counts attaches, so a timeout only fails the attach that scheduled it.
     private var generation = 0
-    /// The stream's latest picture, kept between sessions: a session that begins while the
-    /// screen stands still starts with it.
-    private var lastFrame: CMSampleBuffer?
+    /// The stream's latest picture and its time, kept between sessions: a session that begins
+    /// while the screen stands still starts with it.
+    private var lastFrame: (sample: CMSampleBuffer, time: CMTime)?
+    /// Decided on the stream's first picture: its times are used as they are, or else each
+    /// picture is timed by the host clock when it arrives.
+    private var isClockTrusted: Bool?
+    /// The time last delivered; a picture at or before it is moved just after it, a repeat dropped.
+    private var lastDeliveredTime: CMTime?
+    private var pendingRepeat: DispatchWorkItem?
 
     /// Starts routing to `writers`; returns the session's start (host time). Once the stream
     /// has a picture the session starts now, with the latest picture moved to that time;
@@ -480,7 +490,7 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
                 self.writers = writers
                 if let frame = self.lastFrame, let display = writers[.screen] {
                     let now = CMClockGetTime(CMClockGetHostTimeClock())
-                    if now > CMSampleBufferGetPresentationTimeStamp(frame), display.append(frame, at: now) {
+                    if now > frame.time, display.append(frame.sample, at: now) {
                         continuation.resume(returning: now.seconds)
                         return
                     }
@@ -507,9 +517,15 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
         }
     }
 
-    /// Forgets the kept picture (the stream ended).
+    /// Forgets the stream's pictures and stops repeating (the stream ended).
     func reset() {
-        queue.async { self.lastFrame = nil }
+        queue.async {
+            self.pendingRepeat?.cancel()
+            self.pendingRepeat = nil
+            self.lastFrame = nil
+            self.isClockTrusted = nil
+            self.lastDeliveredTime = nil
+        }
     }
 
     func failPending(_ error: Error) {
@@ -526,17 +542,47 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
             guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as NSArray?,
                   let info = attachments.firstObject as? NSDictionary,
                   let raw = info[SCStreamFrameInfo.status.rawValue] as? Int, SCFrameStatus(rawValue: raw) == .complete else { return }
-            lastFrame = sampleBuffer
-            guard let writer = writers[type], writer.append(sampleBuffer) else { return }
-            if let waiter {
-                self.waiter = nil
-                waiter.resume(returning: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds)
-            }
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            let stamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            if isClockTrusted == nil { isClockTrusted = abs(CMTimeSubtract(now, stamp).seconds) < Self.trustedClockDelta }
+            repeating(sampleBuffer, at: isClockTrusted == true ? stamp : now, addedTime: .zero, isOriginal: true)
         } else {
             guard let writer = writers[type] else { return }
             // Audio before the session's first picture is dropped.
             guard waiter == nil else { return }
             writer.append(sampleBuffer)
+        }
+    }
+
+    /// Delivers a picture, and again every `repeatInterval` until a newer one arrives, each
+    /// repeat moved on by the host time since the last delivery.
+    private func repeating(_ sample: CMSampleBuffer, at time: CMTime, addedTime: CMTime, isOriginal: Bool) {
+        pendingRepeat?.cancel()
+        let scheduled = CMClockGetTime(CMClockGetHostTimeClock())
+        let next = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let elapsed = CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), scheduled)
+            self.repeating(sample, at: CMTimeAdd(time, elapsed), addedTime: CMTimeAdd(isOriginal ? .zero : addedTime, elapsed), isOriginal: false)
+        }
+        pendingRepeat = next
+        queue.asyncAfter(deadline: .now() + Self.repeatInterval, execute: next)
+        deliver(sample, at: time, isOriginal: isOriginal)
+    }
+
+    private func deliver(_ sample: CMSampleBuffer, at requested: CMTime, isOriginal: Bool) {
+        var time = requested
+        if let last = lastDeliveredTime, time <= last {
+            guard isOriginal else { return }
+            time = CMTime(value: last.value + 1, timescale: last.timescale)
+        }
+        lastDeliveredTime = time
+        lastFrame = (sample, time)
+        guard let writer = writers[.screen] else { return }
+        let written = time == CMSampleBufferGetPresentationTimeStamp(sample) ? writer.append(sample) : writer.append(sample, at: time)
+        guard written else { return }
+        if let waiter {
+            self.waiter = nil
+            waiter.resume(returning: time.seconds)
         }
     }
 }
