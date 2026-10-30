@@ -106,6 +106,9 @@ public final class CameraTrack: @unchecked Sendable {
     /// Image names of `typeEvents`, index for index.
     private let typeEventNames: [String]
     private let cursorConfig: CursorConfig
+    private let planner: CameraPlanner
+    /// The screen-only layout of the plain stage.
+    private let plainResolver: LayoutResolver
 
     public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, sampleRateHz: Double? = nil) {
         // Everything below works in the crop's space.
@@ -132,6 +135,8 @@ public final class CameraTrack: @unchecked Sendable {
         let hoverTimes = project.cursorHoverTimes(hovers)
 
         let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, sparse: sparse, silence: silence)
+        self.planner = planner
+        plainResolver = project.plainLayoutResolver
 
         let cursorPath = CursorPathCache.shared.path(
             for: CursorPathCache.Key(
@@ -278,6 +283,31 @@ public final class CameraTrack: @unchecked Sendable {
         frame.previousCursor = before.cursor
         frame.previousCursorScale = before.cursorScale
         frame.previousCameraRect = before.cameraRect
+        return frame
+    }
+
+    /// The plain stage at playback time `timeMs`, shown while placing an item or editing a mask:
+    /// the unzoomed screen alone on the default stage at its resting focus, without the loupe,
+    /// the cursor, its click effect or the webcam. Nothing moves, so there is no motion blur.
+    public func plainFrame(at timeMs: Double) -> CameraFrame {
+        var frame = interpolatedFrame(at: timeMs)
+        let source = resolver.playbackToSource(timeMs)
+        let resting = planner.restingFocus(at: source)
+        let screen = layout.toCanvas(plainResolver.screenRect(focus01: resting.center, bounds01: resting.bounds, level: 1))
+        frame.screenRect = screen
+        frame.previousScreenRect = screen
+        frame.isInstantSnap = false
+        frame.screenReferenceWidth = plainResolver.initialScreenRect.width * layout.scale
+        frame.allowsScreenBorderRadius = plainResolver.allowsScreenBorderRadius
+        frame.isBackgroundVisible = !(plainResolver.stageRect.width <= plainResolver.initialScreenRect.width
+            && plainResolver.stageRect.height <= plainResolver.initialScreenRect.height)
+        frame.loupe = nil
+        frame.cursorOpacity = 0
+        frame.previousCursor = nil
+        frame.clickProgress = nil
+        frame.clickPosition = nil
+        frame.cameraOpacity = 0
+        frame.previousCameraRect = nil
         return frame
     }
 

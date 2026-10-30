@@ -264,6 +264,33 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(track.frame(at: 1100).clickProgress != nil)
         #expect(track.frame(at: 2000).clickProgress == nil)
     }
+
+    @Test func plainStageDropsZoomCursorAndClicks() {
+        let p = project(zooms: [ZoomRange(startMs: 1000, endMs: 5000, scale: 2)], events: [move(0, 960, 540), click(3000, 960, 540)])
+        let track = CameraTrack(project: p)
+        #expect(abs(track.frame(at: 3100).screenRect.width - track.layout.restScreen.width * 2) < 0.5)
+        let plain = track.plainFrame(at: 3100)
+        #expect(plain.screenRect == track.layout.restScreen)
+        #expect(plain.previousScreenRect == plain.screenRect)
+        #expect(plain.cursorOpacity == 0)
+        #expect(plain.clickProgress == nil)
+        #expect(plain.loupe == nil)
+        #expect(plain.cameraOpacity == 0)
+    }
+
+    @Test func plainStageFitsTheWholeScreen() {
+        var p = project(zooms: [], events: [move(0, 960, 540)])
+        // A stage narrower than the recording: "Avoid empty area" covers it, the plain stage fits it.
+        p.style.aspectRatio = 1
+        p.style.avoidEmptyZoomArea = true
+        let track = CameraTrack(project: p)
+        let covered = track.frame(at: 500).screenRect
+        let fitted = track.plainFrame(at: 500).screenRect
+        #expect(fitted.width < covered.width)
+        // 1080 square stage padded by 0.1: a 900-wide zoom area holds the 16:9 screen.
+        #expect(abs(fitted.width - 900 * track.layout.scale) < 0.5)
+        #expect(abs(fitted.height - 506.25 * track.layout.scale) < 0.5)
+    }
 }
 
 @Suite struct StoreTests {

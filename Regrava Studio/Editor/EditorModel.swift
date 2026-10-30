@@ -66,6 +66,7 @@ final class EditorModel: ObservableObject {
             guard oldValue != isPlaying else { return }
             followSuspended = false
             updateRenderQuality()
+            updatePlainScreen()
         }
     }
     /// `playback.defaultRate`: 0.25…8.
@@ -84,7 +85,9 @@ final class EditorModel: ObservableObject {
     // View state
     @Published var layoutType: EditorLayoutType = .edit
     @Published var sidebarRoot: SidebarRoot = .background
-    @Published var sidebarItem: SidebarItem?
+    @Published var sidebarItem: SidebarItem? {
+        didSet { updatePlainScreen() }
+    }
     @Published var selectedZoomIDs: Set<UUID> = []
     /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
     var itemClipboard: ItemClipboard?
@@ -101,16 +104,22 @@ final class EditorModel: ObservableObject {
     private var microphoneRenderTasks: [MicrophoneAudioPreset: Task<Void, Never>] = [:]
     var defaultZoomLevelTask: Task<Void, Never>?
     /// Zoom add tool armed from the add-tools rail.
-    @Published var isAddZoomToolArmed = false
+    @Published var isAddZoomToolArmed = false {
+        didSet { updatePlainScreen() }
+    }
     /// Which zoom the add tool places (`view.addZoomPresentation`).
     @Published var addZoomPresentation = ZoomPresentation.screen
     /// Command menu (⌘K).
     @Published var isCommandMenuOpen = false
     /// Mask add tool (`activeAddTool = "mask"`, `addMaskType`).
-    @Published var isAddMaskToolArmed = false
+    @Published var isAddMaskToolArmed = false {
+        didSet { updatePlainScreen() }
+    }
     @Published var addMaskType: MaskType = .sensitiveData
     /// Layout add tool (`activeAddTool = "layout"`); only camera overlay arms it.
-    @Published var isAddLayoutToolArmed = false
+    @Published var isAddLayoutToolArmed = false {
+        didSet { updatePlainScreen() }
+    }
     /// The microphone transcript (`transcripts/microphone-session-0.json`), nil until generated.
     @Published var transcript: SessionTranscript? {
         didSet {
@@ -422,6 +431,7 @@ final class EditorModel: ObservableObject {
         if selected != selectedZoomIDs { selectedZoomIDs = selected }
         if !isDirty { isDirty = true }
         scheduleAutosave()
+        updatePlainScreen()
         rememberLastProjectConfig()
         if micModeChanged {
             syncMicrophoneRenders()
@@ -744,6 +754,29 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// `isStageFocusedOnPlainScreen`: paused with an add tool armed, or with the open mask
+    /// under the playhead.
+    var isStageFocusedOnPlainScreen: Bool {
+        guard !isPlaying else { return false }
+        if isAddZoomToolArmed || isAddMaskToolArmed || isAddLayoutToolArmed { return true }
+        guard let id = openMaskID, let mask = project.masks.first(where: { $0.id == id }) else { return false }
+        let t = currentSourceTimeMs
+        return mask.startMs <= t && mask.endMs >= t
+    }
+
+    /// Switches the preview to or from the plain stage. The paused frame is drawn again unless
+    /// a seek is about to draw it (`redraw: false`).
+    private func updatePlainScreen(redraw: Bool = true) {
+        let plain = isStageFocusedOnPlainScreen
+        guard plain != renderState.isPlainScreen else { return }
+        renderState.isPlainScreen = plain
+        guard let base = baseConfiguration, let item = player.currentItem else { return }
+        // Re-assigning the composition drops cached frames.
+        item.videoComposition = AVVideoComposition(configuration: base)
+        guard redraw, !isPlaying else { return }
+        if isScrubbing { scrubPreview?.refresh() } else { seek(to: currentTimeMs, moveHead: false) }
+    }
+
     /// Lighter motion blur while playing, full quality when paused (`wf.qualityByMode`). A frame
     /// left on screen after playback or scrubbing is drawn again at full quality.
     private func updateRenderQuality() {
@@ -874,7 +907,10 @@ final class EditorModel: ObservableObject {
     func seek(to timeMs: Double, moveHead: Bool = true) {
         let frame = 1000.0 / 60
         let clamped = clamp((timeMs / frame).rounded() * frame, 0, durationMs)
-        if moveHead { currentTimeMs = clamped }
+        if moveHead {
+            currentTimeMs = clamped
+            updatePlainScreen(redraw: false)
+        }
         chaseSeek(to: CMTime(seconds: clamped / 1000, preferredTimescale: 600))
     }
 
@@ -1068,7 +1104,7 @@ final class EditorModel: ObservableObject {
 
     var previewTargets: PreviewTargets {
         let snapshot = renderState.current
-        let frame = snapshot.track.frame(at: currentTimeMs)
+        let frame = renderState.isPlainScreen ? snapshot.track.plainFrame(at: currentTimeMs) : snapshot.track.frame(at: currentTimeMs)
         return PreviewTargets(
             recording: frame.screenRect,
             recordingCornerRadius: recordingAreaCornerRadius(snapshot, frame),
@@ -1143,7 +1179,7 @@ final class EditorModel: ObservableObject {
     }
 
     var recordingAreaRect: Rect2 {
-        renderState.current.track.frame(at: currentTimeMs).screenRect
+        renderState.frame(at: currentTimeMs).screenRect
     }
 
     // MARK: Masks

@@ -516,6 +516,15 @@ public extension Project {
         }
     }
 
+    /// The screen alone on the default layout's stage, fitted whole ("Avoid empty area" off):
+    /// the stage shown while placing an item or editing a mask.
+    var plainLayoutResolver: LayoutResolver {
+        var info = stageInfo
+        info.aspectRatio = defaultLayoutResolver.aspectRatio
+        info.avoidEmptyZoomArea = false
+        return .screenOnly(info)
+    }
+
     /// Stage aspect: the style's, or the default layout's automatic one.
     var stageAspectRatio: Double { style.aspectRatio ?? defaultLayoutResolver.autoStageAspectRatio }
 

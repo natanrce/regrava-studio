@@ -55,6 +55,28 @@ public final class RenderState: @unchecked Sendable {
         }
     }
 
+    private var _isPlainScreen = false
+
+    /// Frames show the plain stage (`CameraTrack.plainFrame`) instead of the animated one.
+    public var isPlainScreen: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _isPlainScreen
+        }
+        set {
+            lock.lock()
+            _isPlainScreen = newValue
+            lock.unlock()
+        }
+    }
+
+    /// The frame rendered at playback time `timeMs`.
+    public func frame(at timeMs: Double) -> CameraFrame {
+        let track = current.track
+        return isPlainScreen ? track.plainFrame(at: timeMs) : track.frame(at: timeMs)
+    }
+
     public func replace(with newSnapshot: Snapshot) {
         lock.lock()
         snapshot = newSnapshot
@@ -63,7 +85,8 @@ public final class RenderState: @unchecked Sendable {
 
     public func render(source: CIImage, camera: CIImage? = nil, timeMs: Double) -> CIImage {
         let s = current
-        return s.compositor.compose(source: source, camera: camera, frame: s.track.frame(at: timeMs), quality: quality)
+        let frame = isPlainScreen ? s.track.plainFrame(at: timeMs) : s.track.frame(at: timeMs)
+        return s.compositor.compose(source: source, camera: camera, frame: frame, quality: quality)
     }
 }
 
