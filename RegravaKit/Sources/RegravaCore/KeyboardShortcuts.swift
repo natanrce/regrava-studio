@@ -51,7 +51,7 @@ public enum KeyboardShortcuts {
     static let special: [String: [String]] = {
         var map: [String: [String]] = [
             "\u{09}": ["Tab"], "\u{0A}": ["Enter"], "\u{0D}": ["Enter"], "\u{19}": ["Shift", "Tab"],
-            "\u{1B}": ["Escape"], "\u{7F}": ["Delete"], "\u{85}": ["Enter"], " ": [" "], "\u{08}": ["Backspace"],
+            "\u{1B}": ["Escape"], "\u{7F}": ["Delete"], "\u{85}": ["Enter"], "\u{A0}": [" "], "\u{08}": ["Backspace"],
             "\u{F700}": ["ArrowUp"], "\u{F701}": ["ArrowDown"], "\u{F702}": ["ArrowLeft"], "\u{F703}": ["ArrowRight"],
             "\u{F727}": ["Insert"], "\u{F728}": ["Delete"], "\u{F729}": ["Home"], "\u{F72B}": ["End"],
             "\u{F72C}": ["PageUp"], "\u{F72D}": ["PageDown"], "\u{F72E}": ["PrintScreen"], "\u{F72F}": ["ScrollLock"],

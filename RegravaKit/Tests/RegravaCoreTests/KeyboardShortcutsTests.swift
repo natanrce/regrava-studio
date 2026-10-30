@@ -61,6 +61,13 @@ import Testing
         #expect(presses[0].id == "1000")
     }
 
+    @Test func optionSpaceShowsTheSpaceCap() {
+        // ⌥Space types a no-break space.
+        let event = Keystroke(kind: .down, timeMs: 0, character: "\u{A0}", activeModifiers: [.option])
+        #expect(KeyboardShortcuts.shortcut(for: event) == ["Alt", " "])
+        #expect(KeyboardShortcuts.keyCaps(["Alt", " "]) == KeyboardShortcuts.keyCaps(KeyboardShortcuts.shortcut(for: Keystroke(kind: .down, timeMs: 0, character: " ", activeModifiers: [.option]))!))
+    }
+
     @Test func heldModifierShowsEarly() {
         let mouse = [
             MouseEvent(kind: .move, timeMs: 3000, position: Vec2(0, 0)),
