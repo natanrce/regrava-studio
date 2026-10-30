@@ -276,27 +276,13 @@ private struct PreviewSpace: View {
                     if editor.isAddLayoutToolArmed && !editor.isPlaying {
                         OverlayPlacementTool(editor: editor, size: size)
                     }
-                    if editor.isAddZoomToolArmed {
-                        ZoomPlacementPreview(editor: editor, size: size)
-                        // Automatic zooms aren't offered for device recordings.
-                        let automatic = !editor.project.recording.isExternalDeviceMode
-                        Text((editor.addZoomPresentation == .loupe ? "Click where to place the loupe" : "Click where to zoom in") + (automatic ? " — or use Automatic zoom" : ""))
-                            .font(Theme.Typo.label.weight(.medium))
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 12)
-                            .background(RoundedRectangle(cornerRadius: 5).fill(Theme.Colors.background.opacity(0.8)))
-                            .frame(maxHeight: .infinity, alignment: .top)
-                            .padding(.top, 12)
-                            .allowsHitTesting(false)
-                        if automatic {
-                            RSButton(title: "Automatic zoom", icon: "computermouse.fill", kind: .translucent, size: .small) {
-                                editor.addZoomAtPlayhead(presentation: editor.addZoomPresentation)
-                                editor.isAddZoomToolArmed = false
-                            }
-                            .tooltip("Adds a zoom that automatically follows the mouse activity")
-                            .frame(maxHeight: .infinity, alignment: .bottom)
-                            .padding(.bottom, 16)
-                        }
+                    if editor.isAddZoomToolArmed && !editor.isPlaying {
+                        let area = editor.recordingAreaRect
+                        ZoomPlacementTool(
+                            editor: editor,
+                            area: CGRect(x: area.x * scale, y: area.y * scale, width: area.width * scale, height: area.height * scale)
+                        )
+                        .frame(width: size.width, height: size.height, alignment: .topLeading)
                     }
                 }
                 .overlay { PreviewMarkers(editor: editor, scale: scale) }
@@ -840,14 +826,17 @@ private struct OverlayPlacementTool: View {
     }
 }
 
-/// The add-zoom tool's pointer preview: a circle of the loupe's size, or the classic
-/// zoom's visible area, centred on the pointer.
-private struct ZoomPlacementPreview: View {
+/// The armed add-zoom tool over the recording area: a click there adds a zoom aimed at that
+/// point; the pointer carries a circle of the loupe's size, or the classic zoom's visible area.
+private struct ZoomPlacementTool: View {
     @ObservedObject var editor: EditorModel
-    var size: CGSize
+    /// The recording area in the preview.
+    var area: CGRect
     @State private var pointer: CGPoint?
 
     var body: some View {
+        // Automatic zooms aren't offered for device recordings.
+        let automatic = !editor.project.recording.isExternalDeviceMode
         ZStack(alignment: .topLeading) {
             Color.white.opacity(0.001)
                 .onContinuousHover { phase in
@@ -859,7 +848,8 @@ private struct ZoomPlacementPreview: View {
                     }
                 }
                 .onTapGesture { location in
-                    let target = Vec2(clamp(location.x / size.width, 0, 1), clamp(location.y / size.height, 0, 1))
+                    guard area.width > 0, area.height > 0 else { return }
+                    let target = Vec2(clamp(location.x / area.width, 0, 1), clamp(location.y / area.height, 0, 1))
                     editor.addZoomAtPlayhead(presentation: editor.addZoomPresentation, manualTarget: target)
                     editor.isAddZoomToolArmed = false
                 }
@@ -868,9 +858,9 @@ private struct ZoomPlacementPreview: View {
                 // Sized from the last edited style.
                 let style = LastEditedZoomStyle.stored
                 let zoom = style?.zoom ?? 2
-                // Loupe: diameter radius01 × 2 × overlay width. Classic: width/zoom × height/zoom.
-                let w = isLoupe ? (style?.loupeOptions.radius01 ?? LoupeOptions().radius01) * 2 * size.width : size.width / zoom
-                let h = isLoupe ? w : size.height / zoom
+                // Loupe: diameter radius01 × 2 × area width. Classic: width/zoom × height/zoom.
+                let w = isLoupe ? (style?.loupeOptions.radius01 ?? LoupeOptions().radius01) * 2 * area.width : area.width / zoom
+                let h = isLoupe ? w : area.height / zoom
                 let shape = RoundedRectangle(cornerRadius: isLoupe ? w / 2 : 8)
                 shape
                     .fill(Theme.Colors.primary.opacity(0.08))
@@ -880,6 +870,30 @@ private struct ZoomPlacementPreview: View {
                     .offset(x: pointer.x - w / 2, y: pointer.y - h / 2)
                     .allowsHitTesting(false)
             }
+            // Hint: top 16, pill, background at 0.75 with blur, label weight 500.
+            Text((editor.addZoomPresentation == .loupe ? "Click where to place the loupe" : "Click where to zoom in") + (automatic ? " — or use Automatic zoom" : ""))
+                .font(Theme.Typo.label.weight(.medium))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(Capsule().fill(Theme.Colors.background.opacity(0.75)))
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.top, 16)
+                .frame(width: area.width, height: area.height, alignment: .top)
+                .allowsHitTesting(false)
+            if automatic {
+                RSButton(title: "Automatic zoom", icon: "computermouse.fill", kind: .translucent, size: .small) {
+                    editor.addZoomAtPlayhead(presentation: editor.addZoomPresentation)
+                    editor.isAddZoomToolArmed = false
+                }
+                .tooltip("Adds a zoom that automatically follows the mouse activity")
+                .padding(.bottom, 16)
+                .frame(width: area.width, height: area.height, alignment: .bottom)
+            }
         }
+        .frame(width: area.width, height: area.height, alignment: .topLeading)
+        .clipped()
+        .offset(x: area.minX, y: area.minY)
     }
 }
