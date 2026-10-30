@@ -38,8 +38,23 @@ import Testing
     }
 
     @Test func outputSizeKeepsCanvasAspectWithEvenWidth() {
-        let size = ExportSettings.defaults(for: .mp4).outputSize(canvas: Size2(width: 1920, height: 1080))
+        let size = ExportSettings.defaults(for: .mp4).outputSize(aspectRatio: 16.0 / 9)
         #expect(size == Size2(width: 1280, height: 720))
+    }
+
+    @Test func outputSizeFloorsToEvenPixels() {
+        #expect(ExportSettings.outputSize(aspectRatio: 9.0 / 16, height: 2160) == Size2(width: 1214, height: 2160))
+        #expect(ExportSettings.outputSize(aspectRatio: 4.0 / 3, height: 1080) == Size2(width: 1440, height: 1080))
+        #expect(ExportSettings.evenPixels(1214.9999999) == 1214)
+        #expect(ExportSettings.evenPixels(1215.0000000001) == 1214)
+        #expect(ExportSettings.evenPixels(1215.9999999999) == 1216)
+        #expect(ExportSettings.evenPixels(0.5) == 2)
+    }
+
+    @Test func outputSizeFitsInside4K() {
+        #expect(ExportSettings.outputSize(aspectRatio: 21.0 / 9, height: 2160) == Size2(width: 3840, height: 1644))
+        #expect(ExportSettings.outputSize(aspectRatio: 1, height: 2160) == Size2(width: 2160, height: 2160))
+        #expect(ExportSettings.outputSize(aspectRatio: 21.0 / 9, height: 1080) == Size2(width: 2520, height: 1080))
     }
 
     @Test func storeRemembersSettingsPerFormat() {

@@ -159,7 +159,7 @@ final class ExportController: ObservableObject {
     // Approximations based on this app's encoder settings.
 
     static func estimate(settings: ExportSettings, canvas: Size2, durationMs: Double) -> (time: String, size: String) {
-        let size = settings.outputSize(canvas: canvas)
+        let size = settings.outputSize(aspectRatio: canvas.aspectRatio)
         let seconds = durationMs / 1000
         let pixelsPerSecond = size.width * size.height * Double(settings.fps)
         var exportSeconds = pixelsPerSecond * seconds / 90_000_000

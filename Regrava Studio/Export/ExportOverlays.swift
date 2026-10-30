@@ -40,7 +40,7 @@ struct ExportPickerOverlay: View {
 
     private var card: some View {
         VStack(alignment: .leading, spacing: Theme.gap(3.5)) {
-            ExportSettingsForm(store: store, target: target, canvas: project.canvasSize)
+            ExportSettingsForm(store: store, target: target, aspectRatio: project.stageAspectRatio)
             NamedField(name: "Export to") {
                 HStack(spacing: Theme.gap(1)) {
                     SegmentedPicker(

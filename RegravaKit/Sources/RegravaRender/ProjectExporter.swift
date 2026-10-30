@@ -78,7 +78,7 @@ public enum ProjectExporter {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> [URL] {
         let settings = rawSettings.normalized(target: target)
-        let outputSize = settings.outputSize(canvas: project.canvasSize)
+        let outputSize = settings.outputSize(aspectRatio: project.stageAspectRatio)
         // Export frames wait until face data covers them ("tracking face").
         try await completeFaceTracking(project: project, bundle: videoURL.deletingLastPathComponent())
         try await completeHoverDetection(project: project, bundle: videoURL.deletingLastPathComponent())

@@ -172,11 +172,33 @@ public struct ExportSettings: Codable, Hashable, Sendable {
         return parts.joined(separator: " • ")
     }
 
-    /// Output pixel size for a canvas aspect ratio at this height (even numbers for encoders).
-    public func outputSize(canvas: Size2) -> Size2 {
-        let h = Double(height)
-        let w = (h * canvas.aspectRatio / 2).rounded() * 2
+    /// Largest output video: anything bigger is scaled down to fit inside it.
+    public static let maxOutputSize = Size2(width: 3840, height: 2160)
+
+    /// Output pixel size for a stage aspect ratio at this height: even numbers, at least 2,
+    /// fitted inside `maxOutputSize`.
+    public func outputSize(aspectRatio: Double) -> Size2 {
+        Self.outputSize(aspectRatio: aspectRatio, height: Double(height))
+    }
+
+    public static func outputSize(aspectRatio: Double, height desiredHeight: Double) -> Size2 {
+        var h = evenPixels(desiredHeight)
+        var w = evenPixels(h * aspectRatio)
+        if w > maxOutputSize.width || h > maxOutputSize.height {
+            let scale = min(maxOutputSize.width / w, maxOutputSize.height / h)
+            w = evenPixels(w * scale)
+            h = evenPixels(h * scale)
+        }
         return Size2(width: w, height: h)
+    }
+
+    /// A pixel length for the encoder: the integer it is within 1e-6 of, else rounded down;
+    /// an odd value goes down to the even one below it; never under 2.
+    public static func evenPixels(_ value: Double) -> Double {
+        let nearest = value.rounded()
+        let whole = abs(value - nearest) < 0.000001 ? nearest : value.rounded(.down)
+        let even = whole.truncatingRemainder(dividingBy: 2) == 0 ? whole : whole - 1
+        return max(even, 2)
     }
 
     public static func resolutionLabel(_ height: Int) -> String {

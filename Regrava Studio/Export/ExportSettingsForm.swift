@@ -7,8 +7,8 @@ struct ExportSettingsForm: View {
     @Binding var store: ExportSettingsStore
     /// nil in Settings ▸ Quick export (codec "Both" not offered there).
     var target: ExportTarget?
-    /// Canvas used for the "<w>px × <h>px" label.
-    var canvas: Size2?
+    /// Stage aspect ratio used for the "<w>px × <h>px" label.
+    var aspectRatio: Double?
 
     private var settings: Binding<ExportSettings> {
         Binding(
@@ -41,8 +41,8 @@ struct ExportSettingsForm: View {
                             isDisabled: { !s.allowedResolutions.contains($0) },
                             selection: settings.height
                         )
-                        if let canvas {
-                            let size = s.outputSize(canvas: canvas)
+                        if let aspectRatio {
+                            let size = s.outputSize(aspectRatio: aspectRatio)
                             Text(verbatim: "\(Int(size.width))px × \(Int(size.height))px")
                                 .font(Theme.Typo.label)
                                 .foregroundStyle(Theme.Colors.tertiary)

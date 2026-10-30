@@ -232,7 +232,7 @@ private struct QuickExportSettings: View {
                 icon: "square.and.arrow.up",
                 description: "These settings will be used when using quick export or exporting from the widget"
             ) {
-                ExportSettingsForm(store: $preferences.widgetExportSettings, target: nil, canvas: nil)
+                ExportSettingsForm(store: $preferences.widgetExportSettings, target: nil, aspectRatio: nil)
                     .padding(20)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.backgroundAccent))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.Colors.systemBorder))
