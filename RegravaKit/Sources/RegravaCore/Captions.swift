@@ -114,7 +114,7 @@ public enum CaptionLayout {
         for w in words {
             let ww = measure(w.text).width
             let has = !current.isEmpty
-            let tooManyChars = chars + w.text.count > maxChars
+            let tooManyChars = chars + w.text.utf16.count > maxChars
             let tooWide = width + (has ? space : 0) + ww > maxWidth
             let tooLong = has && w.endMs - current[0].startMs > maxLineSpanMs
             let tooFar = has && w.startMs - current[0].endMs > maxGapFromFirstEndMs
@@ -122,12 +122,12 @@ public enum CaptionLayout {
                 if !has { continue }
                 groups.append(current)
                 current = [w]
-                chars = w.text.count
+                chars = w.text.utf16.count
                 width = ww
                 continue
             }
             current.append(w)
-            chars += w.text.count
+            chars += w.text.utf16.count
             width += ww
         }
         if !current.isEmpty { groups.append(current) }

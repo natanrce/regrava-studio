@@ -30,6 +30,15 @@ struct CaptionsTests {
         #expect(lines.count == 2)
     }
 
+    @Test func lineLengthCountsUTF16Units() {
+        // Each emoji is one character but two UTF-16 units: 20 of them fill 40 of the 42.
+        let emoji = word(String(repeating: "\u{1F600}", count: 20), 0, 100)
+        let lines = CaptionLayout.lines([emoji, word(" abc", 100, 200)], maxWidth: 10_000, measure: measure)
+        #expect(lines.map { $0.words.map(\.text) } == [[emoji.text], ["abc"]])
+        let ascii = word(String(repeating: "x", count: 20), 0, 100)
+        #expect(CaptionLayout.lines([ascii, word(" abc", 100, 200)], maxWidth: 10_000, measure: measure).count == 1)
+    }
+
     @Test func lineSizesUseTheSpaceWidth() {
         let line = CaptionLayout.lines([word("Hi", 0, 100), word(" you", 100, 200)], maxWidth: 1000, measure: measure)[0]
         // "Hi" = 24; " you": measure("you") 34 + space 14.
