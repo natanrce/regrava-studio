@@ -22,16 +22,6 @@ public enum ExportError: LocalizedError {
 /// Renders a project with the export settings (format, codec, profile, resolution, frame
 /// rate, quality) using AVAssetReader/AVAssetWriter, or ImageIO for GIF.
 public enum ProjectExporter {
-    /// Bits per pixel per frame used for H.264 at each quality. These are this project's choices.
-    public static func bitsPerPixel(_ quality: ExportQuality) -> Double {
-        switch quality {
-        case .studio: return 0.30
-        case .socialMedia: return 0.12
-        case .webHigh: return 0.07
-        case .webLow: return 0.035
-        }
-    }
-
     /// Finishes the webcam's face detection before rendering when face tracking is on.
     public static func completeFaceTracking(project: Project, bundle: URL) async throws {
         guard project.camera.enableFaceTracking, let name = project.recording.cameraFileName else { return }
@@ -112,10 +102,21 @@ public enum ProjectExporter {
 
     // MARK: Movie (MP4 / ProRes)
 
-    private static func videoOutputSettings(settings: ExportSettings, codec: ExportCodec?, size: Size2) -> [String: Any] {
+    /// BT.709 colour tags written on every exported video stream.
+    static let colorProperties: [String: String] = [
+        AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+        AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+        AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+    ]
+
+    /// ProRes: the profile's codec. MP4: the hardware encoder at the quality's bitrate (H.264's
+    /// constant rate factor converts to its fallback bitrate there), a keyframe at least every
+    /// two seconds, High (H.264) or Main (HEVC) profile at an automatic level.
+    static func videoOutputSettings(settings: ExportSettings, codec: ExportCodec?, size: Size2) -> [String: Any] {
         var output: [String: Any] = [
             AVVideoWidthKey: Int(size.width),
             AVVideoHeightKey: Int(size.height),
+            AVVideoColorPropertiesKey: colorProperties,
         ]
         if settings.format == .prores {
             switch settings.proresProfile {
@@ -126,16 +127,15 @@ public enum ProjectExporter {
             }
             return output
         }
+        let codec = codec ?? .h264
         let isHEVC = codec == .h265
-        let bitsPerSecond = bitsPerPixel(settings.quality) * (isHEVC ? 0.6 : 1) * size.width * size.height * Double(settings.fps)
+        let bitsPerSecond = ExportEncoding.hardwareBitsPerSecond(codec: codec, quality: settings.quality, width: size.width, height: size.height, fps: settings.fps)
         output[AVVideoCodecKey] = isHEVC ? AVVideoCodecType.hevc : AVVideoCodecType.h264
-        var compression: [String: Any] = [
+        output[AVVideoCompressionPropertiesKey] = [
             AVVideoAverageBitRateKey: Int(bitsPerSecond),
-            AVVideoExpectedSourceFrameRateKey: settings.fps,
-            AVVideoMaxKeyFrameIntervalKey: settings.fps * 2,
-        ]
-        if !isHEVC { compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel }
-        output[AVVideoCompressionPropertiesKey] = compression
+            AVVideoMaxKeyFrameIntervalKey: ExportEncoding.maxKeyFrameInterval(fps: settings.fps),
+            AVVideoProfileLevelKey: isHEVC ? kVTProfileLevel_HEVC_Main_AutoLevel as String : AVVideoProfileLevelH264HighAutoLevel,
+        ] as [String: Any]
         return output
     }
 
