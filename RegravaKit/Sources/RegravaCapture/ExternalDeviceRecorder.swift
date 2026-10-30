@@ -377,8 +377,9 @@ final class DeviceCaptureCore: NSObject, AVCaptureVideoDataOutputSampleBufferDel
     }
 
     /// The system audio stream stopped on its own: the recording is aborted.
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        onFailure?(error)
+    /// Optional: the stream may report a stop without an error.
+    func stream(_ stream: SCStream, didStopWithError error: Error?) {
+        onFailure?(CaptureError.streamStop(error, isLowDiskSpace: CaptureError.isVolumeLowOnDiskSpace(directory)))
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

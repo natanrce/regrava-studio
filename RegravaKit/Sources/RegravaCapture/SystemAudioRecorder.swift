@@ -11,7 +11,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @un
     /// First sample's host time (for the recording's metadata).
     var onStart: (@Sendable (TimeInterval) -> Void)?
     /// The stream stopped on its own; the recording is aborted as when the screen's stream stops.
-    var onStop: (@Sendable (Error) -> Void)?
+    var onStop: (@Sendable (Error?) -> Void)?
     private let queue = DispatchQueue(label: "regrava.capture.system-audio", qos: .userInitiated)
     private let frames = FrameSink()
     private var stream: SCStream?
@@ -47,7 +47,8 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @un
         self.stream = stream
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    /// Optional: the stream may report a stop without an error.
+    func stream(_ stream: SCStream, didStopWithError error: Error?) {
         onStop?(error)
     }
 

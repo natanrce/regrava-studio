@@ -86,6 +86,9 @@ public enum CaptureError: LocalizedError {
     case notRecording
     case busy
     case failed(String)
+    /// A capture stream stopped on its own: what happened, its internal form, and what to tell
+    /// the user when there is something to tell.
+    case streamStopped(message: String, internalMessage: String, userMessage: String?)
 
     public var errorDescription: String? {
         switch self {
@@ -93,7 +96,35 @@ public enum CaptureError: LocalizedError {
         case .notRecording: return "No recording is in progress."
         case .busy: return "The recorder is busy."
         case .failed(let message): return message
+        case let .streamStopped(message, _, userMessage): return userMessage ?? message
         }
+    }
+
+    static let lowDiskSpaceMessage = "Recording stopped due to low disk space."
+
+    /// The error a stream stop is reported with. A stop with no error says so (or blames low
+    /// disk space when there is none left); a stop by the system when there is no disk space
+    /// left blames that; any other error is kept as it is.
+    static func streamStop(_ error: Error?, isLowDiskSpace: Bool) -> Error {
+        guard let error else {
+            if isLowDiskSpace {
+                return CaptureError.streamStopped(message: "nil error from ScreenCaptureKit", internalMessage: "internalError: nil error from ScreenCaptureKit", userMessage: lowDiskSpaceMessage)
+            }
+            let message = "ScreenCaptureKit stopped without reporting any error information."
+            return CaptureError.streamStopped(message: message, internalMessage: "internalError: " + message, userMessage: nil)
+        }
+        if let stream = error as? SCStreamError, stream.code == .systemStoppedStream, isLowDiskSpace {
+            let message = (error as NSError).debugDescription
+            return CaptureError.streamStopped(message: message, internalMessage: "internalError: " + message, userMessage: lowDiskSpaceMessage)
+        }
+        return error
+    }
+
+    /// No space left for opportunistic use on the volume of `url`; false when that is unknown.
+    static func isVolumeLowOnDiskSpace(_ url: URL) -> Bool {
+        let keys: Set<URLResourceKey> = [.volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityForOpportunisticUsageKey, .volumeTotalCapacityKey]
+        guard let values = try? url.resourceValues(forKeys: keys), let available = values.volumeAvailableCapacityForOpportunisticUsage else { return false }
+        return available == 0
     }
 }
 
@@ -443,12 +474,14 @@ public final class ScreenRecorder: NSObject {
 }
 
 extension ScreenRecorder: SCStreamDelegate {
-    nonisolated public func stream(_ stream: SCStream, didStopWithError error: Error) {
+    /// Optional: the stream may report a stop without an error.
+    nonisolated public func stream(_ stream: SCStream, didStopWithError error: Error?) {
         Task { @MainActor in self.streamStopped(error) }
     }
 
     /// The screen's or the apps' sound stream stopped on its own: the recording is aborted.
-    private func streamStopped(_ error: Error) {
+    private func streamStopped(_ stopError: Error?) {
+        let error = CaptureError.streamStop(stopError, isLowDiskSpace: workDirectory.map(CaptureError.isVolumeLowOnDiskSpace) ?? false)
         channels.failPending(error)
         if phase == .recording || phase == .paused { onUnexpectedStop?(error) }
     }
