@@ -36,12 +36,15 @@ struct CacheReferenceTests {
         for c in out["description"] as! [[Any]] { #expect(SD.ChunkGrid(endsMs: c[0] as! [Int]).description == c[1] as! String) }
     }
 
+    /// The recorded paths use this project bundle extension.
+    static let recordedBundleExtension = "screenstudio"
+
     @Test func videoKeyAndRoot() throws {
         FileManager.default.changeCurrentDirectoryPath(SDTestData.path("A-oracle"))
         for c in try Self.load("out.json")["videoKey"] as! [[Any]] {
             let path = c[0] as! String
-            #expect(SD.SensitiveDataCache.videoKey(forVideoAt: path) == c[1] as! String, "\(path)")
-            #expect(SD.SensitiveDataCache.root(forVideoAt: path).absoluteString == c[2] as! String, "\(path)")
+            #expect(SD.SensitiveDataCache.videoKey(forVideoAt: path, bundleExtension: Self.recordedBundleExtension) == c[1] as! String, "\(path)")
+            #expect(SD.SensitiveDataCache.root(forVideoAt: path, bundleExtension: Self.recordedBundleExtension).absoluteString == c[2] as! String, "\(path)")
         }
     }
 

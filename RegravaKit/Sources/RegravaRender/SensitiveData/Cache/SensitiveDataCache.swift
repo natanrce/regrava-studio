@@ -1,6 +1,7 @@
 import CoreGraphics
 import Darwin
 import Foundation
+import RegravaCore
 
 // `SensitiveDataCache`, the on-disk evidence cache, and `ChunkGrid` helpers.
 // Layout on disk (all binary files are `EvidenceFile`s):
@@ -99,11 +100,11 @@ extension SD {
             }
         }
 
-        /// root(forVideoAt:): `<bundle>.screenstudio/cache/sensitive-data/` for a video inside a
-        /// `.screenstudio` project bundle, else `<NSTemporaryDirectory>/sensitive-data/`.
-        static func root(forVideoAt videoPath: String) -> URL {
+        /// root(forVideoAt:): `<bundle>.regrava/cache/sensitive-data/` for a video inside a
+        /// `.regrava` project bundle, else `<NSTemporaryDirectory>/sensitive-data/`.
+        static func root(forVideoAt videoPath: String, bundleExtension: String = ProjectStore.fileExtension) -> URL {
             let components = URL(fileURLWithPath: videoPath).standardizedFileURL.pathComponents
-            for (index, component) in components.enumerated() where component.hasSuffix(".screenstudio") {
+            for (index, component) in components.enumerated() where component.hasSuffix("." + bundleExtension) {
                 let bundle = NSString.path(withComponents: Array(components[...index]))
                 return URL(fileURLWithPath: bundle, isDirectory: true)
                     .appendingPathComponent("cache", isDirectory: true)
@@ -113,13 +114,13 @@ extension SD {
         }
 
         /// videoKey(forVideoAt:): "<path>|<size or -1>|<Int(mtime) or 0>", where <path> is the path inside the
-        /// `.screenstudio` bundle for a video in a project (so the key survives moving the project), else the
+        /// `.regrava` bundle for a video in a project (so the key survives moving the project), else the
         /// standardized path.
-        static func videoKey(forVideoAt videoPath: String) -> String {
+        static func videoKey(forVideoAt videoPath: String, bundleExtension: String = ProjectStore.fileExtension) -> String {
             let url = URL(fileURLWithPath: videoPath).standardizedFileURL
             var bundleRelativePath: String?
             let components = url.pathComponents
-            if let index = components.firstIndex(where: { $0.hasSuffix(".screenstudio") }) {
+            if let index = components.firstIndex(where: { $0.hasSuffix("." + bundleExtension) }) {
                 bundleRelativePath = NSString.path(withComponents: Array(components[(index + 1)...]))
             }
             let attributes = (try? FileManager.default.attributesOfItem(atPath: videoPath)) ?? [:]

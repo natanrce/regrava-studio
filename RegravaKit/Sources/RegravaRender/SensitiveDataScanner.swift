@@ -97,7 +97,7 @@ public enum SensitiveDataScanner {
 
     /// Scans the whole recording, with the full partial results (`onPartialResult`) and the scanned
     /// fraction (`onProgress`, 0…1). The evidence cache is kept under `bundle` (or next to the video:
-    /// in a `.screenstudio` package, else in the temporary directory). `demandMs`: the moment someone
+    /// in a `.regrava` project, else in the temporary directory). `demandMs`: the moment someone
     /// looks at; the chunks nearest it are scanned first.
     public static func scan(video: URL, phrases: [String], detectFaces: Bool, options: Options = Options(), bundle: URL? = nil,
                             demandMs: Double? = nil, onPartialResult: @escaping @Sendable (PartialResult) -> Void,
