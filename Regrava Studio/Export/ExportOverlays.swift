@@ -86,7 +86,10 @@ struct ExportPickerOverlay: View {
 
     private var footer: some View {
         let settings = preferences.exportSettings.current
-        let estimate = ExportController.estimate(settings: settings, canvas: project.canvasSize, durationMs: project.recording.durationMs)
+        let estimate = ExportEstimator.texts(
+            settings: settings.normalized(target: target), target: target, aspectRatio: project.stageAspectRatio,
+            durationMs: project.playbackDurationMs, hasAudio: project.exportHasAudio
+        )
         return HStack(alignment: .top, spacing: Theme.gap(0.5)) {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {

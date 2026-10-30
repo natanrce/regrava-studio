@@ -154,58 +154,6 @@ final class ExportController: ObservableObject {
             task?.cancel()
         }
     }
-
-    // MARK: Estimates
-    // Approximations based on this app's encoder settings.
-
-    static func estimate(settings: ExportSettings, canvas: Size2, durationMs: Double) -> (time: String, size: String) {
-        let size = settings.outputSize(aspectRatio: canvas.aspectRatio)
-        let seconds = durationMs / 1000
-        let pixelsPerSecond = size.width * size.height * Double(settings.fps)
-        var exportSeconds = pixelsPerSecond * seconds / 90_000_000
-        if settings.format == .gif { exportSeconds *= 1.3 }
-
-        func megabytes(_ bitsPerPixel: Double) -> Double { bitsPerPixel * pixelsPerSecond * seconds / 8 / 1_000_000 }
-        let sizeText: String
-        switch settings.format {
-        case .mp4:
-            let h264 = megabytes(ProjectExporter.bitsPerPixel(settings.quality))
-            switch settings.codec {
-            case .h264: sizeText = formatMB(h264)
-            case .h265: sizeText = formatMB(h264 * 0.6)
-            case .both: sizeText = "\(formatMB(h264)) H.264, \(formatMB(h264 * 0.6)) HEVC"
-            }
-        case .prores:
-            let bpp: Double = switch settings.proresProfile {
-            case .lt: 1.6
-            case .standard: 2.4
-            case .hq: 3.5
-            case .p4444: 5.3
-            }
-            sizeText = formatMB(megabytes(bpp))
-        case .gif:
-            let low = megabytes(settings.quality == .studio ? 1.2 : 0.6)
-            let high = low * 2.5
-            sizeText = "\(formatNumber(low))–\(formatNumber(high))MB"
-        }
-        return (formatDuration(exportSeconds), sizeText)
-    }
-
-    private static func formatNumber(_ value: Double) -> String {
-        value >= 100 ? String(Int(value.rounded())) : String(format: "%.1f", value)
-    }
-
-    private static func formatMB(_ value: Double) -> String { "\(formatNumber(value))MB" }
-
-    static func formatDuration(_ seconds: Double) -> String {
-        let s = max(Int(seconds.rounded(.up)), 1)
-        if s < 60 { return "\(s) second\(s == 1 ? "" : "s")" }
-        if s < 3600 {
-            let m = Int((Double(s) / 60).rounded(.up))
-            return "\(m) minute\(m == 1 ? "" : "s")"
-        }
-        return "\(s / 3600) hours \((s % 3600) / 60) minutes"
-    }
 }
 
 /// Progress bar on the Dock icon, in 2.5% steps.
