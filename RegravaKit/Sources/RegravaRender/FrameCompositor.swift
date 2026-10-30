@@ -265,9 +265,33 @@ public final class FrameCompositor: @unchecked Sendable {
         let maxReads: Double = quality == .export || quality == .pausedHigh ? 16 : 4
         let c = ciPoint(center)
 
+        // What each input is read over. Past the lens and its shadow only `scene` is read, at
+        // the pixel itself. Inside, the view reads back by up to the bevel bend (≤ 2·bevel) plus
+        // the fringe (≤ 0.35 of it), the frost through the magnification (radius / zoom) and
+        // the rim reflection up to two radii out. Two pixels of margin for linear sampling;
+        // boxes snap to 64 px and stay on the canvas, where reads past its edge clamp.
+        let bevel = radius * clamp(lens.bevelRatio, 0, 1)
+        func around(_ reach: Double) -> CGRect {
+            let a = 64.0
+            let x0 = floor((c.x - reach) / a) * a, y0 = floor((c.y - reach) / a) * a
+            let x1 = ceil((c.x + reach) / a) * a, y1 = ceil((c.y + reach) / a) * a
+            return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0).intersection(canvasRect)
+        }
+        let lensBox = around(radius + LoupeFrame.shadowSize * w + 1.5 + 2)
+        let viewBox = around(max(radius, 2 * bevel) + 0.7 * bevel + 2)
+        let frostBox = around(max(radius + 1.5, radius / zoom + 2 * bevel) + 2)
+        let rimBox = around(2 * radius + 1 + 2)
+
         return kernel.apply(
             extent: canvasRect,
-            roiCallback: { _, _ in canvasRect },
+            roiCallback: { index, rect in
+                guard rect.intersects(lensBox) else { return index == 5 ? rect : .null }
+                switch index {
+                case 5: return rect.union(rimBox).intersection(canvasRect)
+                case 6: return frostBox
+                default: return viewBox
+                }
+            },
             arguments: [
                 content, levels[0], levels[1], levels[2], levels[3], scene.cropped(to: canvasRect), frost,
                 CIVector(x: c.x, y: c.y, z: radius, w: radius * clamp(lens.bevelRatio, 0, 1)),
