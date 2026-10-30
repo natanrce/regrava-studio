@@ -14,6 +14,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let pointPixelScale: Double
     private let cursors: CursorLibrary?
     private let background: CIImage
+    /// The loupe's frosted backdrop: the background blurred by 0.5% of the stage width.
+    private let frost: CIImage
     private let motionBlurAmount: Double
     private let fps: Int
     private let camera: CameraConfig
@@ -56,6 +58,11 @@ public final class FrameCompositor: @unchecked Sendable {
         deviceFrame = project.activeDeviceFrame
         screenCrop01 = project.screenCrop01
         background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
+        // Kept by Core Image once drawn. Every change to the background or the canvas builds a
+        // new compositor, so a new image and a new cache entry.
+        let c = layout.canvas
+        let canvasRect = CGRect(x: c.x, y: c.height - c.y - c.height, width: c.width, height: c.height)
+        frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005).cropped(to: canvasRect).insertingIntermediate(cache: true)
     }
 
     private var canvasHeight: Double { layout.canvas.height }
@@ -249,8 +256,6 @@ public final class FrameCompositor: @unchecked Sendable {
         let content = session(over: clear, source: source, camera: camera, frame: inner, quality: quality, perspective: perspective).cropped(to: canvasRect)
         // Blurrier reads on the compressed rim: lod 1…4, 0.58·(2^lod − 1) texels.
         let levels = (1...4).map { lod in content.applyingGaussianBlur(sigma: 0.58 * (pow(2, Double(lod)) - 1) * 0.5).cropped(to: canvasRect) }
-        // Frosted backdrop: the background blurred by 0.5% of the stage width.
-        let frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005).cropped(to: canvasRect)
 
         // Light from the screen shadow's light.
         let canvas = layout.canvas
@@ -267,8 +272,8 @@ public final class FrameCompositor: @unchecked Sendable {
 
         // What each input is read over. Past the lens and its shadow only `scene` is read, at
         // the pixel itself. Inside, the view reads back by up to the bevel bend (≤ 2·bevel) plus
-        // the fringe (≤ 0.35 of it), the frost through the magnification (radius / zoom) and
-        // the rim reflection up to two radii out. Two pixels of margin for linear sampling;
+        // the fringe (≤ 0.35 of it) and the rim reflection up to two radii out; the cached frost
+        // is read whole. Two pixels of margin for linear sampling;
         // boxes snap to 64 px and stay on the canvas, where reads past its edge clamp.
         let bevel = radius * clamp(lens.bevelRatio, 0, 1)
         func around(_ reach: Double) -> CGRect {
@@ -279,7 +284,6 @@ public final class FrameCompositor: @unchecked Sendable {
         }
         let lensBox = around(radius + LoupeFrame.shadowSize * w + 1.5 + 2)
         let viewBox = around(max(radius, 2 * bevel) + 0.7 * bevel + 2)
-        let frostBox = around(max(radius + 1.5, radius / zoom + 2 * bevel) + 2)
         let rimBox = around(2 * radius + 1 + 2)
 
         return kernel.apply(
@@ -288,7 +292,8 @@ public final class FrameCompositor: @unchecked Sendable {
                 guard rect.intersects(lensBox) else { return index == 5 ? rect : .null }
                 switch index {
                 case 5: return rect.union(rimBox).intersection(canvasRect)
-                case 6: return frostBox
+                // The frost is cached whole, so it is drawn once for every lens position.
+                case 6: return canvasRect
                 default: return viewBox
                 }
             },
@@ -650,7 +655,9 @@ public final class FrameCompositor: @unchecked Sendable {
         if blur > 0 {
             filled = filled.clampedToExtent().applyingGaussianBlur(sigma: blur / 2)
         }
-        return filled.cropped(to: rect)
+        // Kept by Core Image once drawn instead of decoded, scaled and blurred every frame. A
+        // new image or canvas makes a new compositor, so a new cache entry.
+        return filled.cropped(to: rect).insertingIntermediate(cache: true)
     }
 
     /// Gradient from the top-left corner (0,0) to the bottom-right corner (1,1), stops evenly
