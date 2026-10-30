@@ -215,6 +215,7 @@ public final class ScreenRecorder: NSObject {
             _ = await channels.detach()
             try? await stream?.stopCapture()
             stream = nil
+            channels.reset()
             journal?.close()
             journal = nil
             phase = .idle
@@ -265,6 +266,7 @@ public final class ScreenRecorder: NSObject {
         systemAudio = nil
         try? await stream?.stopCapture()
         stream = nil
+        channels.reset()
         journal?.close()
         journal = nil
         var result = try await RecordingFinalizer.finalize(folder: workDirectory)
@@ -299,6 +301,7 @@ public final class ScreenRecorder: NSObject {
         for writer in await channels.detach() { await writer.finish() }
         try? await stream?.stopCapture()
         stream = nil
+        channels.reset()
         journal?.close()
         journal = nil
         if let workDirectory { try? FileManager.default.removeItem(at: workDirectory) }
@@ -350,7 +353,7 @@ public final class ScreenRecorder: NSObject {
             }
         }
         journal.update { $0.sessions.append(.init(index: index, channels: entries)) }
-        let start = try await channels.attach(writers, timeout: 5)
+        let start = try await channels.attach(writers)
         segments.append(Segment(startUptime: start))
         journal.update { metadata in
             if let s = metadata.sessions.firstIndex(where: { $0.index == index }) { metadata.sessions[s].startUptime = start }
@@ -453,25 +456,41 @@ extension ScreenRecorder: SCStreamDelegate {
 
 /// Routes the stream's samples to the current session's channels, on its own queue.
 final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
+    /// How long the stream's first picture is waited for.
+    static let firstFrameTimeout: TimeInterval = 3
+    static let firstFrameTimeoutMessage = "Cannot record your screen. If this error persists, try rebooting your computer."
+
     let queue = DispatchQueue(label: "regrava.capture.channels", qos: .userInitiated)
     private var writers: [SCStreamOutputType: SegmentedWriter] = [:]
     private var waiter: CheckedContinuation<TimeInterval, Error>?
     /// Counts attaches, so a timeout only fails the attach that scheduled it.
     private var generation = 0
+    /// The stream's latest picture, kept between sessions: a session that begins while the
+    /// screen stands still starts with it.
+    private var lastFrame: CMSampleBuffer?
 
-    /// Starts routing to `writers`; returns the host time of the first picture.
-    func attach(_ writers: [SCStreamOutputType: SegmentedWriter], timeout: TimeInterval) async throws -> TimeInterval {
+    /// Starts routing to `writers`; returns the session's start (host time). Once the stream
+    /// has a picture the session starts now, with the latest picture moved to that time;
+    /// before its first picture it starts at that picture, waited for up to `firstFrameTimeout`.
+    func attach(_ writers: [SCStreamOutputType: SegmentedWriter]) async throws -> TimeInterval {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 self.generation += 1
                 let generation = self.generation
                 self.writers = writers
+                if let frame = self.lastFrame, let display = writers[.screen] {
+                    let now = CMClockGetTime(CMClockGetHostTimeClock())
+                    if now > CMSampleBufferGetPresentationTimeStamp(frame), display.append(frame, at: now) {
+                        continuation.resume(returning: now.seconds)
+                        return
+                    }
+                }
                 self.waiter = continuation
-                self.queue.asyncAfter(deadline: .now() + timeout) {
+                self.queue.asyncAfter(deadline: .now() + Self.firstFrameTimeout) {
                     guard generation == self.generation, let waiter = self.waiter else { return }
                     self.waiter = nil
                     self.writers = [:]
-                    waiter.resume(throwing: CaptureError.failed("The recording did not start. Check the Screen Recording permission."))
+                    waiter.resume(throwing: CaptureError.failed(Self.firstFrameTimeoutMessage))
                 }
             }
         }
@@ -488,6 +507,11 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
         }
     }
 
+    /// Forgets the kept picture (the stream ended).
+    func reset() {
+        queue.async { self.lastFrame = nil }
+    }
+
     func failPending(_ error: Error) {
         queue.async {
             self.waiter?.resume(throwing: error)
@@ -496,18 +520,20 @@ final class StreamChannels: NSObject, SCStreamOutput, @unchecked Sendable {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard sampleBuffer.isValid, let writer = writers[type] else { return }
+        guard sampleBuffer.isValid else { return }
         if type == .screen {
             // Only complete frames carry a picture; idle ones repeat the last.
             guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as NSArray?,
                   let info = attachments.firstObject as? NSDictionary,
                   let raw = info[SCStreamFrameInfo.status.rawValue] as? Int, SCFrameStatus(rawValue: raw) == .complete else { return }
-            guard writer.append(sampleBuffer) else { return }
+            lastFrame = sampleBuffer
+            guard let writer = writers[type], writer.append(sampleBuffer) else { return }
             if let waiter {
                 self.waiter = nil
                 waiter.resume(returning: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds)
             }
         } else {
+            guard let writer = writers[type] else { return }
             // Audio before the session's first picture is dropped.
             guard waiter == nil else { return }
             writer.append(sampleBuffer)

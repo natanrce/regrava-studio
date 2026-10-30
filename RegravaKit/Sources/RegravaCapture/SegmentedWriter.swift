@@ -65,6 +65,16 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
         return input.append(sample)
     }
 
+    /// `sample` again, moved to `time` (a held picture repeated later).
+    @discardableResult
+    func append(_ sample: CMSampleBuffer, at time: CMTime) -> Bool {
+        var timing = CMSampleTimingInfo(duration: CMSampleBufferGetDuration(sample), presentationTimeStamp: time, decodeTimeStamp: .invalid)
+        var copy: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr,
+              let copy else { return false }
+        return append(copy)
+    }
+
     /// A frame made here (a turned device frame), at `time`.
     @discardableResult
     func append(_ buffer: CVPixelBuffer, at time: CMTime) -> Bool {
@@ -96,12 +106,8 @@ final class SegmentedWriter: NSObject, AVAssetWriterDelegate, @unchecked Sendabl
     func finish(endTime: CMTime? = nil) async {
         guard startTime != nil, writer.status == .writing else { return }
         if let endTime, let last = lastSample, let lastTime, endTime > lastTime {
-            var timing = CMSampleTimingInfo(duration: CMSampleBufferGetDuration(last), presentationTimeStamp: endTime, decodeTimeStamp: .invalid)
-            var copy: CMSampleBuffer?
-            if CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: last, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr, let copy {
-                for _ in 0 ..< 100 where !input.isReadyForMoreMediaData { try? await Task.sleep(nanoseconds: 2_000_000) }
-                if input.isReadyForMoreMediaData { input.append(copy) }
-            }
+            for _ in 0 ..< 100 where !input.isReadyForMoreMediaData { try? await Task.sleep(nanoseconds: 2_000_000) }
+            append(last, at: endTime)
         }
         lastSample = nil
         input.markAsFinished()

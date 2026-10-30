@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreVideo
 import Foundation
+import ScreenCaptureKit
 import Testing
 @testable import RegravaCapture
 
@@ -68,5 +69,42 @@ struct SegmentedWriterTests {
         print("END-TIME duration \(duration) track \(range.duration.seconds)")
         #expect(duration >= 5.5 && duration < 5.6)
         #expect(range.duration.seconds >= 5.5 && range.duration.seconds < 5.6)
+    }
+
+    /// A session that begins while the screen stands still starts at once, with the latest
+    /// picture moved to its start.
+    @Test func sessionOnAStillScreenStartsWithTheLatestPicture() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("seg-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let channels = StreamChannels()
+        let stream = SCStream(filter: SCContentFilter(), configuration: SCStreamConfiguration(), delegate: nil)
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 320, 200, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+        var format: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer!, formatDescriptionOut: &format)
+        let before = CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), CMTime(seconds: 2, preferredTimescale: 600))
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: before, decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer!, formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &sample)
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sample!, createIfNecessary: true)! as NSArray
+        (attachments[0] as! NSMutableDictionary)[SCStreamFrameInfo.status.rawValue] = SCFrameStatus.complete.rawValue
+        channels.queue.sync { channels.stream(stream, didOutputSampleBuffer: sample!, of: .screen) }
+
+        let display = try SegmentedWriter(directory: dir, name: "channel-1-display-1", mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 200,
+        ], holdsLastSample: true)
+        let requested = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        let start = try await channels.attach([.screen: display])
+        print("STILL start \(start) requested \(requested) frame \(before.seconds)")
+        #expect(start >= requested && start - requested < 0.5)
+        #expect(display.startTime == start)
+        _ = await channels.detach()
+        await display.finish(endTime: CMTime(seconds: start + 1, preferredTimescale: 1_000_000_000))
+        let out = dir.appendingPathComponent("flat.mp4")
+        try RecordingFolder.flatten(display.playlistURL, to: out)
+        let duration = try await AVURLAsset(url: out).load(.duration).seconds
+        print("STILL duration \(duration)")
+        #expect(duration >= 1)
     }
 }
