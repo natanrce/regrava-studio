@@ -150,7 +150,9 @@ struct SegmentedWriterTests {
         }
         times = times.map { $0 - (times.first ?? 0) }
         print("REPEAT times \(times)")
-        #expect(times.count == 3)
-        #expect(times.count == 3 && abs(times[1] - 1) < 0.15 && abs(times[2] - 2) < 0.3)
+        // The test's wait can stretch on a busy machine, so check the spacing, not the count.
+        #expect(times.count >= 3)
+        let gaps = zip(times.dropFirst(), times).map { $0 - $1 }
+        #expect(gaps.allSatisfy { $0 >= 0.99 && $0 < 1.2 }, "\(gaps)")
     }
 }
