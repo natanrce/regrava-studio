@@ -14,7 +14,7 @@ struct ShortcutsPanel: View {
             if editor.project.captions.enableShortcuts {
                 SliderField(
                     name: "Shortcut labels size",
-                    value: editor.binding(\.captions.shortcutsSizeRatio, coalesce: "shortcuts-size"),
+                    value: editor.binding(\.captions.shortcutsSizeRatio),
                     range: 0.075...0.25,
                     preview: { "\(Int(($0 * 100).rounded()))%" },
                     resetValue: 0.1

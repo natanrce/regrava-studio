@@ -2,18 +2,18 @@ import RegravaCore
 import SwiftUI
 
 extension EditorModel {
-    /// Binding into the project; edits through the same key coalesce into one undo step.
-    func binding<T: Equatable>(_ keyPath: WritableKeyPath<Project, T>, coalesce: String? = nil) -> Binding<T> {
+    /// Binding into the project.
+    func binding<T: Equatable>(_ keyPath: WritableKeyPath<Project, T>) -> Binding<T> {
         Binding(
             get: { self.project[keyPath: keyPath] },
-            set: { value in self.change(coalesce: coalesce ?? String(describing: keyPath)) { $0[keyPath: keyPath] = value } }
+            set: { value in self.change { $0[keyPath: keyPath] = value } }
         )
     }
 
     func zoomBinding<T: Equatable>(_ id: UUID, _ keyPath: WritableKeyPath<ZoomRange, T>) -> Binding<T> {
         Binding(
             get: { self.project.zooms.first { $0.id == id }?[keyPath: keyPath] ?? ZoomRange(startMs: 0, endMs: 1)[keyPath: keyPath] },
-            set: { value in self.updateZoom(id, coalesce: "zoom-\(id)-\(keyPath)") { $0[keyPath: keyPath] = value } }
+            set: { value in self.updateZoom(id) { $0[keyPath: keyPath] = value } }
         )
     }
 }

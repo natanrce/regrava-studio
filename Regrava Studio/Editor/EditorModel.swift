@@ -174,11 +174,9 @@ final class EditorModel: ObservableObject {
         var transcript: SessionTranscript?
     }
 
-    private var undoStack: [HistoryEntry] = []
-    private var redoStack: [HistoryEntry] = []
+    private var history = UndoHistory<HistoryEntry>()
+    private var historyTimer: Task<Void, Never>?
     private var transcriptSaveTask: Task<Void, Never>?
-    private var lastCoalesceKey: String?
-    private var lastChangeAt = Date.distantPast
     private var isScrubbing = false {
         didSet {
             guard oldValue != isScrubbing else { return }
@@ -301,13 +299,13 @@ final class EditorModel: ObservableObject {
 
     // MARK: Changes & history
 
-    /// Applies a change with undo support. Changes sharing `coalesce` within one second
-    /// (slider drags, timeline drags) form a single undo step.
-    func change(coalesce key: String? = nil, _ body: (inout Project) -> Void) {
+    /// Applies a change with undo support. Changes less than 100 ms apart, from any source,
+    /// form a single undo step (for up to 5 s).
+    func change(_ body: (inout Project) -> Void) {
         var updated = project
         body(&updated)
         guard updated != project else { return }
-        recordHistory(coalesce: key)
+        recordHistory()
         apply(updated)
     }
 
@@ -318,42 +316,53 @@ final class EditorModel: ObservableObject {
         var updatedTranscript = transcript
         if let words, updatedTranscript != nil { updatedTranscript!.transcript = words }
         guard updatedProject != project || updatedTranscript != transcript else { return }
-        recordHistory(coalesce: nil)
+        recordHistory()
         applyTranscript(updatedTranscript)
         if updatedProject != project { apply(updatedProject) }
     }
 
     /// Published only when they change: every set redraws the editor.
     private func updateHistoryFlags() {
-        if canUndo != !undoStack.isEmpty { canUndo = !undoStack.isEmpty }
-        if canRedo != !redoStack.isEmpty { canRedo = !redoStack.isEmpty }
+        if canUndo != history.canUndo { canUndo = history.canUndo }
+        if canRedo != history.canRedo { canRedo = history.canRedo }
     }
 
-    private func recordHistory(coalesce key: String?) {
-        let now = Date()
-        if !(key != nil && key == lastCoalesceKey && now.timeIntervalSince(lastChangeAt) < 1) {
-            undoStack.append(HistoryEntry(project: project, transcript: transcript))
-            if undoStack.count > 200 { undoStack.removeFirst() }
-            redoStack.removeAll()
+    private static var historyClockMs: Double { ProcessInfo.processInfo.systemUptime * 1000 }
+
+    private func recordHistory() {
+        history.record(changingFrom: HistoryEntry(project: project, transcript: transcript), at: Self.historyClockMs)
+        updateHistoryFlags()
+        armHistoryTimer()
+    }
+
+    /// Runs the buffer's timer until it is no longer armed.
+    private func armHistoryTimer() {
+        historyTimer?.cancel()
+        guard let deadline = history.debouncer.deadline else { return }
+        historyTimer = Task { [weak self] in
+            let delay = max(0, deadline - Self.historyClockMs)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.history.timerFired(at: max(deadline, Self.historyClockMs))
+            self.updateHistoryFlags()
+            self.armHistoryTimer()
         }
-        lastCoalesceKey = key
-        lastChangeAt = now
     }
 
     func undo() {
-        guard let previous = undoStack.popLast() else { return }
-        redoStack.append(HistoryEntry(project: project, transcript: transcript))
-        lastCoalesceKey = nil
-        applyTranscript(previous.transcript)
-        apply(previous.project)
+        guard let previous = history.undo(current: HistoryEntry(project: project, transcript: transcript)) else { return }
+        restore(previous)
     }
 
     func redo() {
-        guard let next = redoStack.popLast() else { return }
-        undoStack.append(HistoryEntry(project: project, transcript: transcript))
-        lastCoalesceKey = nil
-        applyTranscript(next.transcript)
-        apply(next.project)
+        guard let next = history.redo(current: HistoryEntry(project: project, transcript: transcript)) else { return }
+        restore(next)
+    }
+
+    private func restore(_ entry: HistoryEntry) {
+        applyTranscript(entry.transcript)
+        apply(entry.project)
+        updateHistoryFlags()
     }
 
     /// Edited transcripts are saved 800 ms after the last change.
@@ -1180,8 +1189,8 @@ final class EditorModel: ObservableObject {
         if !isPlaying { seek(to: project.resolver.sourceToPlayback(startMs + (endMs - startMs) / 2)) }
     }
 
-    func updateMask(_ id: UUID, coalesce: String? = nil, _ body: (inout MaskRange) -> Void) {
-        change(coalesce: coalesce) { project in
+    func updateMask(_ id: UUID, _ body: (inout MaskRange) -> Void) {
+        change { project in
             guard let index = project.masks.firstIndex(where: { $0.id == id }) else { return }
             body(&project.masks[index])
         }
@@ -1201,7 +1210,7 @@ final class EditorModel: ObservableObject {
         let lower = others.last(where: { $0.endMs <= mask.startMs + 0.5 })?.endMs ?? 0
         let upper = others.first(where: { $0.startMs >= mask.endMs - 0.5 })?.startMs ?? project.recording.durationMs
         let newStart = clamp(start, lower, upper - mask.durationMs)
-        updateMask(id, coalesce: "drag-\(id)") {
+        updateMask(id) {
             $0.startMs = newStart
             $0.endMs = newStart + mask.durationMs
         }
@@ -1211,7 +1220,7 @@ final class EditorModel: ObservableObject {
         guard let mask = project.masks.first(where: { $0.id == id }) else { return }
         let others = project.sortedMasks.filter { $0.id != id }
         let minimum = MaskRange.minimumDurationMs
-        updateMask(id, coalesce: "resize-\(id)") {
+        updateMask(id) {
             if leading {
                 let lower = others.last(where: { $0.endMs <= mask.startMs + 0.5 })?.endMs ?? 0
                 $0.startMs = clamp(time, lower, mask.endMs - minimum)
@@ -1292,7 +1301,7 @@ final class EditorModel: ObservableObject {
 
     /// Trim by dragging an edge (playback time), moving the playhead to the trimmed edge.
     func trimSlice(_ id: UUID, edge: Project.SliceEdge, toSource sourceMs: Double) {
-        change(coalesce: "trim-\(id)") { project in
+        change { project in
             switch edge {
             case .start: project.updateSlice(id, sourceStartMs: sourceMs)
             case .end: project.updateSlice(id, sourceEndMs: sourceMs)
@@ -1302,8 +1311,8 @@ final class EditorModel: ObservableObject {
         seek(to: project.resolver.sourceToPlayback(edge == .start ? slice.sourceStartMs : slice.sourceEndMs))
     }
 
-    func updateSlice(_ id: UUID, coalesce: String? = nil, _ body: (inout Slice) -> Void) {
-        change(coalesce: coalesce) { project in
+    func updateSlice(_ id: UUID, _ body: (inout Slice) -> Void) {
+        change { project in
             guard let index = project.slices.firstIndex(where: { $0.id == id }) else { return }
             body(&project.slices[index])
         }
@@ -1438,8 +1447,8 @@ final class EditorModel: ObservableObject {
         return zoom.id
     }
 
-    func updateZoom(_ id: UUID, coalesce: String? = nil, _ body: (inout ZoomRange) -> Void) {
-        change(coalesce: coalesce) { project in
+    func updateZoom(_ id: UUID, _ body: (inout ZoomRange) -> Void) {
+        change { project in
             guard let index = project.zooms.firstIndex(where: { $0.id == id }) else { return }
             body(&project.zooms[index])
             project.zooms[index].isGenerated = false
@@ -1493,7 +1502,7 @@ final class EditorModel: ObservableObject {
         let lower = others.last(where: { $0.endMs <= zoom.startMs + 0.5 })?.endMs ?? 0
         let upper = others.first(where: { $0.startMs >= zoom.endMs - 0.5 })?.startMs ?? project.recording.durationMs
         let newStart = clamp(start, lower, upper - zoom.durationMs)
-        updateZoom(id, coalesce: "drag-\(id)") {
+        updateZoom(id) {
             $0.startMs = newStart
             $0.endMs = newStart + zoom.durationMs
         }
@@ -1503,7 +1512,7 @@ final class EditorModel: ObservableObject {
         guard let zoom = project.zooms.first(where: { $0.id == id }) else { return }
         let others = sortedZooms.filter { $0.id != id }
         let minimum = ZoomRange.minimumDurationMs
-        updateZoom(id, coalesce: "resize-\(id)") {
+        updateZoom(id) {
             if leading {
                 let lower = others.last(where: { $0.endMs <= zoom.startMs + 0.5 })?.endMs ?? 0
                 $0.startMs = clamp(time, lower, zoom.endMs - minimum)

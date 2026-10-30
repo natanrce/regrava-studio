@@ -128,7 +128,7 @@ struct GeneralPanel: View {
             set: { newHue in
                 let current = Double(NSColor(Color(rgba: style.background.gradientFrom)).usingColorSpace(.sRGB)?.hueComponent ?? 0) * 360
                 let delta = newHue - current
-                editor.change(coalesce: "hue") {
+                editor.change {
                     $0.style.background.gradientStops = $0.style.background.gradientStops.map { Self.rotateHue($0, by: delta) }
                 }
             }
@@ -259,7 +259,7 @@ struct CursorPanel: View {
                         NestedPanel {
                             SliderField(name: "Hide not moving cursor after", value: Binding(
                                 get: { after },
-                                set: { v in editor.change(coalesce: "hide-after") { $0.cursor.hideNotMovingAfterMs = v } }
+                                set: { v in editor.change { $0.cursor.hideNotMovingAfterMs = v } }
                             ), range: 500...5000, step: 100, preview: { seconds($0) }, resetValue: 2000)
                         }
                     }
@@ -275,7 +275,7 @@ struct CursorPanel: View {
                                 value: Binding(
                                     get: { loop },
                                     set: { v in
-                                        editor.change(coalesce: "loop") { $0.cursor.loopPositionBeforeEndMs = v }
+                                        editor.change { $0.cursor.loopPositionBeforeEndMs = v }
                                         editor.seek(to: editor.durationMs - v)
                                     }
                                 ),
@@ -309,7 +309,7 @@ struct CursorPanel: View {
                                 value: Binding(
                                     get: { cursor.stopMovementInLastPartMs },
                                     set: { v in
-                                        editor.change(coalesce: "stop-movement") { $0.cursor.stopMovementInLastPartMs = v }
+                                        editor.change { $0.cursor.stopMovementInLastPartMs = v }
                                         editor.seek(to: editor.durationMs - v)
                                     }
                                 ),
@@ -378,7 +378,7 @@ struct AnimationsPanel: View {
                 description: "Elements that are moving will have a cinematic motion blur effect applied",
                 value: Binding(
                     get: { editor.project.animation.motionBlurAmount },
-                    set: { v in editor.change(coalesce: "motion-blur") { $0.animation.motionBlurAmount = v } }
+                    set: { v in editor.change { $0.animation.motionBlurAmount = v } }
                 ),
                 range: 0...1,
                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -570,7 +570,7 @@ struct SliceInspector: View {
                             SliderField(
                                 name: "Microphone volume",
                                 icon: "microphone",
-                                value: Binding(get: { slice.volume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-mic-volume") { $0.volume = v } }),
+                                value: Binding(get: { slice.volume }, set: { v in editor.updateSlice(sliceID) { $0.volume = v } }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -580,7 +580,7 @@ struct SliceInspector: View {
                             SliderField(
                                 name: "System audio volume",
                                 icon: "hifispeaker",
-                                value: Binding(get: { slice.systemAudioVolume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-system-volume") { $0.systemAudioVolume = v } }),
+                                value: Binding(get: { slice.systemAudioVolume }, set: { v in editor.updateSlice(sliceID) { $0.systemAudioVolume = v } }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -590,7 +590,7 @@ struct SliceInspector: View {
                             SliderField(
                                 name: "External device audio volume",
                                 icon: "iphone.gen1.radiowaves.left.and.right",
-                                value: Binding(get: { slice.externalDeviceAudioVolume }, set: { v in editor.updateSlice(sliceID, coalesce: "slice-device-volume") { $0.externalDeviceAudioVolume = v } }),
+                                value: Binding(get: { slice.externalDeviceAudioVolume }, set: { v in editor.updateSlice(sliceID) { $0.externalDeviceAudioVolume = v } }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -690,7 +690,7 @@ struct MaskInspector: View {
                                     name: "Highlight mask opacity",
                                     value: Binding(
                                         get: { mask.highlightMaskOpacity },
-                                        set: { v in editor.updateMask(maskID, coalesce: "highlight-opacity") { $0.highlightMaskOpacity = v } }
+                                        set: { v in editor.updateMask(maskID) { $0.highlightMaskOpacity = v } }
                                     ),
                                     range: 0.1...0.9,
                                     preview: { "\(Int(($0 * 100).rounded()))%" },
@@ -847,7 +847,7 @@ struct AudioPanel: View {
                                     value: Binding(
                                         get: { audio.backgroundAudioVolume },
                                         set: { v in
-                                            editor.change(coalesce: "background-volume") { $0.audio.backgroundAudioVolume = (v * 100).rounded() / 100 }
+                                            editor.change { $0.audio.backgroundAudioVolume = (v * 100).rounded() / 100 }
                                             preview.setVolume(v)
                                         }
                                     ),
@@ -958,7 +958,7 @@ struct ClickSoundField: View {
                         icon: "computermouse",
                         value: Binding(
                             get: { audio.clickSoundEffectVolume },
-                            set: { v in editor.change(coalesce: "click-sound-volume") { $0.audio.clickSoundEffectVolume = (v * 10).rounded() / 10 } }
+                            set: { v in editor.change { $0.audio.clickSoundEffectVolume = (v * 10).rounded() / 10 } }
                         ),
                         range: 0...1,
                         step: 0.1,

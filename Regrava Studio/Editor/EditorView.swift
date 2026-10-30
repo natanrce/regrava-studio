@@ -584,7 +584,7 @@ private struct MaskOverlays: View {
                         rect: rect(bound, in: areaRect),
                         area: areaRect,
                         onChange: { newRect in
-                            editor.updateMask(id, coalesce: "mask-bounds-\(id)") { mask in
+                            editor.updateMask(id) { mask in
                                 mask.bounds = [recording(newRect, mask.bounds.first ?? bound, area: areaRect)]
                             }
                         }

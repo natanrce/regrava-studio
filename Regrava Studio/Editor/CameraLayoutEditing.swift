@@ -92,8 +92,8 @@ extension EditorModel {
         if !isPlaying { seek(to: project.resolver.sourceToPlayback(layout.midMs)) }
     }
 
-    func updateLayout(_ id: UUID, coalesce: String? = nil, _ body: (inout CameraLayoutRange) -> Void) {
-        change(coalesce: coalesce) { project in
+    func updateLayout(_ id: UUID, _ body: (inout CameraLayoutRange) -> Void) {
+        change { project in
             guard let index = project.cameraLayouts.firstIndex(where: { $0.id == id }) else { return }
             body(&project.cameraLayouts[index])
         }
@@ -113,7 +113,7 @@ extension EditorModel {
         let lower = others.last(where: { $0.endMs <= layout.startMs + 0.5 })?.endMs ?? 0
         let upper = others.first(where: { $0.startMs >= layout.endMs - 0.5 })?.startMs ?? project.recording.durationMs
         let newStart = clamp(start, lower, upper - layout.durationMs)
-        updateLayout(id, coalesce: "drag-\(id)") {
+        updateLayout(id) {
             $0.startMs = newStart
             $0.endMs = newStart + layout.durationMs
         }
@@ -123,7 +123,7 @@ extension EditorModel {
         guard let layout = project.cameraLayouts.first(where: { $0.id == id }) else { return }
         let others = project.sortedCameraLayouts.filter { $0.id != id }
         let minimum = CameraLayoutRange.minimumDurationMs
-        updateLayout(id, coalesce: "resize-\(id)") {
+        updateLayout(id) {
             if leading {
                 let lower = others.last(where: { $0.endMs <= layout.startMs + 0.5 })?.endMs ?? 0
                 $0.startMs = clamp(time, lower, layout.endMs - minimum)

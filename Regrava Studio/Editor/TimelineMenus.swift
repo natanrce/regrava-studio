@@ -48,17 +48,17 @@ extension EditorModel {
         var volumes: [MenuRow] = []
         if recording.hasMicrophone {
             volumes.append(.slider(title: "Microphone volume", value: slice.volume, range: 0...1, valueLabel: Self.percent) { [weak self] v in
-                self?.updateSlice(slice.id, coalesce: "slice-volume") { $0.volume = v }
+                self?.updateSlice(slice.id) { $0.volume = v }
             })
         }
         if recording.hasSystemAudio {
             volumes.append(.slider(title: "System audio volume", value: slice.systemAudioVolume, range: 0...1, valueLabel: Self.percent) { [weak self] v in
-                self?.updateSlice(slice.id, coalesce: "slice-system-volume") { $0.systemAudioVolume = v }
+                self?.updateSlice(slice.id) { $0.systemAudioVolume = v }
             })
         }
         if recording.hasExternalDeviceAudio {
             volumes.append(.slider(title: "External device audio volume", value: slice.externalDeviceAudioVolume, range: 0...1, valueLabel: Self.percent) { [weak self] v in
-                self?.updateSlice(slice.id, coalesce: "slice-device-volume") { $0.externalDeviceAudioVolume = v }
+                self?.updateSlice(slice.id) { $0.externalDeviceAudioVolume = v }
             })
         }
 
@@ -114,7 +114,7 @@ extension EditorModel {
 
         var level: [MenuRow] = [
             .slider(title: "Zoom level", value: first.scale, range: 1...4, valueLabel: Self.percent) { [weak self] v in
-                self?.change(coalesce: "zoom-level-menu") { project in
+                self?.change { project in
                     for i in project.zooms.indices where ids.contains(project.zooms[i].id) { project.zooms[i].scale = v }
                 }
                 self?.rememberDefaultZoomLevel(v)

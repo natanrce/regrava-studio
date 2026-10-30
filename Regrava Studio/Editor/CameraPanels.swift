@@ -74,7 +74,7 @@ struct CameraLayoutPanel: View {
                     if project.camera.hideDuringSilenceMs != nil {
                         SliderField(
                             name: "Minimum silence duration",
-                            value: Binding(get: { project.camera.hideDuringSilenceMs ?? 5000 }, set: { v in editor.change(coalesce: "silence-duration") { $0.camera.hideDuringSilenceMs = v } }),
+                            value: Binding(get: { project.camera.hideDuringSilenceMs ?? 5000 }, set: { v in editor.change { $0.camera.hideDuringSilenceMs = v } }),
                             range: 2000...15000,
                             preview: { String(format: "%.1fs", $0 / 1000) },
                             resetValue: 5000
