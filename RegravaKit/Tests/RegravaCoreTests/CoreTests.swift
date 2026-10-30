@@ -37,6 +37,12 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(zooms[0].scale == 2)
     }
 
+    @Test func zoomNearTheStartBeginsAtOneMillisecond() {
+        let zooms = AutoZoomGenerator.generate(events: [click(200.7)], durationMs: 20000, config: AutoZoomConfig())
+        #expect(zooms.first?.startMs == 1)
+        #expect(zooms.first?.endMs == 2700)
+    }
+
     @Test func clicksInLastSecondAreIgnored() {
         let zooms = AutoZoomGenerator.generate(events: [click(19500)], durationMs: 20000, config: AutoZoomConfig())
         #expect(zooms.isEmpty)

@@ -69,7 +69,7 @@ public enum AutoZoomGenerator {
             .filter { $0.kind == .down && $0.timeMs < latestClick }
             .map { click -> TimeSpan in
                 let t = click.timeMs.rounded(.down)
-                return TimeSpan(max(t - config.leadMs, 0), min(t + config.holdMs, latestEnd))
+                return TimeSpan(max(t - config.leadMs, 1), min(t + config.holdMs, latestEnd))
             }
         return Intervals.merge(spans, gap: config.mergeGapMs)
             .filter { $0.end - $0.start >= ZoomRange.minimumDurationMs }
