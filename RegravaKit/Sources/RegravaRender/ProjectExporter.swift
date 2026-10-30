@@ -139,6 +139,28 @@ public enum ProjectExporter {
         return output
     }
 
+    /// MP4: AAC at 192 kbps for delivery. ProRes: uncompressed 24-bit PCM, what editing formats
+    /// carry. Both 48 kHz stereo.
+    static func audioOutputSettings(format: ExportFormat) -> [String: Any] {
+        if format == .prores {
+            return [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: ExportEncoding.audioSampleRate,
+                AVNumberOfChannelsKey: 2,
+                AVLinearPCMBitDepthKey: ExportEncoding.pcmBitDepth,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+                AVLinearPCMIsBigEndianKey: false,
+            ]
+        }
+        return [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: ExportEncoding.audioSampleRate,
+            AVNumberOfChannelsKey: 2,
+            AVEncoderBitRateKey: ExportEncoding.aacBitsPerSecond,
+        ]
+    }
+
     private static func writeMovie(
         project: Project,
         videoURL: URL,
@@ -172,7 +194,15 @@ public enum ProjectExporter {
 
         var audioOutput: AVAssetReaderAudioMixOutput?
         if !audioTracks.isEmpty {
-            let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [AVFormatIDKey: kAudioFormatLinearPCM])
+            let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsNonInterleaved: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVSampleRateKey: ExportEncoding.audioSampleRate,
+                AVNumberOfChannelsKey: 2,
+            ])
             output.audioTimePitchAlgorithm = .spectral
             output.audioMix = media.audioMix
             reader.add(output)
@@ -186,18 +216,15 @@ public enum ProjectExporter {
         } catch {
             throw ExportError.cannotWrite(error.localizedDescription)
         }
+        // The index goes first, so the movie plays while it downloads.
+        writer.shouldOptimizeForNetworkUse = true
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoOutputSettings(settings: settings, codec: codec, size: outputSize))
         videoInput.expectsMediaDataInRealTime = false
         writer.add(videoInput)
 
         var audioInput: AVAssetWriterInput?
         if audioOutput != nil {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 192_000,
-            ])
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioOutputSettings(format: settings.format))
             input.expectsMediaDataInRealTime = false
             writer.add(input)
             audioInput = input

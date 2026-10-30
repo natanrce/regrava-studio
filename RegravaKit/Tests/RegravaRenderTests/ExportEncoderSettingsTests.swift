@@ -43,4 +43,16 @@ import VideoToolbox
         }
         #expect(ProjectExporter.videoOutputSettings(settings: .defaults(for: .prores), codec: nil, size: Size2(width: 1920, height: 1080))[AVVideoCompressionPropertiesKey] == nil)
     }
+
+    @Test func audioCodecPerFormat() {
+        let mp4 = ProjectExporter.audioOutputSettings(format: .mp4)
+        #expect(mp4[AVFormatIDKey] as? AudioFormatID == kAudioFormatMPEG4AAC)
+        #expect(mp4[AVEncoderBitRateKey] as? Int == 192_000)
+        #expect(mp4[AVSampleRateKey] as? Double == 48_000)
+        let prores = ProjectExporter.audioOutputSettings(format: .prores)
+        #expect(prores[AVFormatIDKey] as? AudioFormatID == kAudioFormatLinearPCM)
+        #expect(prores[AVLinearPCMBitDepthKey] as? Int == 24)
+        #expect(prores[AVLinearPCMIsFloatKey] as? Bool == false)
+        #expect(prores[AVNumberOfChannelsKey] as? Int == 2)
+    }
 }
