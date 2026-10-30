@@ -124,13 +124,17 @@ public enum KeyboardShortcuts {
     }
 
     private struct Item {
+        /// Position of the event in the recorded keystrokes: identifies it.
+        var index: Int
         var event: Keystroke
         var shortcut: [String]
     }
 
     /// Filtered key downs grouped into presses, without display times.
     private static func groups(_ keystrokes: [Keystroke], showSingleKeys: Bool) -> [[Item]] {
-        let mapped = keystrokes.filter { $0.kind == .down }.compactMap { event in shortcut(for: event).map { Item(event: event, shortcut: $0) } }
+        let mapped = keystrokes.enumerated().filter { $0.element.kind == .down }.compactMap { index, event in
+            shortcut(for: event).map { Item(index: index, event: event, shortcut: $0) }
+        }
         var filtered: [Item] = []
         for (i, item) in mapped.enumerated() {
             if i + 1 < mapped.count {
@@ -169,12 +173,13 @@ public enum KeyboardShortcuts {
         guard !groups.isEmpty else { return [] }
 
         // A non-repeat key down is matched with the next key up of the same character.
-        var keyUpTime: [Double: Double] = [:]
-        var pending: [String: Double] = [:]
-        for event in keystrokes {
+        // Matches are kept per key down event, so downs sharing a timestamp stay apart.
+        var keyUpTime: [Int: Double] = [:]
+        var pending: [String: Int] = [:]
+        for (index, event) in keystrokes.enumerated() {
             let key = event.character.lowercased()
             if event.kind == .down {
-                if !event.isARepeat { pending[key] = event.timeMs }
+                if !event.isARepeat { pending[key] = index }
             } else if let down = pending.removeValue(forKey: key) {
                 keyUpTime[down] = event.timeMs
             }
@@ -190,8 +195,8 @@ public enum KeyboardShortcuts {
             let first = downs[0].timeMs
             let lastDown = downs[downs.count - 1].timeMs
             var lastEvent = lastDown
-            for down in downs where !down.isARepeat {
-                if let up = keyUpTime[down.timeMs] { lastEvent = max(lastEvent, up) }
+            for item in group {
+                if let up = keyUpTime[item.index] { lastEvent = max(lastEvent, up) }
             }
             let previous = presses.last
             var press = ShortcutPress(shortcut: group[0].shortcut, keyDowns: downs, firstKeyDownMs: first, lastKeyDownMs: lastDown, lastEventMs: lastEvent, displayStartMs: 0, displayEndMs: lastDown + displayAfterMs)

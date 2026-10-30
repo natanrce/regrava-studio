@@ -68,6 +68,18 @@ import Testing
         #expect(KeyboardShortcuts.keyCaps(["Alt", " "]) == KeyboardShortcuts.keyCaps(KeyboardShortcuts.shortcut(for: Keystroke(kind: .down, timeMs: 0, character: " ", activeModifiers: [.option]))!))
     }
 
+    @Test func keyUpsMatchTheirOwnKeyDownWhenTimesCollide() {
+        let keys = [
+            Keystroke(kind: .down, timeMs: 1000, character: "a", activeModifiers: [.command]),
+            Keystroke(kind: .down, timeMs: 1000, character: "b", activeModifiers: [.command]),
+            Keystroke(kind: .up, timeMs: 1100, character: "b", activeModifiers: [.command]),
+            Keystroke(kind: .up, timeMs: 1500, character: "a", activeModifiers: [.command]),
+        ]
+        let presses = KeyboardShortcuts.presses(keystrokes: keys, mouseEvents: [], showSingleKeys: false)
+        #expect(presses.map(\.shortcut) == [["Meta", "a"], ["Meta", "b"]])
+        #expect(presses.map(\.lastEventMs) == [1500, 1100])
+    }
+
     @Test func heldModifierShowsEarly() {
         let mouse = [
             MouseEvent(kind: .move, timeMs: 3000, position: Vec2(0, 0)),
