@@ -349,14 +349,19 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// Undo and redo keep the playhead on its recording frame (`stickyAction`).
     func undo() {
-        guard let previous = history.undo(current: HistoryEntry(project: project, transcript: transcript)) else { return }
-        restore(previous)
+        stickyPlayhead {
+            guard let previous = history.undo(current: HistoryEntry(project: project, transcript: transcript)) else { return }
+            restore(previous)
+        }
     }
 
     func redo() {
-        guard let next = history.redo(current: HistoryEntry(project: project, transcript: transcript)) else { return }
-        restore(next)
+        stickyPlayhead {
+            guard let next = history.redo(current: HistoryEntry(project: project, transcript: transcript)) else { return }
+            restore(next)
+        }
     }
 
     private func restore(_ entry: HistoryEntry) {
