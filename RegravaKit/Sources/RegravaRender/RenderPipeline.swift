@@ -347,9 +347,9 @@ public enum PlaybackComposition {
         for (index, track) in tracks.enumerated() {
             let input = AVMutableAudioMixInputParameters(track: track)
             if let built, track.trackID == built.backgroundTrackID {
-                input.setVolume(Float(audio.backgroundAudioVolume * audio.volume), at: .zero)
+                input.setVolume(Float(audio.backgroundAudioVolume), at: .zero)
             } else if let built, built.clickTrackIDs.contains(track.trackID) {
-                input.setVolume(Float(audio.clickSoundEffectVolume * audio.volume), at: .zero)
+                input.setVolume(Float(audio.clickSoundEffectVolume), at: .zero)
             } else if index < sources.count {
                 let source = sources[index]
                 if audio.isMuted(source) {
@@ -357,11 +357,9 @@ public enum PlaybackComposition {
                 } else {
                     for (slice, link) in zip(project.slices, resolver.links) {
                         let at = CMTime(seconds: link.playbackStartMs / 1000, preferredTimescale: 600)
-                        input.setVolume(Float(slice.volume(for: source) * audio.volume), at: at)
+                        input.setVolume(Float(slice.volume(for: source)), at: at)
                     }
                 }
-            } else {
-                input.setVolume(Float(audio.volume), at: .zero)
             }
             parameters.append(input)
         }
