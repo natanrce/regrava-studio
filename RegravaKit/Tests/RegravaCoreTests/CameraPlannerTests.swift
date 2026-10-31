@@ -44,3 +44,13 @@ extension CameraPlannerTests {
         #expect(planner(q).activeZoom(at: 4000) == nil)
     }
 }
+
+extension CameraPlannerTests {
+    @Test func anInstantLoupeSnapsTheScreen() {
+        let p = project([ZoomRange(startMs: 1000, endMs: 3000, isInstant: true, presentation: .loupe)])
+        #expect(planner(p).isInInstantWindow(3050))
+        #expect(!planner(p).isInInstantWindow(3051))
+        let disabled = project([ZoomRange(startMs: 1000, endMs: 3000, isDisabled: true, isInstant: true)])
+        #expect(!planner(disabled).isInInstantWindow(2000))
+    }
+}

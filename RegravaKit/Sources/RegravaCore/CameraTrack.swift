@@ -537,6 +537,8 @@ struct CameraPlanner {
     let zooms: [ZoomRange]
     /// Every zoom ordered by start, ties in project order.
     let allZoomsByStart: [ZoomRange]
+    /// Enabled zooms of any kind with an instant animation.
+    let instantZooms: [ZoomRange]
     /// Enabled glass loupe zooms.
     let loupes: [ZoomRange]
     let groups: [UUID: [FocusGroup]]
@@ -563,6 +565,7 @@ struct CameraPlanner {
         allZoomsByStart = project.zooms.enumerated()
             .sorted { $0.element.startMs != $1.element.startMs ? $0.element.startMs < $1.element.startMs : $0.offset < $1.offset }
             .map(\.element)
+        instantZooms = allZoomsByStart.filter { $0.isInstant && !$0.isDisabled }
         let enabled = project.zooms.enumerated().filter { !$0.element.isDisabled }
         enabledZoomsByEnd = enabled
             .sorted { $0.element.endMs != $1.element.endMs ? $0.element.endMs < $1.element.endMs : $0.offset < $1.offset }
@@ -655,8 +658,9 @@ struct CameraPlanner {
         return Rect2(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    /// Any enabled instant zoom, loupes included, snaps the screen until 50 ms after its end.
     func isInInstantWindow(_ t: Double) -> Bool {
-        zooms.contains { $0.isInstant && t >= $0.startMs && t <= $0.endMs + 50 }
+        instantZooms.contains { t >= $0.startMs && t <= $0.endMs + 50 }
     }
 
     /// `getIsHiddenAtTime`: never in a fullscreen-camera range; hidden during a long silence
