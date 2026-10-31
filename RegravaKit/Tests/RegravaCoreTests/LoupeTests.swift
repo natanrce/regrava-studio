@@ -22,7 +22,7 @@ import Testing
         // Long after, the lens sits at the same place with no optics: invisible.
         #expect(track.frame(at: 11_000).loupe == nil)
         // Before the loupe, the nearest zoom is that loupe: same radius, zoom 1.
-        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, sparse: p.mouseEvents)
+        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, pathEvents: p.mouseEvents)
         let before = planner.loupeTarget(at: 500)
         #expect(!before.isActive && before.frame.radius > 0.3 && before.frame.zoom == 1 && before.frame.presence == 0)
     }
@@ -32,14 +32,14 @@ import Testing
             ZoomRange(startMs: 1000, endMs: 3000, scale: 2, presentation: .loupe),
             ZoomRange(startMs: 3500, endMs: 6000, scale: 2),
         ])
-        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, sparse: p.mouseEvents)
+        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, pathEvents: p.mouseEvents)
         #expect(planner.loupeTarget(at: 3400).frame == .none)
         #expect(planner.loupeTarget(at: 3100).frame.radius > 0)
     }
 
     @Test func loupeSpringIsStifferThanTheScreen() {
         let p = project([ZoomRange(startMs: 1000, endMs: 3000, presentation: .loupe)])
-        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, sparse: p.mouseEvents)
+        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, pathEvents: p.mouseEvents)
         #expect(planner.loupeSpring(at: 2000).stiffness == p.animation.screenSpring.stiffness * 1.5)
     }
 
@@ -51,7 +51,7 @@ import Testing
 
     @Test func cameraCoverageIsTheLensShareOfTheCamera() {
         let p = project([])
-        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, sparse: p.mouseEvents)
+        let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, pathEvents: p.mouseEvents)
         let screen = Rect2(x: 0, y: 0, width: 1000, height: 1000)
         let camera = Rect2(x: 400, y: 400, width: 200, height: 200)
         func lens(_ radius: Double, at center: Vec2 = Vec2(0.5, 0.5), active: Bool = true) -> (frame: LoupeFrame, isActive: Bool) {

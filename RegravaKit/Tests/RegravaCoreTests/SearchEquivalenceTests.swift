@@ -110,7 +110,7 @@ import Testing
         for list in [zooms, [], [zooms[1]], [zooms[4]]] {
             var p = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 12_000, fps: 60), mouseEvents: [MouseEvent(kind: .move, timeMs: 0, position: Vec2(960, 540))])
             p.zooms = list
-            let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, sparse: p.mouseEvents)
+            let planner = CameraPlanner(project: p, timeline: LayoutTimeline(project: p), cleaned: p.mouseEvents, pathEvents: p.mouseEvents)
             let enabled = list.filter { !$0.isDisabled }
             for t in Self.probes(list.flatMap { [$0.startMs, $0.endMs] }) {
                 #expect(planner.previousEnabledZoom(endingAtOrBefore: t) == enabled.filter { $0.endMs <= t }.max { $0.endMs < $1.endMs })

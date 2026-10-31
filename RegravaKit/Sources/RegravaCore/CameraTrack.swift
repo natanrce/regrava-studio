@@ -123,7 +123,6 @@ public final class CameraTrack: @unchecked Sendable {
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
         let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.removeShakeThreshold)
-        let sparse = MouseProcessing.downsample(cleaned, minDistance: 10 * project.recording.pointPixelScale)
         clicks = cleaned.filter { $0.kind == .down }
         cursorConfig = project.cursor
         let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)
@@ -134,7 +133,7 @@ public final class CameraTrack: @unchecked Sendable {
         let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
         let hoverTimes = project.cursorHoverTimes(hovers)
 
-        let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, sparse: sparse, silence: silence)
+        let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, pathEvents: pathEvents, silence: silence)
         self.planner = planner
         plainResolver = project.plainLayoutResolver
 
@@ -533,6 +532,9 @@ struct CameraPlanner {
     let project: Project
     let timeline: LayoutTimeline
     let cleaned: [MouseEvent]
+    /// The events the drawn cursor follows (`cursorPathEvents`): resting focus and auto-zoom
+    /// groups come from them.
+    let pathEvents: [MouseEvent]
     /// Enabled zooms that move the screen (not loupes), ordered by start.
     let zooms: [ZoomRange]
     /// Every zoom ordered by start, ties in project order.
@@ -550,11 +552,12 @@ struct CameraPlanner {
     let enabledZoomsByEnd: [ZoomRange]
     let enabledZoomsByStart: [ZoomRange]
 
-    init(project: Project, timeline: LayoutTimeline, cleaned: [MouseEvent], sparse: [MouseEvent], silence: [SilenceChunk] = []) {
+    init(project: Project, timeline: LayoutTimeline, cleaned: [MouseEvent], pathEvents: [MouseEvent], silence: [SilenceChunk] = []) {
         self.project = project
         self.silence = silence
         self.timeline = timeline
         self.cleaned = cleaned
+        self.pathEvents = pathEvents
         // Any enabled screen zoom moves the screen, a 1× one included.
         zooms = project.zooms
             .filter { !$0.isDisabled && $0.presentation == .screen }
@@ -574,16 +577,23 @@ struct CameraPlanner {
             .sorted { $0.element.startMs != $1.element.startMs ? $0.element.startMs < $1.element.startMs : $0.offset < $1.offset }
             .map(\.element)
 
+        // Thinned to one event every 10 points, presses and releases always kept.
         let video = project.recording.videoSize
+        let sparse = MouseProcessing.downsample(pathEvents, minDistance: 10 * project.recording.pointPixelScale)
         var groups: [UUID: [FocusGroup]] = [:]
         let sparseAscending = isAscending(count: sparse.count) { sparse[$0].timeMs }
-        for zoom in zooms + loupes where zoom.mode == .auto {
+        let smooth = project.animation.mouseSpring != nil
+        // Every auto zoom, disabled ones included: one carried behind a fullscreen camera may be.
+        for zoom in allZoomsByStart where zoom.mode == .auto {
             var events = indices(count: sparse.count, ascending: sparseAscending, from: zoom.startMs, through: zoom.endMs, key: { sparse[$0].timeMs }).map { sparse[$0] }
-            // Include where the cursor already was when the zoom starts.
-            if let i = MouseProcessing.lastIndex(atOrBefore: zoom.startMs, in: sparse), sparse[i].timeMs < zoom.startMs {
-                var carried = sparse[i]
+            // An event right at the start is also counted 1 ms before it.
+            if let first = events.first, first.timeMs == zoom.startMs {
+                var carried = first
                 carried.timeMs = zoom.startMs - 1
                 events.insert(carried, at: 0)
+            }
+            if events.isEmpty, let fallback = Self.eventNear(zoom.startMs, pathEvents: pathEvents, smooth: smooth) {
+                events = [fallback]
             }
             // A group may span at most half of what is visible at this zoom level.
             let extent = Size2(width: video.width / zoom.scale * 0.5, height: video.height / zoom.scale * 0.5)
@@ -592,9 +602,23 @@ struct CameraPlanner {
         self.groups = groups
         let visible = timeline.defaultResolver.visibleSourcePart(level: 1)
         restingGroups = FocusGrouping.build(
-            events: sparse,
+            events: pathEvents,
             maxExtent: Size2(width: visible.width * 0.5, height: visible.height * 0.5)
         )
+    }
+
+    /// Where an auto zoom without events looks: with smooth movement, a press or release
+    /// within 500 ms after `t`; otherwise the event at or before `t`, else the next one.
+    static func eventNear(_ t: Double, pathEvents: [MouseEvent], smooth: Bool) -> MouseEvent? {
+        if smooth {
+            let buttons = pathEvents.filter(\.isClick)
+            if let i = ceilSearch(count: buttons.count, value: t, key: { buttons[$0].timeMs }), buttons[i].timeMs - t <= 500 {
+                return buttons[i]
+            }
+        }
+        let i = floorSearch(count: pathEvents.count, value: t, key: { pathEvents[$0].timeMs })
+            ?? ceilSearch(count: pathEvents.count, value: t, key: { pathEvents[$0].timeMs })
+        return i.map { pathEvents[$0] }
     }
 
     /// The zoom moving the screen (`screenMovingRange`): the active zoom, the next one within its
@@ -617,15 +641,15 @@ struct CameraPlanner {
         return nil
     }
 
-    func focus(for zoom: ZoomRange, at t: Double) -> Vec2 {
+    /// Where `zoom` looks at `t`; nil for an auto zoom with no cursor to follow, which leaves
+    /// the screen at its resting focus.
+    func focus(for zoom: ZoomRange, at t: Double) -> Vec2? {
         let video = project.recording.videoSize
         switch zoom.mode {
         case .manual:
             return zoom.manualTarget
         case .auto:
-            let point = FocusGrouping.group(at: t, in: groups[zoom.id] ?? [])?.center
-                ?? MouseProcessing.position(at: zoom.startMs, in: cleaned)
-            guard let point else { return .center01 }
+            guard let point = FocusGrouping.group(at: t, in: groups[zoom.id] ?? [])?.center else { return nil }
             return Vec2(clamp(point.x / video.width, 0, 1), clamp(point.y / video.height, 0, 1))
         }
     }
@@ -636,7 +660,7 @@ struct CameraPlanner {
         let video = project.recording.videoSize
         let group = floorSearch(count: restingGroups.count, value: t, key: { restingGroups[$0].startMs }).map { restingGroups[$0] }
         let center = group.map { Vec2($0.center.x / video.width, $0.center.y / video.height) } ?? .center01
-        guard let b = Self.cursorBounds(cleaned, from: t, to: t + 350) else { return (center, nil) }
+        guard let b = Self.cursorBounds(pathEvents, from: t, to: t + 350) else { return (center, nil) }
         return (center, Rect2(x: b.x / video.width, y: b.y / video.height, width: b.width / video.width, height: b.height / video.height))
     }
 
@@ -686,8 +710,8 @@ struct CameraPlanner {
         let cameraResolver = variant(timeline.cameraResolver(at: t))
         let zoom = activeZoom(at: t)
         let screen: Rect2
-        if let zoom {
-            screen = screenResolver.screenRect(focus01: focus(for: zoom, at: t), level: zoom.scale)
+        if let zoom, let focus = focus(for: zoom, at: t) {
+            screen = screenResolver.screenRect(focus01: focus, level: zoom.scale)
         } else {
             let resting = restingFocus(at: t)
             screen = screenResolver.screenRect(focus01: resting.center, bounds01: resting.bounds, level: 1)

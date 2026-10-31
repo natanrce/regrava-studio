@@ -80,10 +80,11 @@ extension CameraPlanner {
         return next
     }
 
-    /// The lens of `zoom` at `t`, with a slow drift (1.25% over 12 s and 18 s).
-    func loupeOptions(_ zoom: ZoomRange, at t: Double) -> LoupeFrame {
+    /// The lens of `zoom` at `t`, with a slow drift (1.25% over 12 s and 18 s); nil for an
+    /// auto loupe with no cursor to follow.
+    func loupeOptions(_ zoom: ZoomRange, at t: Double) -> LoupeFrame? {
         let video = project.recording.videoSize
-        let p = focus(for: zoom, at: t)
+        guard let p = focus(for: zoom, at: t) else { return nil }
         let drift = Vec2(sin(t / 12_000 * 2 * .pi) * 0.0125, cos((t + 7500) / 18_000 * 2 * .pi) * 0.0125)
         let o = zoom.loupeOptions
         return LoupeFrame(
@@ -99,7 +100,7 @@ extension CameraPlanner {
 
     /// The lens target; `isActive` when a loupe range applies.
     func loupeTarget(at t: Double) -> (frame: LoupeFrame, isActive: Bool) {
-        if let range = loupeRange(at: t) { return (loupeOptions(range, at: t), true) }
+        if let range = loupeRange(at: t), let frame = loupeOptions(range, at: t) { return (frame, true) }
         // Inactive stand-in: the nearer of the previous and next zoom of any kind; a loupe
         // keeps its place and size while its optics fade, anything else collapses the lens.
         let previous = previousEnabledZoom(endingAtOrBefore: t)
@@ -111,8 +112,7 @@ extension CameraPlanner {
         case let (nil, n?): nearest = (n, n.startMs)
         default: nearest = nil
         }
-        guard let nearest, nearest.zoom.presentation == .loupe else { return (.none, false) }
-        var frame = loupeOptions(nearest.zoom, at: nearest.at)
+        guard let nearest, nearest.zoom.presentation == .loupe, var frame = loupeOptions(nearest.zoom, at: nearest.at) else { return (.none, false) }
         frame.bevelRatio = 0
         frame.zoom = 1
         frame.chromaticAberration = 0

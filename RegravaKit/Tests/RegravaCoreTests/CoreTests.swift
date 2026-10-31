@@ -251,7 +251,8 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
     }
 
     @Test func followsTheActiveGroup() {
-        let events = [move(0, 200, 200), move(3000, 1700, 900)]
+        // Only events inside the zoom form its groups: one at 600 ms, one at 3000 ms.
+        let events = [move(0, 200, 200), move(600, 220, 220), move(3000, 1700, 900)]
         let p = project(zooms: [ZoomRange(startMs: 500, endMs: 6000, scale: 2)], events: events)
         let track = CameraTrack(project: p)
         let early = track.frame(at: 2900).screenRect
