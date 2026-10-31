@@ -110,7 +110,7 @@ public enum PresetFile {
                 "background": ["blurAmount01": 0, "edgeFalloff01": camera.background.edgeFalloff01],
             ] as [String: Any],
             "animations": [
-                "mouseMovementSpring": spring(animation.mouseSpring ?? animation.screenSpring),
+                "mouseMovementSpring": animation.mouseSpring.map(spring) ?? NSNull(),
                 "screenMovementSpring": spring(animation.screenSpring),
                 "motionBlurAmount": animation.motionBlurAmount,
             ] as [String: Any],
@@ -258,7 +258,8 @@ public enum PresetFile {
         var animation = AnimationConfig()
         let animations = dict(c, "animations")
         animation.screenSpring = spring(dict(animations, "screenMovementSpring"), animation.screenSpring)
-        if animations["mouseMovementSpring"] != nil { animation.mouseSpring = spring(dict(animations, "mouseMovementSpring"), animation.mouseSpring ?? animation.screenSpring) }
+        // Nullable, null by default: no cursor smoothing.
+        animation.mouseSpring = (animations["mouseMovementSpring"] as? [String: Any]).map { spring($0, SpringConfig()) }
         animation.motionBlurAmount = num(animations, "motionBlurAmount", animation.motionBlurAmount)
         animation.startsZoomEarly = bool(dict(c, "zooms"), "startAnimationEarly", animation.startsZoomEarly)
 

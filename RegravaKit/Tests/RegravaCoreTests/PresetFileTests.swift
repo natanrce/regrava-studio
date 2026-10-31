@@ -41,6 +41,20 @@ struct PresetFileTests {
         #expect(back.defaultLayout == config.defaultLayout)
     }
 
+    /// No cursor smoothing is written as null and read back as nil; a missing key means null too.
+    @Test func keepsNoCursorSmoothing() throws {
+        let project = Project(recording: RecordingInfo(videoSize: Size2(width: 100, height: 100), pointPixelScale: 1, durationMs: 1000, fps: 60), mouseEvents: [])
+        var config = project.presetConfig
+        config.animation.mouseSpring = nil
+        let data = try PresetFile.encode(config, appVersion: "1.0")
+        let json = (try JSONSerialization.jsonObject(with: data) as! [String: Any])["json"] as! [String: Any]
+        let animations = (json["projectConfig"] as! [String: Any])["animations"] as! [String: Any]
+        #expect(animations["mouseMovementSpring"] is NSNull)
+        #expect(try PresetFile.decode(data).animation.mouseSpring == nil)
+        let missing = #"{"json":{"version":"4.0.0","projectConfig":{"animations":{}}}}"#.data(using: .utf8)!
+        #expect(try PresetFile.decode(missing).animation.mouseSpring == nil)
+    }
+
     @Test func rejectsABadVersion() {
         let data = #"{"json":{"version":"x","projectConfig":{}}}"#.data(using: .utf8)!
         #expect(throws: PresetFile.Failure.self) { try PresetFile.decode(data) }
