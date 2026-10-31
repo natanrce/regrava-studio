@@ -297,6 +297,15 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(track.frame(at: 5000).screenRect == track.layout.restScreen)
     }
 
+    @Test func typingLooksAtMovesRemovedAsShakes() {
+        // The 1300 ms move is a shake, but it still counts as the mouse moving after the keys.
+        let events = [move(0, 100, 100), move(1300, 1500, 900), move(5000, 100, 100), move(5010, 100, 100)]
+        var p = project(zooms: [], events: events)
+        p.keystrokes = [1000.0, 1100, 1200].map { Keystroke(kind: .down, timeMs: $0, character: "a") }
+        let track = CameraTrack(project: p)
+        #expect(track.frame(at: 2000).cursorOpacity > 0.99)
+    }
+
     @Test func clickRippleIsReported() {
         let track = CameraTrack(project: project(zooms: [], events: [click(1000, 10, 10)]))
         #expect(track.frame(at: 1100).clickProgress != nil)

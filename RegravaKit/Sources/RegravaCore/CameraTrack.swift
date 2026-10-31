@@ -264,7 +264,7 @@ public final class CameraTrack: @unchecked Sendable {
             frame.cursorScale = press.value
             frame.isInstantSnap = target.instant
             // Cursor opacity: fades out quickly while typing, otherwise follows visibility.
-            let typing = Typing.isActivelyTyping(at: source, keystrokes: project.keystrokes, mouseEvents: cleaned)
+            let typing = Typing.isActivelyTyping(at: source, keystrokes: project.keystrokes, mouseEvents: sorted)
             let visible = slice?.hideCursor != true
                 && Self.isCursorVisible(at: source, pathEvents: pathEvents, hideAfterMs: project.cursor.hideNotMovingAfterMs)
             let opacitySpring = typing ? Self.typingFadeSpring : Self.visibilitySpring
