@@ -125,7 +125,7 @@ public final class CameraTrack: @unchecked Sendable {
         sampleIntervalMs = 1000 / max(fps, 1)
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
-        let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.removeShakeThreshold)
+        let cleaned = MouseProcessing.removeShakes(sorted, threshold: project.cursor.removeShakeThreshold)
         clicks = cleaned.filter { $0.kind == .down }
         cursorConfig = project.cursor
         let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)

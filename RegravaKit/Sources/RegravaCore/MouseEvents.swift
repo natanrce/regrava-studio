@@ -35,23 +35,27 @@ public struct MouseEvent: Codable, Hashable, Sendable {
 }
 
 public enum MouseProcessing {
-    /// Removes isolated single-sample jumps: a move that is far from both neighbours while
-    /// the neighbours themselves are close to each other (tracking glitches, warps).
-    public static func removeSpikes(_ events: [MouseEvent], threshold: Double) -> [MouseEvent] {
-        guard threshold > 0, events.count >= 3 else { return events }
-        var result: [MouseEvent] = [events[0]]
-        result.reserveCapacity(events.count)
-        for i in 1..<(events.count - 1) {
-            let previous = events[i - 1].position
-            let current = events[i]
-            let next = events[i + 1].position
-            let isSpike = current.kind == .move
-                && current.position.distance(to: previous) > threshold
-                && current.position.distance(to: next) > threshold
-                && previous.distance(to: next) <= threshold
-            if !isSpike { result.append(current) }
+    /// "Remove cursor shakes": drops every event whose Manhattan distance to both of the next two
+    /// events exceeds `threshold`. A dropped press also drops the next release. 0 = off.
+    public static func removeShakes(_ events: [MouseEvent], threshold: Double) -> [MouseEvent] {
+        guard threshold != 0 else { return events }
+        func isFar(_ a: MouseEvent, _ b: MouseEvent) -> Bool {
+            abs(a.position.x - b.position.x) + abs(a.position.y - b.position.y) > threshold
         }
-        result.append(events[events.count - 1])
+        var result: [MouseEvent] = []
+        result.reserveCapacity(events.count)
+        var dropNextUp = false
+        for (i, event) in events.enumerated() {
+            if dropNextUp && event.kind == .up {
+                dropNextUp = false
+                continue
+            }
+            guard i + 2 < events.count, isFar(event, events[i + 1]), isFar(event, events[i + 2]) else {
+                result.append(event)
+                continue
+            }
+            if event.kind == .down { dropNextUp = true }
+        }
         return result
     }
 

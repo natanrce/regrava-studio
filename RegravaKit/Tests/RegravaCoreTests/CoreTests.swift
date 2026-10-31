@@ -79,15 +79,35 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
 }
 
 @Suite struct MouseProcessingTests {
-    @Test func removesIsolatedSpike() {
-        let events = [move(0, 0, 0), move(10, 900, 900), move(20, 5, 5)]
-        let cleaned = MouseProcessing.removeSpikes(events, threshold: 500)
-        #expect(cleaned.map(\.timeMs) == [0, 20])
+    @Test func removesEventFarFromTheNextTwo() {
+        let events = [move(0, 0, 0), move(10, 900, 900), move(20, 5, 5), move(30, 6, 6)]
+        let cleaned = MouseProcessing.removeShakes(events, threshold: 500)
+        #expect(cleaned.map(\.timeMs) == [0, 20, 30])
     }
 
-    @Test func keepsRealLongMovement() {
+    @Test func shakeDistanceIsManhattan() {
+        // Euclidean 424 but Manhattan 600: still a shake at 500.
+        let events = [move(0, 0, 0), move(10, 300, 300), move(20, 0, 0), move(30, 1, 0)]
+        #expect(MouseProcessing.removeShakes(events, threshold: 500).map(\.timeMs) == [0, 20, 30])
+    }
+
+    @Test func lastTwoEventsAreAlwaysKept() {
         let events = [move(0, 0, 0), move(10, 900, 900), move(20, 1800, 1800)]
-        #expect(MouseProcessing.removeSpikes(events, threshold: 500).count == 3)
+        #expect(MouseProcessing.removeShakes(events, threshold: 500).map(\.timeMs) == [10, 20])
+    }
+
+    @Test func droppedPressDropsItsRelease() {
+        var down = click(10, 900, 900)
+        down.kind = .down
+        var up = click(40, 0, 0)
+        up.kind = .up
+        let events = [move(0, 0, 0), down, move(20, 0, 0), move(30, 0, 0), up, move(50, 0, 0)]
+        #expect(MouseProcessing.removeShakes(events, threshold: 500).map(\.timeMs) == [0, 20, 30, 50])
+    }
+
+    @Test func zeroThresholdKeepsEverything() {
+        let events = [move(0, 0, 0), move(10, 900, 900), move(20, 5, 5), move(30, 6, 6)]
+        #expect(MouseProcessing.removeShakes(events, threshold: 0).count == 4)
     }
 
     @Test func downsampleKeepsClicks() {
