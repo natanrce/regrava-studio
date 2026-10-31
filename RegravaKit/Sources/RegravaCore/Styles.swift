@@ -294,6 +294,12 @@ public enum ClickEffect: String, Codable, CaseIterable, Sendable {
     case circle, ripple
 }
 
+/// "Rotate while moving": Tilt leans with horizontal speed, Follow points along the travel.
+public enum CursorRotationMode: String, Codable, CaseIterable, Sendable {
+    case velocity
+    case directional
+}
+
 /// `cursor.set`: the cursor style and the variant chosen per type.
 public struct CursorSetChoice: Codable, Hashable, Sendable {
     public var id: String
@@ -331,6 +337,10 @@ public struct CursorConfig: Codable, Hashable, Sendable {
     public var stopMovementInLastPartMs: Double
     /// "Rotate cursor" (−180…180°).
     public var baseRotation: Double
+    /// "Rotate while moving", added to `baseRotation`.
+    public var rotationMode: CursorRotationMode
+    /// "Tilt amount" (0…2) of the Tilt mode.
+    public var rotateOnXMovementRatio: Double
     /// "Always use pointer cursor".
     public var alwaysUseDefault: Bool
     /// "Optimize cursor changes".
@@ -347,6 +357,8 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         removeShakeThreshold: Double = 500,
         stopMovementInLastPartMs: Double = 0,
         baseRotation: Double = 0,
+        rotationMode: CursorRotationMode = .velocity,
+        rotateOnXMovementRatio: Double = 0.5,
         alwaysUseDefault: Bool = false,
         optimizeOriginalTypes: Bool = true,
         followRecordedPositionOnHover: Bool = true,
@@ -361,6 +373,8 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         self.removeShakeThreshold = removeShakeThreshold
         self.stopMovementInLastPartMs = stopMovementInLastPartMs
         self.baseRotation = baseRotation
+        self.rotationMode = rotationMode
+        self.rotateOnXMovementRatio = rotateOnXMovementRatio
         self.alwaysUseDefault = alwaysUseDefault
         self.optimizeOriginalTypes = optimizeOriginalTypes
         self.followRecordedPositionOnHover = followRecordedPositionOnHover
@@ -377,6 +391,8 @@ public struct CursorConfig: Codable, Hashable, Sendable {
         removeShakeThreshold = c.value(.removeShakeThreshold, default: d.removeShakeThreshold)
         stopMovementInLastPartMs = c.value(.stopMovementInLastPartMs, default: d.stopMovementInLastPartMs)
         baseRotation = c.value(.baseRotation, default: d.baseRotation)
+        rotationMode = c.value(.rotationMode, default: d.rotationMode)
+        rotateOnXMovementRatio = c.value(.rotateOnXMovementRatio, default: d.rotateOnXMovementRatio)
         alwaysUseDefault = c.value(.alwaysUseDefault, default: d.alwaysUseDefault)
         optimizeOriginalTypes = c.value(.optimizeOriginalTypes, default: d.optimizeOriginalTypes)
         followRecordedPositionOnHover = c.value(.followRecordedPositionOnHover, default: d.followRecordedPositionOnHover)

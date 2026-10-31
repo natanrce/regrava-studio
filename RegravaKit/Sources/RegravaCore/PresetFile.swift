@@ -57,8 +57,8 @@ public enum PresetFile {
                 "size": cursor.size,
                 "stopMovementInLastPartMs": cursor.stopMovementInLastPartMs,
                 "set": ["id": cursor.set.id, "variants": cursor.set.variants],
-                "rotationMode": "velocity",
-                "rotateOnXMovementRatio": 0.5,
+                "rotationMode": cursor.rotationMode.rawValue,
+                "rotateOnXMovementRatio": cursor.rotateOnXMovementRatio,
                 "baseRotation": cursor.baseRotation,
                 "useDefaultIfAppHasLowResolution": true,
                 "alwaysUseDefault": cursor.alwaysUseDefault,
@@ -247,6 +247,8 @@ public enum PresetFile {
         let set = dict(cc, "set")
         if let id = str(set, "id") { cursor.set = CursorSetChoice(id: id, variants: set["variants"] as? [String: String] ?? [:]) }
         cursor.baseRotation = num(cc, "baseRotation", cursor.baseRotation)
+        if let mode = str(cc, "rotationMode").flatMap(CursorRotationMode.init(rawValue:)) { cursor.rotationMode = mode }
+        cursor.rotateOnXMovementRatio = num(cc, "rotateOnXMovementRatio", cursor.rotateOnXMovementRatio)
         cursor.alwaysUseDefault = bool(cc, "alwaysUseDefault", cursor.alwaysUseDefault)
         cursor.hideNotMovingAfterMs = optNum(cc, "hideNotMovingAfterMs", cursor.hideNotMovingAfterMs)
         cursor.loopPositionBeforeEndMs = optNum(cc, "loopPositionBeforeEndMs", cursor.loopPositionBeforeEndMs)
