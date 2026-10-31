@@ -237,6 +237,8 @@ public struct CaptionScene: Sendable {
     }
 
     public struct Word: Sendable {
+        /// Line and word index: the same word from one frame to the next.
+        public var id: Int
         public var text: String
         public var rect: Rect2
         public var opacity: Double
@@ -260,7 +262,7 @@ public struct CaptionTrack: Sendable {
     /// Stage units per 1080-high stage pixel (for the 40 px slide).
     let unit: Double
     let resolver: TimeResolver
-    let fps: Double
+    public let fps: Double
     /// Largest `endMs` of the lines up to each index, when the lines are ordered by start
     /// (nil otherwise): bounds the lines near an instant without visiting all of them.
     private let maxEndThrough: [Double]?
@@ -363,7 +365,7 @@ public struct CaptionTrack: Sendable {
         }
         for key in last.words.keys.sorted() {
             guard let word = last.words[key], let state = nodes[key] else { continue }
-            scene.words.append(.init(text: word.text, rect: Rect2(x: state.x.value, y: state.y.value, width: word.rect.width, height: word.rect.height), opacity: clamp(state.opacity.value, 0, 1)))
+            scene.words.append(.init(id: key, text: word.text, rect: Rect2(x: state.x.value, y: state.y.value, width: word.rect.width, height: word.rect.height), opacity: clamp(state.opacity.value, 0, 1)))
         }
         return scene
     }

@@ -108,29 +108,56 @@ final class CaptionRenderer: @unchecked Sendable {
         ])
     }
 
-    /// Captions over `output` at a playback time.
-    func draw(over output: CIImage, atPlayback time: Double) -> CIImage {
+    /// Captions over `output` at a playback time. With motion blur on, the box and each word
+    /// trail from `lerp(now, before, strength)` to now like every sprung node (uniform weights).
+    func draw(over output: CIImage, atPlayback time: Double, motionBlurStrength strength: Double = 0, quality: RenderQuality = .export) -> CIImage {
         let scene = track.scene(atPlayback: time)
+        let before = strength > 0 ? track.scene(atPlayback: max(0, time - 1000 / track.fps)) : nil
         var result = output
         if let box = scene.box, box.opacity > 0.001 {
-            let rect = ciRect(box.rect)
-            let ring = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
-                "inputExtent": CIVector(cgRect: rect.insetBy(dx: -10 * unit, dy: -10 * unit)),
-                "inputRadius": 22 * unit,
-                "inputColor": outline,
-            ])?.outputImage ?? CIImage.empty()
-            let fill = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
-                "inputExtent": CIVector(cgRect: rect),
-                "inputRadius": 12 * unit,
-                "inputColor": background,
-            ])?.outputImage ?? CIImage.empty()
-            result = faded(fill.composited(over: ring), opacity: box.opacity).composited(over: result)
+            result = trailed(box.rect, previous: before?.box?.rect, strength: strength, quality: quality) { self.boxImage($0, opacity: box.opacity) }
+                .composited(over: result)
         }
+        var previousWords: [Int: Rect2] = [:]
+        for word in before?.words ?? [] { previousWords[word.id] = word.rect }
         for word in scene.words where word.opacity > 0.001 {
-            let rect = ciRect(word.rect)
-            let glyphs = image(for: word.text).transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
-            result = faded(glyphs, opacity: word.opacity).composited(over: result)
+            result = trailed(word.rect, previous: previousWords[word.id], strength: strength, quality: quality) { self.wordImage(word.text, rect: $0, opacity: word.opacity) }
+                .composited(over: result)
         }
         return result
+    }
+
+    /// `draw(rect)`, averaged along the trail when the node moved.
+    private func trailed(_ rect: Rect2, previous: Rect2?, strength: Double, quality: RenderQuality, draw: (Rect2) -> CIImage) -> CIImage {
+        let image = draw(rect)
+        guard strength > 0, let previous else { return image }
+        let start = rect.lerp(to: previous, strength)
+        let travel = rect.cornerTravel(to: start)
+        guard travel >= 1 else { return image }
+        let bounds = image.extent.union(draw(start).extent).integral
+        return MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel, quality: quality), bounds: bounds) { t in
+            draw(start.lerp(to: rect, t))
+        } ?? image
+    }
+
+    private func wordImage(_ text: String, rect r: Rect2, opacity: Double) -> CIImage {
+        let rect = ciRect(r)
+        let glyphs = image(for: text).transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        return faded(glyphs, opacity: opacity)
+    }
+
+    private func boxImage(_ r: Rect2, opacity: Double) -> CIImage {
+        let rect = ciRect(r)
+        let ring = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
+            "inputExtent": CIVector(cgRect: rect.insetBy(dx: -10 * unit, dy: -10 * unit)),
+            "inputRadius": 22 * unit,
+            "inputColor": outline,
+        ])?.outputImage ?? CIImage.empty()
+        let fill = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
+            "inputExtent": CIVector(cgRect: rect),
+            "inputRadius": 12 * unit,
+            "inputColor": background,
+        ])?.outputImage ?? CIImage.empty()
+        return faded(fill.composited(over: ring), opacity: opacity)
     }
 }

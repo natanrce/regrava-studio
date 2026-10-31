@@ -108,7 +108,7 @@ public final class FrameCompositor: @unchecked Sendable {
         if let lens = frame.loupe {
             output = loupe(lens, over: output, source: src, camera: camera, frame: frame, quality: quality)
         }
-        if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs) }
+        if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
         if let shortcuts { output = shortcuts.draw(over: output, atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
 
         return output.cropped(to: canvasRect)

@@ -33,6 +33,25 @@ struct CaptionRenderTests {
     }
 }
 
+struct CaptionMotionBlurTests {
+    @Test func movingWordsTrailWithMotionBlur() throws {
+        var project = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 6000, fps: 30), mouseEvents: [], style: StyleConfig(aspectRatio: 16.0 / 9))
+        project.captions.wordEntrance = .slideIn
+        let words = ["Welcome", " to", " the"].enumerated().map { TranscriptWord(index: $0, startMs: 1000 + Double($0) * 300, endMs: 1280 + Double($0) * 300, text: $1) }
+        let canvas = Rect2(x: 0, y: 0, width: 1920, height: 1080)
+        let renderer = try #require(CaptionRenderer(project: project, words: words, canvas: canvas, fps: 60))
+        let base = CIImage(color: .black).cropped(to: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        func pixels(_ image: CIImage) -> [UInt8] {
+            var p = [UInt8](repeating: 0, count: 1920 * 1080 * 4)
+            CIContext().render(image, toBitmap: &p, rowBytes: 1920 * 4, bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080), format: .RGBA8, colorSpace: nil)
+            return p
+        }
+        // The second word slides in at 1300 ms: blurred and sharp differ; at rest they match.
+        #expect(pixels(renderer.draw(over: base, atPlayback: 1340, motionBlurStrength: 1)) != pixels(renderer.draw(over: base, atPlayback: 1340)))
+        #expect(pixels(renderer.draw(over: base, atPlayback: 4500, motionBlurStrength: 1)) == pixels(renderer.draw(over: base, atPlayback: 4500)))
+    }
+}
+
 struct CaptionFontTests {
     @Test func bundlesTheCaptionFonts() {
         #expect((CaptionRenderer.bundledFont("InstrumentSerif-Regular", size: 20).map { CTFontCopyFamilyName($0) as String }) == "Instrument Serif")
