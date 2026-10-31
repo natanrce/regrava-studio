@@ -591,9 +591,10 @@ struct CameraPlanner {
     /// lead-in, or the previous one carried behind a fullscreen camera.
     func activeZoom(at t: Double) -> ZoomRange? {
         if let zoom = zooms.last(where: { $0.contains(t) }) { return zoom }
+        // The lead-in into the next zoom, unless an enabled zoom (a loupe) holds `t`.
         let lead = project.animation.leadInMs
-        if !project.zooms.contains(where: { $0.contains(t) }), lead > 0,
-           let next = zooms.first(where: { $0.startMs > t }), !next.isInstant, t >= next.startMs - lead {
+        if !project.zooms.contains(where: { $0.contains(t) && !$0.isDisabled }), lead > 0,
+           let next = zooms.first(where: { $0.startMs >= t }), !next.isInstant, t >= next.startMs - lead {
             return next
         }
         if let range = timeline.activeRange(at: t), range.type == .fullscreenCamera,
