@@ -578,7 +578,6 @@ struct CameraPlanner {
             .map(\.element)
 
         // Thinned to one event every 10 points, presses and releases always kept.
-        let video = project.recording.videoSize
         let sparse = MouseProcessing.downsample(pathEvents, minDistance: 10 * project.recording.pointPixelScale)
         var groups: [UUID: [FocusGroup]] = [:]
         let sparseAscending = isAscending(count: sparse.count) { sparse[$0].timeMs }
@@ -595,16 +594,33 @@ struct CameraPlanner {
             if events.isEmpty, let fallback = Self.eventNear(zoom.startMs, pathEvents: pathEvents, smooth: smooth) {
                 events = [fallback]
             }
-            // A group may span at most half of what is visible at this zoom level.
-            let extent = Size2(width: video.width / zoom.scale * 0.5, height: video.height / zoom.scale * 0.5)
+            // A group may span at most half of what is visible at this zoom level, as laid out
+            // when the zoom starts.
+            let extent = Self.visibleEventExtent(project: project, resolver: Self.screenResolver(timeline, project: project, at: zoom.startMs), level: zoom.scale)
             groups[zoom.id] = FocusGrouping.build(events: events, maxExtent: extent)
         }
         self.groups = groups
-        let visible = timeline.defaultResolver.visibleSourcePart(level: 1)
         restingGroups = FocusGrouping.build(
             events: pathEvents,
-            maxExtent: Size2(width: visible.width * 0.5, height: visible.height * 0.5)
+            maxExtent: Self.visibleEventExtent(project: project, resolver: timeline.defaultResolver, level: 1)
         )
+    }
+
+    /// The screen's layout at `t` before zoom variants, hiding the camera when it is off.
+    static func screenResolver(_ timeline: LayoutTimeline, project: Project, at t: Double) -> LayoutResolver {
+        let resolver = timeline.screenResolver(at: t)
+        return project.camera.hide ? resolver.hideCameraVariant : resolver
+    }
+
+    /// Half of the source visible at `level` (`getVisibleSourcePart(level) × 0.5`), in video
+    /// pixels. The layout measures the recording in points, so the comparison with the stage
+    /// is made in points and the result converted back.
+    static func visibleEventExtent(project: Project, resolver: LayoutResolver, level: Double) -> Size2 {
+        let ppp = max(project.recording.pointPixelScale, 0.0001)
+        let deviceFrame = project.activeDeviceFrame != nil
+        let source = deviceFrame ? resolver.sourceRect.size : Size2(width: resolver.sourceRect.width / ppp, height: resolver.sourceRect.height / ppp)
+        let visible = LayoutResolver.visibleSourcePart(stage: resolver.stageRect.size, source: source, level: level)
+        return Size2(width: visible.width * 0.5 * ppp, height: visible.height * 0.5 * ppp)
     }
 
     /// Where an auto zoom without events looks: with smooth movement, a press or release

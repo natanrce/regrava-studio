@@ -475,10 +475,15 @@ public final class LayoutResolver: @unchecked Sendable {
     /// Part of the source visible at `level` (`getVisibleSourcePart`). The source is scaled in its
     /// own pixels and compared with the 1080-tall stage.
     public func visibleSourcePart(level: Double) -> Size2 {
-        let w = sourceRect.width * level, h = sourceRect.height * level
+        Self.visibleSourcePart(stage: stageRect.size, source: sourceRect.size, level: level)
+    }
+
+    /// `getVisibleSourcePart` for a source measured in `source` units.
+    public static func visibleSourcePart(stage: Size2, source: Size2, level: Double) -> Size2 {
+        let w = source.width * level, h = source.height * level
         return Size2(
-            width: min(1, stageRect.width / max(w, 0.0001)) * sourceRect.width,
-            height: min(1, stageRect.height / max(h, 0.0001)) * sourceRect.height
+            width: min(1, stage.width / max(w, 0.0001)) * source.width,
+            height: min(1, stage.height / max(h, 0.0001)) * source.height
         )
     }
 }

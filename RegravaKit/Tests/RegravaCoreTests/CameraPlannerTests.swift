@@ -82,3 +82,21 @@ extension CameraPlannerTests {
         #expect(planner(q).groups[early.id]?.map(\.center) == [Vec2(900, 900)])
     }
 }
+
+extension CameraPlannerTests {
+    @Test func groupLimitIsHalfTheVisiblePartInPoints() {
+        // 3024×1964 px at 2 px per point is 1512×982 points on a 1920×1080 stage. At 2× the
+        // visible part is min(1, 1920/3024)·1512 = 960 by min(1, 1080/1964)·982 = 540 points,
+        // so a group spans at most 480×270 points = 960×540 video pixels.
+        var p = project([])
+        p.recording.videoSize = Size2(width: 3024, height: 1964)
+        p.recording.pointPixelScale = 2
+        p.style.aspectRatio = 16.0 / 9
+        let timeline = LayoutTimeline(project: p)
+        let extent = CameraPlanner.visibleEventExtent(project: p, resolver: timeline.defaultResolver, level: 2)
+        #expect(abs(extent.width - 960) < 1e-9 && abs(extent.height - 540) < 1e-9)
+        // At rest the whole recording fits: half of it.
+        let rest = CameraPlanner.visibleEventExtent(project: p, resolver: timeline.defaultResolver, level: 1)
+        #expect(abs(rest.width - 1512) < 1e-9 && abs(rest.height - 982) < 1e-9)
+    }
+}
