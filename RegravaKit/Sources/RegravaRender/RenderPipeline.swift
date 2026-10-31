@@ -14,22 +14,23 @@ public final class RenderState: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot: Snapshot
 
-    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil) {
-        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory)
+    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps) {
+        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps)
     }
 
-    /// `assetsDirectory` is the project folder (background images).
-    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil) -> Snapshot {
+    /// `assetsDirectory` is the project folder (background images). `fps` is the rate frames
+    /// are produced at: the editor's playback rate, or the export's.
+    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps) -> Snapshot {
         let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
         let silence = assetsDirectory.flatMap { SilenceAnalyzer.stored(project: project, bundle: $0) } ?? []
         let hovers = assetsDirectory.flatMap(CursorHovers.load(bundle:))
-        let track = CameraTrack(project: project, faces: faces, silence: silence, hovers: hovers)
+        let track = CameraTrack(project: project, faces: faces, silence: silence, hovers: hovers, fps: fps)
         // Captions read the transcript stored beside the project (source time, onset-adjusted).
         let transcript = assetsDirectory.flatMap { SessionTranscript.load(bundle: $0) }
             .map { TranscriptTiming.clientTranscript([(0, $0.transcript)]) } ?? []
         // Hide sensitive data / Hide faces: the detections the scan has so far (an export waits for the finished scan).
         let sensitiveData = project.processing.isAutoMasking ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.previewDetections ?? []) : []
-        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData)
+        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps)
         return Snapshot(track: track, compositor: compositor)
     }
 

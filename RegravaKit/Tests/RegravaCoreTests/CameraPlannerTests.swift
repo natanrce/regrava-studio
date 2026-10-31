@@ -100,3 +100,12 @@ extension CameraPlannerTests {
         #expect(abs(rest.width - 1512) < 1e-9 && abs(rest.height - 982) < 1e-9)
     }
 }
+
+extension CameraPlannerTests {
+    @Test func springsStepAtTheOutputRateNotTheRecordingRate() {
+        var p = project([ZoomRange(startMs: 1000, endMs: 3000)])
+        p.recording.fps = 120
+        #expect(CameraTrack(project: p).sampleIntervalMs == 1000.0 / 60)
+        #expect(CameraTrack(project: p, fps: 30).sampleIntervalMs == 1000.0 / 30)
+    }
+}

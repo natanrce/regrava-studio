@@ -75,7 +75,7 @@ public enum ProjectExporter {
         try await completeSensitiveDataScan(project: project, bundle: videoURL.deletingLastPathComponent())
         // And for the microphone's silences when the camera hides during them.
         try await SilenceAnalyzer.ensure(project: project, bundle: videoURL.deletingLastPathComponent(), recording: videoURL)
-        let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent())
+        let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent(), fps: Double(settings.fps))
 
         switch settings.format {
         case .gif:

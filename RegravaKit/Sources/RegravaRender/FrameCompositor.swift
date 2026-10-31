@@ -17,7 +17,8 @@ public final class FrameCompositor: @unchecked Sendable {
     /// The loupe's frosted backdrop: the background blurred by 0.5% of the stage width.
     private let frost: CIImage
     private let motionBlurAmount: Double
-    private let fps: Int
+    /// Rate frames are produced at (`playback.fps`).
+    private let fps: Double
     private let camera: CameraConfig
     /// A cutout layout is used somewhere, so camera frames are matted (`isCameraMatted`).
     private let isCameraMatted: Bool
@@ -38,7 +39,7 @@ public final class FrameCompositor: @unchecked Sendable {
     private let cameraGrade: (data: Data, size: Int)?
 
     /// `assetsDirectory` is the project folder (for background images).
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = []) {
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps) {
         processing = project.processing
         self.sensitiveData = AutoMaskTimeline(detections: project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : [])
         resolver = project.resolver
@@ -49,11 +50,11 @@ public final class FrameCompositor: @unchecked Sendable {
         pointPixelScale = project.recording.pointPixelScale
         self.cursors = cursors
         motionBlurAmount = project.animation.motionBlurAmount
-        fps = project.recording.fps
+        self.fps = fps
         camera = project.camera
         isCameraMatted = project.isCutoutLayoutUsed
-        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas)
-        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil)
+        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas, fps: fps)
+        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil, fps: fps)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         deviceFrame = project.activeDeviceFrame
         screenCrop01 = project.screenCrop01

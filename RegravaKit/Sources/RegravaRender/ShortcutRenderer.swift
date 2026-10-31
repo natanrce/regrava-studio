@@ -14,8 +14,8 @@ final class ShortcutRenderer: @unchecked Sendable {
     private var cache: [String: CIImage] = [:]
     private let lock = NSLock()
 
-    init?(project: Project, canvas: Rect2, captionsShown: Bool) {
-        guard let track = ShortcutTrack(project: project, canvas: canvas, captionsShown: captionsShown) else { return nil }
+    init?(project: Project, canvas: Rect2, captionsShown: Bool, fps: Double) {
+        guard let track = ShortcutTrack(project: project, canvas: canvas, captionsShown: captionsShown, fps: fps) else { return nil }
         self.track = track
         canvasHeight = canvas.height
         unit = canvas.height / 1080

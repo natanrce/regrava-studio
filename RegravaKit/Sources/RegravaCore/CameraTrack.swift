@@ -49,11 +49,11 @@ public struct CameraFrame: Hashable, Sendable {
     public var cursorScale: Double = 1
     /// Inside an instant zoom's snap window (motion blur is off there).
     public var isInstantSnap = false
-    /// The same values one project frame earlier, for motion blur.
+    /// The same values one playback frame earlier, for motion blur.
     public var previousScreenRect: Rect2?
     public var previousCursor: Vec2?
     public var previousCursorScale: Double = 1
-    /// Webcam placement one project frame earlier, for its motion blur.
+    /// Webcam placement one playback frame earlier, for its motion blur.
     public var previousCameraRect: Rect2?
     /// Mask applied to the recording.
     public var mask: MaskFrame = .none
@@ -96,6 +96,9 @@ public final class CameraTrack: @unchecked Sendable {
     public let sampleIntervalMs: Double
     public let resolver: TimeResolver
     public static let clickRippleMs: Double = 450
+    /// Frame rate of the editor's playback: springs, motion blur and the previous frame follow
+    /// the rate frames are produced at, this while editing and the chosen rate on export.
+    public static let previewFps = 60.0
 
     /// Scale of the cursor while a button is held.
     public static let pressedCursorScale = 0.9
@@ -110,7 +113,7 @@ public final class CameraTrack: @unchecked Sendable {
     /// The screen-only layout of the plain stage.
     private let plainResolver: LayoutResolver
 
-    public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, sampleRateHz: Double? = nil) {
+    public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, fps: Double = CameraTrack.previewFps) {
         // Everything below works in the crop's space.
         let project = fullProject.screenCropSpace
         let layout = CanvasLayout(project: project)
@@ -119,7 +122,7 @@ public final class CameraTrack: @unchecked Sendable {
         let resolver = project.resolver
         self.resolver = resolver
         durationMs = max(resolver.playbackDurationMs, 0)
-        sampleIntervalMs = 1000 / (sampleRateHz ?? Double(max(project.recording.fps, 1)))
+        sampleIntervalMs = 1000 / max(fps, 1)
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
         let cleaned = MouseProcessing.removeSpikes(sorted, threshold: project.cursor.removeShakeThreshold)
@@ -274,7 +277,7 @@ public final class CameraTrack: @unchecked Sendable {
         samples = frames
     }
 
-    /// The frame at playback time `timeMs`, with the previous project frame attached for motion blur.
+    /// The frame at playback time `timeMs`, with the previous playback frame attached for motion blur.
     public func frame(at timeMs: Double) -> CameraFrame {
         var frame = interpolatedFrame(at: timeMs)
         let before = interpolatedMotion(at: max(0, timeMs - sampleIntervalMs))

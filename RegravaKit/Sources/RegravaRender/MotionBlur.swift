@@ -26,8 +26,8 @@ enum MotionBlur {
     private static let divideKernel = RenderKernels.color("motionBlurNormalize")
 
     /// Strength of the trail for the current settings.
-    static func strength(amount: Double, fps: Int, disabled: Bool) -> Double {
-        disabled ? 0 : amount * Double(fps) / 60
+    static func strength(amount: Double, fps: Double, disabled: Bool) -> Double {
+        disabled ? 0 : amount * fps / 60
     }
 
     /// Number of samples for a trail `travel` canvas pixels long.

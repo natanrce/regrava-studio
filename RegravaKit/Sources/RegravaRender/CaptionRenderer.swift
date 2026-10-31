@@ -51,7 +51,7 @@ final class CaptionRenderer: @unchecked Sendable {
         return Size2(width: ceil(width) + 2 * padding, height: ceil(fontSize * 1.2) + 2 * padding)
     }
 
-    init?(project: Project, words: [TranscriptWord], canvas: Rect2) {
+    init?(project: Project, words: [TranscriptWord], canvas: Rect2, fps: Double) {
         let config = project.captions
         guard config.enableTranscript else { return nil }
         let visible = CaptionWords.visible(words, resolver: project.resolver, showSoundLabels: config.showSoundLabels)
@@ -61,7 +61,7 @@ final class CaptionRenderer: @unchecked Sendable {
         let f = font, size = fontSize
         let lines = CaptionLayout.lines(visible, maxWidth: canvas.width * 0.8) { Self.measure($0, font: f, fontSize: size) }
         guard !lines.isEmpty else { return nil }
-        track = CaptionTrack(lines: lines, config: config, stage: canvas, resolver: project.resolver, fps: Double(project.recording.fps))
+        track = CaptionTrack(lines: lines, config: config, stage: canvas, resolver: project.resolver, fps: fps)
         let text = RGBA(hexString: config.color) ?? RGBA(1, 1, 1)
         color = CGColor(srgbRed: text.r, green: text.g, blue: text.b, alpha: 1)
         let bg = RGBA(hexString: config.backgroundColor) ?? RGBA(0, 0, 0)

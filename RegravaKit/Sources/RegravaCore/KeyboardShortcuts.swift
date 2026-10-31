@@ -386,7 +386,7 @@ public struct ShortcutTrack: Sendable {
 
     /// nil when shortcuts are off or there is nothing to show. `captionsShown`: transcript
     /// captions are on and have lines, so the row goes to the opposite side.
-    public init?(project: Project, canvas: Rect2, captionsShown: Bool) {
+    public init?(project: Project, canvas: Rect2, captionsShown: Bool, fps: Double = CameraTrack.previewFps) {
         let config = project.captions
         guard config.enableShortcuts else { return nil }
         presses = KeyboardShortcuts.visiblePresses(project: project)
@@ -400,7 +400,7 @@ public struct ShortcutTrack: Sendable {
         row = Rect2(x: 0, y: 0, width: box.width, height: rowHeight).fitInside(box, anchor: anchor)
         pressRects = caps.map { [row, rowHeight] in Self.keyRects($0, row: row, rowHeight: rowHeight) }
         resolver = project.resolver
-        fps = max(Double(project.recording.fps), 1)
+        self.fps = max(fps, 1)
         fullscreenCameraRanges = project.recording.hasCamera
             ? project.cameraLayouts.filter { $0.type == .fullscreenCamera && !$0.isDisabled }.map { TimeRange(startMs: $0.startMs, endMs: $0.endMs) }
             : []
