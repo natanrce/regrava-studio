@@ -533,7 +533,10 @@ struct CameraPlanner {
     let project: Project
     let timeline: LayoutTimeline
     let cleaned: [MouseEvent]
+    /// Enabled zooms that move the screen (not loupes), ordered by start.
     let zooms: [ZoomRange]
+    /// Every zoom ordered by start, ties in project order.
+    let allZoomsByStart: [ZoomRange]
     /// Enabled glass loupe zooms.
     let loupes: [ZoomRange]
     let groups: [UUID: [FocusGroup]]
@@ -550,12 +553,16 @@ struct CameraPlanner {
         self.silence = silence
         self.timeline = timeline
         self.cleaned = cleaned
+        // Any enabled screen zoom moves the screen, a 1× one included.
         zooms = project.zooms
-            .filter { !$0.isDisabled && $0.presentation == .screen && $0.scale > 1 && $0.endMs > $0.startMs }
+            .filter { !$0.isDisabled && $0.presentation == .screen }
             .sorted { $0.startMs < $1.startMs }
         loupes = project.zooms
             .filter { !$0.isDisabled && $0.presentation == .loupe && $0.endMs > $0.startMs }
             .sorted { $0.startMs < $1.startMs }
+        allZoomsByStart = project.zooms.enumerated()
+            .sorted { $0.element.startMs != $1.element.startMs ? $0.element.startMs < $1.element.startMs : $0.offset < $1.offset }
+            .map(\.element)
         let enabled = project.zooms.enumerated().filter { !$0.element.isDisabled }
         enabledZoomsByEnd = enabled
             .sorted { $0.element.endMs != $1.element.endMs ? $0.element.endMs < $1.element.endMs : $0.offset < $1.offset }
@@ -597,10 +604,12 @@ struct CameraPlanner {
            let next = zooms.first(where: { $0.startMs >= t }), !next.isInstant, t >= next.startMs - lead {
             return next
         }
+        // Behind a fullscreen camera: the zoom that ended last, unless it is a loupe.
         if let range = timeline.activeRange(at: t), range.type == .fullscreenCamera,
-           t < range.startMs + 0.85 * range.durationMs,
-           let previous = zooms.last(where: { $0.startMs <= t }), previous.endMs >= range.startMs {
-            return previous
+           let i = floorSearch(count: allZoomsByStart.count, value: t, key: { allZoomsByStart[$0].endMs }) {
+            let previous = allZoomsByStart[i]
+            if previous.presentation == .loupe || previous.endMs < range.startMs { return nil }
+            return t < range.startMs + 0.85 * range.durationMs ? previous : nil
         }
         return nil
     }

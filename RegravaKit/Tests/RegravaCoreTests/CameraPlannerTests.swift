@@ -24,3 +24,23 @@ import Testing
         #expect(planner(q).activeZoom(at: 2050) == next)
     }
 }
+
+extension CameraPlannerTests {
+    @Test func aOneTimesZoomStillMovesTheScreen() {
+        let zoom = ZoomRange(startMs: 1000, endMs: 3000, scale: 1)
+        #expect(planner(project([zoom])).activeZoom(at: 2000) == zoom)
+    }
+
+    @Test func fullscreenCameraCarriesTheZoomThatEndedLast() {
+        var p = project([ZoomRange(startMs: 1000, endMs: 3000), ZoomRange(startMs: 2000, endMs: 3500, isDisabled: true)])
+        p.recording.cameraFileName = "camera.mov"
+        p.cameraLayouts = [CameraLayoutRange(startMs: 3000, endMs: 7000, type: .fullscreenCamera)]
+        // The disabled zoom ended last, so it is the one carried until 85% of the range.
+        #expect(planner(p).activeZoom(at: 4000) == p.zooms[1])
+        #expect(planner(p).activeZoom(at: 6500) == nil)
+        // A loupe ending last carries nothing, even with a screen zoom before it.
+        var q = p
+        q.zooms[1] = ZoomRange(startMs: 2000, endMs: 3500, presentation: .loupe)
+        #expect(planner(q).activeZoom(at: 4000) == nil)
+    }
+}
