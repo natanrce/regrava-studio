@@ -107,24 +107,35 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
 @Suite struct GroupingTests {
     @Test func splitsWhenActivityLeavesTheVisibleArea() {
         let events = [move(0, 0, 0), move(100, 50, 50), move(200, 800, 800), move(300, 820, 790)]
-        let groups = FocusGrouping.build(events: events, maxExtent: Size2(width: 200, height: 200), endMs: 1000)
+        let groups = FocusGrouping.build(events: events, maxExtent: Size2(width: 200, height: 200))
         #expect(groups.count == 2)
-        #expect(groups[0].endMs == 200)
+        #expect(groups[0].finishedMs == 200)
         #expect(groups[1].startMs == 200)
-        #expect(groups[1].endMs == 1000)
+        #expect(groups[1].finishedMs == nil)
     }
 
     @Test func centerIsWeightedByDwellTime() {
         // Stays 900 ms at x=100 and 100 ms at x=0.
-        let center = FocusGrouping.dwellWeightedCenter([move(0, 0, 0), move(100, 100, 0)], endMs: 1000)
+        let center = FocusGrouping.dwellWeightedCenter([move(0, 0, 0), move(100, 100, 0)], finishedMs: 1000)
         #expect(abs(center.x - 90) < 1e-9)
+    }
+
+    @Test func lastEventOfTheOpenGroupWeighs100Ms() {
+        // 3 s at x=0, then the last event counts 100 ms however long the zoom lasts.
+        let events = [move(0, 0, 0), move(3000, 310, 0)]
+        let groups = FocusGrouping.build(events: events, maxExtent: Size2(width: 1000, height: 1000))
+        #expect(groups.count == 1)
+        #expect(abs(groups[0].center.x - 310 * 0.1 / 3.1) < 1e-9)
+        // A closed group's last event weighs until the next group starts; no 1 ms floor.
+        let split = FocusGrouping.build(events: [move(0, 0, 0), move(0, 100, 0), move(500, 900, 0)], maxExtent: Size2(width: 200, height: 200))
+        #expect(split[0].finishedMs == 500)
+        #expect(abs(split[0].center.x - 100) < 1e-9)
     }
 
     @Test func picksStartedGroupOrFirstUpcoming() {
         let groups = FocusGrouping.build(
             events: [move(500, 0, 0), move(1000, 900, 0)],
-            maxExtent: Size2(width: 100, height: 100),
-            endMs: 2000
+            maxExtent: Size2(width: 100, height: 100)
         )
         #expect(FocusGrouping.group(at: 100, in: groups)?.startMs == 500)
         #expect(FocusGrouping.group(at: 1500, in: groups)?.startMs == 1000)

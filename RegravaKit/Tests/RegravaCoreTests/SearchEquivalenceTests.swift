@@ -46,12 +46,15 @@ import Testing
     }
 
     @Test func focusGroupLookupMatchesAFullScan() {
-        let groups = FocusGrouping.build(events: Self.events, maxExtent: Size2(width: 300, height: 300), endMs: 1_000_000)
+        let groups = FocusGrouping.build(events: Self.events, maxExtent: Size2(width: 300, height: 300))
         #expect(groups.count > 20)
         for list in [groups, [], Array(groups.prefix(1))] {
             for t in Self.probes(list.map(\.startMs)) {
-                let expected = list.last(where: { $0.startMs <= t }) ?? list.first
-                #expect(FocusGrouping.group(at: t, in: list) == expected)
+                // The first group starting exactly at `t`, else the last started, else the next.
+                let expected = list.first(where: { $0.startMs == t }) ?? list.last(where: { $0.startMs < t }) ?? list.first
+                // Compared by start and finish: a group whose events share one time has a NaN centre.
+                let found = FocusGrouping.group(at: t, in: list)
+                #expect(found?.startMs == expected?.startMs && found?.finishedMs == expected?.finishedMs && found?.bounds == expected?.bounds)
             }
         }
     }

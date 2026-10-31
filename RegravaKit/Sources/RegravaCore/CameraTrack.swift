@@ -577,14 +577,13 @@ struct CameraPlanner {
             }
             // A group may span at most half of what is visible at this zoom level.
             let extent = Size2(width: video.width / zoom.scale * 0.5, height: video.height / zoom.scale * 0.5)
-            groups[zoom.id] = FocusGrouping.build(events: events, maxExtent: extent, endMs: zoom.endMs)
+            groups[zoom.id] = FocusGrouping.build(events: events, maxExtent: extent)
         }
         self.groups = groups
         let visible = timeline.defaultResolver.visibleSourcePart(level: 1)
         restingGroups = FocusGrouping.build(
             events: sparse,
-            maxExtent: Size2(width: visible.width * 0.5, height: visible.height * 0.5),
-            endMs: project.recording.durationMs
+            maxExtent: Size2(width: visible.width * 0.5, height: visible.height * 0.5)
         )
     }
 
@@ -622,7 +621,7 @@ struct CameraPlanner {
     /// middle), with the cursor bounds over the next 350 ms.
     func restingFocus(at t: Double) -> (center: Vec2, bounds: Rect2?) {
         let video = project.recording.videoSize
-        let group = lastSearch(count: restingGroups.count, while: { restingGroups[$0].startMs <= t }).map { restingGroups[$0] }
+        let group = floorSearch(count: restingGroups.count, value: t, key: { restingGroups[$0].startMs }).map { restingGroups[$0] }
         let center = group.map { Vec2($0.center.x / video.width, $0.center.y / video.height) } ?? .center01
         guard let b = Self.cursorBounds(cleaned, from: t, to: t + 350) else { return (center, nil) }
         return (center, Rect2(x: b.x / video.width, y: b.y / video.height, width: b.width / video.width, height: b.height / video.height))
