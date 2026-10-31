@@ -51,3 +51,37 @@ private let probes: [Double] = [0, 400, 600, 800, 1200, 1600, 2400]
         #expect(follow.rotateOnXMovementRatio == 1.5)
     }
 }
+
+@Suite struct CursorPlanTests {
+    func plan(events: [MouseEvent], durationMs: Double, spring: SpringConfig? = .cursor) -> CursorPlan {
+        CursorPlan(inputs: CursorPlan.Inputs(
+            pathEvents: events, cleanedEvents: events, imageChangesMs: [], hoverTimesMs: [],
+            slices: Project.defaultSlices(durationMs: durationMs), spring: spring, pointPixelScale: 1,
+            rotationMode: .velocity, rotateOnXMovementRatio: 0.5
+        ))
+    }
+
+    @Test func chunksArePlannedAroundTheirOwnWindow() {
+        let settle = SpringMath.settleTime(.cursor)
+        let w = plan(events: [], durationMs: 30000).window(1)
+        #expect(w.startMs == 10000)
+        #expect(near(w.fromMs, 10000 - settle - 2100))
+        #expect(w.toMs == 22100)
+    }
+
+    @Test func noSmoothingPlansWithTheDefaultSpringsSettleTime() {
+        let w = plan(events: [], durationMs: 30000, spring: nil).window(2)
+        #expect(near(w.fromMs, 20000 - SpringMath.settleTime(SpringConfig()) - 2100))
+    }
+
+    @Test func followsTheRecordingAcrossChunks() {
+        let events = stride(from: 0.0, through: 30000, by: 100).map { MouseEvent(kind: .move, timeMs: $0, position: Vec2($0 / 10, 100)) }
+        let moving = plan(events: events, durationMs: 30000, spring: nil)
+        // Without smoothing the cursor sits on the last recorded position in every chunk.
+        for t in [500.0, 9_950, 10_050, 25_000] {
+            let p = moving.position(at: t)
+            #expect(p.map { near($0.x, (t / 100).rounded(.down) * 10, 1e-3) } == true, "t = \(t)")
+        }
+        #expect(plan(events: [], durationMs: 1000).position(at: 0) == nil)
+    }
+}

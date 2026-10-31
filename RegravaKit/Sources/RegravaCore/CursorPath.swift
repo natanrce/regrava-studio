@@ -623,10 +623,14 @@ public final class SmoothedCursorPath: @unchecked Sendable {
 
     private let runs: [Run]
     private let initial: Vec2
+    private let lead: LeadCurve
+    private let maxLeadMs: Double
 
-    private init(runs: [Run], initial: Vec2) {
+    private init(runs: [Run], initial: Vec2, lead: LeadCurve, maxLeadMs: Double) {
         self.runs = runs
         self.initial = initial
+        self.lead = lead
+        self.maxLeadMs = maxLeadMs
     }
 
     /// - Parameters:
@@ -694,7 +698,7 @@ public final class SmoothedCursorPath: @unchecked Sendable {
         for (t, l) in leadDecayKnots(path: path, anchorMs: last?.group.endMs ?? origin, anchorLeadMs: last?.choice.endLeadMs ?? 0, settings: settings) {
             lead.add(t, l)
         }
-        return simulate(simulation: simulation, lead: lead, speed: speed, durationMs: durationMs)
+        return simulate(simulation: simulation, lead: lead, speed: speed, durationMs: durationMs, maxLeadMs: settings.maxLeadMs)
     }
 
     private static func groupSyncPoints(_ points: [CursorSyncPoint], gapMs: Double) -> [SyncGroup] {
@@ -710,7 +714,7 @@ public final class SmoothedCursorPath: @unchecked Sendable {
         return groups
     }
 
-    private static func simulate(simulation: CursorSimulation, lead: LeadCurve, speed: SpeedCurve, durationMs: Double) -> SmoothedCursorPath {
+    private static func simulate(simulation: CursorSimulation, lead: LeadCurve, speed: SpeedCurve, durationMs: Double, maxLeadMs: Double) -> SmoothedCursorPath {
         let start = min(0, floor(simulation.path.startMs))
         let initial = simulation.target(lead: lead, at: start)
         var runs: [Run] = []
@@ -741,7 +745,19 @@ public final class SmoothedCursorPath: @unchecked Sendable {
             lastY = y
         }
         flush()
-        return SmoothedCursorPath(runs: runs, initial: initial)
+        return SmoothedCursorPath(runs: runs, initial: initial, lead: lead, maxLeadMs: maxLeadMs)
+    }
+
+    /// When the drawn cursor aims at the recorded position of time `t`: the earliest instant
+    /// whose target time (instant plus lead) reaches `t`, found by bisection.
+    public func targetTime(of t: Double) -> Double {
+        var low = t - maxLeadMs - 1
+        var high = t
+        for _ in 0..<24 {
+            let middle = (low + high) / 2
+            if middle + lead.at(middle) >= t { high = middle } else { low = middle }
+        }
+        return high
     }
 
     public func position(at t: Double) -> Vec2 {

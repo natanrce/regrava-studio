@@ -140,27 +140,17 @@ public final class CameraTrack: @unchecked Sendable {
         self.planner = planner
         plainResolver = project.plainLayoutResolver
 
-        let cursorPath = CursorPathCache.shared.path(
-            for: CursorPathCache.Key(
-                events: cleaned,
-                slices: project.slices,
-                loopMs: project.cursor.loopPositionBeforeEndMs,
-                spring: project.animation.mouseSpring,
-                pointPixelScale: project.recording.pointPixelScale,
-                imageChangesMs: imageChanges,
-                hoverTimesMs: hoverTimes
-            )
-        ) {
-            Self.planCursor(
-                pathEvents: pathEvents,
-                imageChangesMs: imageChanges,
-                hoverTimesMs: hoverTimes,
-                slices: project.slices,
-                resolver: resolver,
-                spring: project.animation.mouseSpring,
-                pointPixelScale: project.recording.pointPixelScale
-            )
-        }
+        let cursorPlan = CursorPathCache.shared.plan(for: CursorPlan.Inputs(
+            pathEvents: pathEvents,
+            cleanedEvents: cleaned,
+            imageChangesMs: imageChanges,
+            hoverTimesMs: hoverTimes,
+            slices: project.slices,
+            spring: project.animation.mouseSpring,
+            pointPixelScale: project.recording.pointPixelScale,
+            rotationMode: project.cursor.rotationMode,
+            rotateOnXMovementRatio: project.cursor.rotateOnXMovementRatio
+        ))
 
         var screen = SpringRect(timeline.defaultResolver.initialScreenRect)
         var cameraRect = SpringRect(Rect2(x: 0, y: 0, width: 0, height: 0))
@@ -228,7 +218,7 @@ public final class CameraTrack: @unchecked Sendable {
             press.setTarget(pressed ? Self.pressedCursorScale : 1, config: pressSpring)
             if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
 
-            var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPath?.position(at: t))
+            var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPlan.position(at: t))
             // The lens springs on its own (`styles.loupe`).
             if i == 0 { loupe = LoupeSpring(loupeTarget.frame) } else { loupe.advance(toward: loupeTarget.frame, config: planner.loupeSpring(at: source), milliseconds: sampleIntervalMs) }
             let lens = loupe.frame
@@ -397,64 +387,6 @@ public final class CameraTrack: @unchecked Sendable {
             inRange.append(back)
         }
         return inRange
-    }
-
-    /// Plans the drawn cursor in playback time: per clip, the position at its start plus its
-    /// events mapped to playback time; sync points likewise; clips that follow a cut reset
-    /// the lead, and clips without smooth movement are instant.
-    static func planCursor(
-        pathEvents: [MouseEvent],
-        imageChangesMs: [Double],
-        hoverTimesMs: [Double] = [],
-        slices: [Slice],
-        resolver: TimeResolver,
-        spring: SpringConfig?,
-        pointPixelScale: Double
-    ) -> SmoothedCursorPath? {
-        guard !pathEvents.isEmpty else { return nil }
-        var points: [CursorPathPoint] = []
-        var syncEvents: [MouseEvent] = []
-        var imageChanges: [Double] = []
-        var hovers: [Double] = []
-        var cuts: [Double] = []
-        var instant: [TimeRange] = []
-        let eventsAscending = isAscending(count: pathEvents.count) { pathEvents[$0].timeMs }
-        let changesAscending = isAscending(count: imageChangesMs.count) { imageChangesMs[$0] }
-        let hoversAscending = isAscending(count: hoverTimesMs.count) { hoverTimesMs[$0] }
-        for (index, link) in resolver.links.enumerated() {
-            let atStart = MouseProcessing.lastIndex(atOrBefore: link.sourceStartMs, in: pathEvents).map { pathEvents[$0] } ?? pathEvents[0]
-            points.append(CursorPathPoint(timeMs: link.playbackStartMs, position: atStart.position))
-            for e in indices(count: pathEvents.count, ascending: eventsAscending, from: link.sourceStartMs, through: link.sourceEndMs, key: { pathEvents[$0].timeMs }) {
-                let event = pathEvents[e]
-                let t = link.sourceToPlayback(event.timeMs)
-                points.append(CursorPathPoint(timeMs: t, position: event.position))
-                var mapped = event
-                mapped.timeMs = t
-                syncEvents.append(mapped)
-            }
-            for c in indices(count: imageChangesMs.count, ascending: changesAscending, from: link.sourceStartMs, through: link.sourceEndMs, key: { imageChangesMs[$0] }) {
-                imageChanges.append(link.sourceToPlayback(imageChangesMs[c]))
-            }
-            // Hovers in cuts drop out; sped-up clips bring them closer.
-            for h in indices(count: hoverTimesMs.count, ascending: hoversAscending, from: link.sourceStartMs, through: link.sourceEndMs, key: { hoverTimesMs[$0] }) {
-                hovers.append(link.sourceToPlayback(hoverTimesMs[h]))
-            }
-            if index > 0, resolver.links[index - 1].sourceEndMs != link.sourceStartMs {
-                cuts.append(link.playbackStartMs)
-            }
-            if slices.indices.contains(index), slices[index].disableSmoothMouseMovement {
-                instant.append(TimeRange(startMs: link.playbackStartMs, endMs: link.playbackEndMs))
-            }
-        }
-        points.sort { $0.timeMs < $1.timeMs }
-        return SmoothedCursorPath.plan(
-            points: points,
-            syncPoints: cursorSyncPoints(events: syncEvents, pointPixelScale: pointPixelScale, cursorImageChangesMs: imageChanges, hoverTimesMs: hovers),
-            spring: spring,
-            durationMs: resolver.playbackDurationMs,
-            instantRanges: instant,
-            cutTimesMs: cuts
-        )
     }
 
     /// Moments the smoothed cursor must reach the recorded position: presses, releases and
@@ -761,33 +693,18 @@ struct CameraPlanner {
 }
 
 /// Planning the cursor is the expensive part of a track and does not depend on zooms or styles,
-/// so the last result is reused while the inputs stay the same.
+/// so the last plan (and the chunks it has made) is reused while the inputs stay the same.
 final class CursorPathCache: @unchecked Sendable {
-    struct Key: Equatable {
-        var events: [MouseEvent]
-        var slices: [Slice]
-        var loopMs: Double?
-        var spring: SpringConfig?
-        var pointPixelScale: Double
-        var imageChangesMs: [Double]
-        var hoverTimesMs: [Double]
-    }
-
     static let shared = CursorPathCache()
     private let lock = NSLock()
-    private var entry: (key: Key, path: SmoothedCursorPath?)?
+    private var entry: CursorPlan?
 
-    func path(for key: Key, make: () -> SmoothedCursorPath?) -> SmoothedCursorPath? {
+    func plan(for inputs: CursorPlan.Inputs) -> CursorPlan {
         lock.lock()
-        if let entry, entry.key == key {
-            lock.unlock()
-            return entry.path
-        }
-        lock.unlock()
-        let path = make()
-        lock.lock()
-        entry = (key, path)
-        lock.unlock()
-        return path
+        defer { lock.unlock() }
+        if let entry, entry.inputs == inputs { return entry }
+        let plan = CursorPlan(inputs: inputs)
+        entry = plan
+        return plan
     }
 }
