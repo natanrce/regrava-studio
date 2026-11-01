@@ -431,10 +431,10 @@ float bayer8(float2 px) {
     int x = int(fmod(floor(px.x), 8.0)), y = int(fmod(floor(px.y), 8.0));
     int x0 = x & 1, y0 = y & 1, x1 = (x >> 1) & 1, y1 = (y >> 1) & 1, x2 = (x >> 2) & 1, y2 = (y >> 2) & 1;
     int v = ((((x0 ^ y0)) * 2 + y0) * 16) + ((((x1 ^ y1)) * 2 + y1) * 4) + (((x2 ^ y2)) * 2 + y2);
-    return (float(v) + 0.5) / 64.0;
+    return float(v) / 64.0;
 }
 
-/// `$ditherColor`: ±half a step of 1/255 of screen-Bayer noise, scaled by alpha (anti-banding).
+/// `$ditherColor`: −½…+½ step of 1/255 of screen-Bayer noise, scaled by alpha (anti-banding).
 float4 ditherColor(float4 c, float2 px) {
     float noise = (bayer8(px) - 0.5) * (1.0 / 255.0) * c.a;
     return float4(c.rgb + noise, c.a);
