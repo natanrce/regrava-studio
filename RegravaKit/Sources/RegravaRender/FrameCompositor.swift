@@ -674,25 +674,10 @@ public final class FrameCompositor: @unchecked Sendable {
         return filled.cropped(to: rect).insertingIntermediate(cache: true)
     }
 
-    /// Gradient from the top-left corner (0,0) to the bottom-right corner (1,1), stops evenly
-    /// spaced; drawn once per canvas size.
+    /// The gradient texture, drawn at the stage's aspect ratio, scaled to cover `rect`.
     static func gradient(_ config: BackgroundConfig, rect: CGRect) -> CIImage {
-        let stops = config.gradientStops.count >= 2 ? config.gradientStops : [config.gradientFrom, config.gradientTo]
-        let width = max(Int(rect.width), 1), height = max(Int(rect.height), 1)
-        let space = CGColorSpace(name: CGColorSpace.sRGB)!
-        // 16 bits per channel so the dither, not 8-bit steps, decides the banding.
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 16, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue),
-              let cgGradient = CGGradient(
-                colorsSpace: space,
-                colors: stops.map { CGColor(srgbRed: $0.r, green: $0.g, blue: $0.b, alpha: $0.a) } as CFArray,
-                locations: stops.indices.map { CGFloat($0) / CGFloat(stops.count - 1) }
-              ) else {
-            return CIImage(color: ciColor(config.gradientFrom)).cropped(to: rect)
-        }
-        // Core Graphics is bottom-left: top-left is (0, height).
-        context.drawLinearGradient(cgGradient, start: CGPoint(x: 0, y: height), end: CGPoint(x: width, y: 0), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-        guard let image = context.makeImage() else { return CIImage(color: ciColor(config.gradientFrom)).cropped(to: rect) }
-        return dithered(CIImage(cgImage: image).cropped(to: rect))
+        let stage = Size2(width: rect.width * LayoutResolver.stageHeight / max(rect.height, 1), height: LayoutResolver.stageHeight)
+        return filled(Backdrop.gradient(config.gradient, stage: stage), rect: rect, blur: 0)
     }
 
     static func ciColor(_ c: RGBA, alpha: Double? = nil) -> CIColor {

@@ -763,5 +763,49 @@ float4 clickEffects(sampler image, float4 p0, float4 p1, float4 p2, float4 s0, f
     return float4(color / colorWeight, alpha / float(reads));
 }
 
+// MARK: - Backgrounds and deband
+
+/// sRGB-encoded channel to linear and back (`$linearChannelFromSrgb`, `$srgbChannelFromLinear`).
+float srgbToLinear(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+float linearToSrgb(float c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+
+/// OKLCH (lightness, chroma, hue radians) to encoded sRGB, the linear values clamped to 0…1.
+float3 srgbFromOklch(float3 lch) {
+    float3 lab = float3(lch.x, lch.y * cos(lch.z), lch.y * sin(lch.z));
+    float l = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+    float m = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+    float s = lab.x - 0.0894841775 * lab.y - 1.291485548 * lab.z;
+    l = l * l * l; m = m * m * m; s = s * s * s;
+    float3 rgb = float3(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+                        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+                        -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s);
+    rgb = clamp(rgb, float3(0.0), float3(1.0));
+    return float3(linearToSrgb(rgb.x), linearToSrgb(rgb.y), linearToSrgb(rgb.z));
+}
+
+/// `source/gradient`: the colour along the line from `line.xy` to `line.zw` (uv, top-left),
+/// mixed stop to stop in OKLCH, premultiplied, dithered at the texel. Encoded sRGB out.
+/// `size` = (width, height, stopCount, -); offsets in o0, o1; stops (L, C, h, alpha) c0…c7.
+float4 oklchGradient(float4 line, float4 size, float4 o0, float4 o1,
+                     float4 c0, float4 c1, float4 c2, float4 c3, float4 c4, float4 c5, float4 c6, float4 c7,
+                     destination dest) {
+    float2 coord = dest.coord();
+    float2 uv = float2(coord.x / size.x, 1.0 - coord.y / size.y);
+    float2 lineVector = line.zw - line.xy;
+    float lengthSquared = max(dot(lineVector, lineVector), 0.000001);
+    float t = clamp(dot(uv - line.xy, lineVector) / lengthSquared, 0.0, 1.0);
+    float offsets[8] = { o0.x, o0.y, o0.z, o0.w, o1.x, o1.y, o1.z, o1.w };
+    float4 stops[8] = { c0, c1, c2, c3, c4, c5, c6, c7 };
+    float4 color = stops[0];
+    for (int i = 1; i < 8; i++) {
+        float span = max(offsets[i] - offsets[i - 1], 0.000001);
+        float segment = clamp((t - offsets[i - 1]) / span, 0.0, 1.0);
+        float active = float(i) < size.z ? 1.0 : 0.0;
+        color = mix(color, stops[i], segment * active);
+    }
+    float3 srgb = srgbFromOklch(color.xyz);
+    return ditherColor(float4(srgb * color.w, color.w), float2(coord.x, size.y - coord.y));
+}
+
 }
 }
