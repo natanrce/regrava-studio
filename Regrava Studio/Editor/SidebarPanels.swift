@@ -301,6 +301,27 @@ struct CursorPanel: View {
                 SidebarSection {
                     NamedField(name: "Rotation", togglable: true) {
                         SliderField(name: "Rotate cursor", value: editor.binding(\.cursor.baseRotation), range: -180...180, step: 1, preview: degrees, resetValue: 0)
+                        NamedField(name: "Rotate while moving", icon: "cursorarrow.motionlines.click", description: "How the cursor rotates as it chases the mouse.") {
+                            SegmentedPicker(
+                                options: CursorRotationMode.allCases,
+                                label: { $0 == .velocity ? "Tilt" : "Follow" },
+                                description: {
+                                    $0 == .velocity
+                                        ? "Leans with fast horizontal movement, settling back upright at rest."
+                                        : "Points along the direction of travel, like pulled on a leash - and keeps its bearing at rest."
+                                },
+                                selection: editor.binding(\.cursor.rotationMode)
+                            )
+                        }
+                        if cursor.rotationMode == .velocity {
+                            SliderField(
+                                name: "Tilt amount",
+                                description: "How strongly horizontal movement leans the cursor.",
+                                value: editor.binding(\.cursor.rotateOnXMovementRatio),
+                                range: 0...2,
+                                resetValue: 0.5
+                            )
+                        }
                     }
                 }
                 SidebarSection(showsDivider: false) {
