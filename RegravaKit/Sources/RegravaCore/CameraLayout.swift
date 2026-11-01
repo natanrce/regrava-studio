@@ -141,6 +141,8 @@ public struct CameraLayoutRange: Codable, Hashable, Sendable, Identifiable {
 
 /// `cameraConfig.background`: the cutout edge, shared by every cutout layout.
 public struct CameraBackgroundConfig: Codable, Hashable, Sendable {
+    /// Kept with the project but not drawn.
+    public var blurAmount01 = 0.0
     /// "Edge softness": 1 keeps the matte as is, 0 makes the edge hard except in soft areas.
     public var edgeFalloff01 = 0.2
     /// "Edge inset": shrinks the matte by this many footage pixels.
@@ -150,6 +152,7 @@ public struct CameraBackgroundConfig: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        blurAmount01 = c.value(.blurAmount01, default: 0)
         edgeFalloff01 = c.value(.edgeFalloff01, default: 0.2)
         edgeInsetPx = c.value(.edgeInsetPx, default: 0)
     }
@@ -159,6 +162,8 @@ public struct CameraBackgroundConfig: Codable, Hashable, Sendable {
 public struct CameraConfig: Codable, Hashable, Sendable {
     public var hide = false
     public var mirror = false
+    /// Kept with the project but not drawn.
+    public var aspectRatio = 1.0
     public var enableFaceTracking = false
     /// "Hide during silence" minimum silence (ms), nil = off.
     public var hideDuringSilenceMs: Double?
@@ -180,6 +185,7 @@ public struct CameraConfig: Codable, Hashable, Sendable {
         let d = CameraConfig()
         hide = c.value(.hide, default: d.hide)
         mirror = c.value(.mirror, default: d.mirror)
+        aspectRatio = c.value(.aspectRatio, default: d.aspectRatio)
         enableFaceTracking = c.value(.enableFaceTracking, default: d.enableFaceTracking)
         hideDuringSilenceMs = c.value(.hideDuringSilenceMs, default: nil)
         sharpen01 = c.value(.sharpen01, default: d.sharpen01)

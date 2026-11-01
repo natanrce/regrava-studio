@@ -104,14 +104,14 @@ public enum PresetFile {
             "camera": [
                 "hide": camera.hide,
                 "mirror": camera.mirror,
-                "aspectRatio": 1,
+                "aspectRatio": camera.aspectRatio,
                 "enableFaceTracking": camera.enableFaceTracking,
                 "hideDuringSilenceMs": camera.hideDuringSilenceMs ?? NSNull(),
                 "lut": camera.lut ?? NSNull(),
                 "lutIntensity": camera.lutIntensity,
                 "grain": camera.grain,
                 "sharpen01": camera.sharpen01,
-                "background": ["blurAmount01": 0, "edgeFalloff01": camera.background.edgeFalloff01],
+                "background": ["blurAmount01": camera.background.blurAmount01, "edgeFalloff01": camera.background.edgeFalloff01],
             ] as [String: Any],
             "animations": [
                 "mouseMovementSpring": animation.mouseSpring.map(spring) ?? NSNull(),
@@ -289,12 +289,14 @@ public enum PresetFile {
         let cam = dict(c, "camera")
         camera.hide = bool(cam, "hide", camera.hide)
         camera.mirror = bool(cam, "mirror", camera.mirror)
+        camera.aspectRatio = num(cam, "aspectRatio", camera.aspectRatio)
         camera.enableFaceTracking = bool(cam, "enableFaceTracking", camera.enableFaceTracking)
         camera.hideDuringSilenceMs = optNum(cam, "hideDuringSilenceMs", camera.hideDuringSilenceMs)
         camera.lut = str(cam, "lut")
         camera.lutIntensity = num(cam, "lutIntensity", camera.lutIntensity)
         camera.grain = num(cam, "grain", camera.grain)
         camera.sharpen01 = num(cam, "sharpen01", camera.sharpen01)
+        camera.background.blurAmount01 = num(dict(cam, "background"), "blurAmount01", camera.background.blurAmount01)
         camera.background.edgeFalloff01 = num(dict(cam, "background"), "edgeFalloff01", camera.background.edgeFalloff01)
 
         var captions = CaptionsConfig()

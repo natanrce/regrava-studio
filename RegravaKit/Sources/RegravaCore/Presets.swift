@@ -76,12 +76,14 @@ public extension Project {
             // The camera's look; its crop and delay belong to the recording.
             camera.hide = preset.hide
             camera.mirror = preset.mirror
+            camera.aspectRatio = preset.aspectRatio
             camera.enableFaceTracking = preset.enableFaceTracking
             camera.hideDuringSilenceMs = preset.hideDuringSilenceMs
             camera.lut = preset.lut
             camera.lutIntensity = preset.lutIntensity
             camera.grain = preset.grain
             camera.sharpen01 = preset.sharpen01
+            camera.background.blurAmount01 = preset.background.blurAmount01
             camera.background.edgeFalloff01 = preset.background.edgeFalloff01
         }
         if let preset = config.captions { captions = preset }

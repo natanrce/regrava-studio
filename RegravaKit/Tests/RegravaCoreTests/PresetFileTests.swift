@@ -55,6 +55,26 @@ struct PresetFileTests {
         #expect(try PresetFile.decode(missing).animation.mouseSpring == nil)
     }
 
+    /// `cameraConfig.aspectRatio` and `background.blurAmount01` are kept through a save.
+    @Test func keepsTheCameraAspectRatioAndBlurAmount() throws {
+        var camera = CameraConfig()
+        #expect(camera.aspectRatio == 1)
+        #expect(camera.background.blurAmount01 == 0)
+        camera.aspectRatio = 1.5
+        camera.background.blurAmount01 = 0.25
+        let project = Project(recording: RecordingInfo(videoSize: Size2(width: 100, height: 100), pointPixelScale: 1, durationMs: 1000, fps: 60), mouseEvents: [])
+        var config = project.presetConfig
+        config.camera = camera
+        let back = try PresetFile.decode(PresetFile.encode(config, appVersion: "1.0"))
+        #expect(back.camera?.aspectRatio == 1.5)
+        #expect(back.camera?.background.blurAmount01 == 0.25)
+        // Older projects without the keys keep the defaults.
+        let old = try JSONDecoder().decode(CameraConfig.self, from: Data(#"{"mirror":true,"background":{"edgeFalloff01":0.4}}"#.utf8))
+        #expect(old.aspectRatio == 1)
+        #expect(old.background.blurAmount01 == 0)
+        #expect(old.background.edgeFalloff01 == 0.4)
+    }
+
     @Test func rejectsABadVersion() {
         let data = #"{"json":{"version":"x","projectConfig":{}}}"#.data(using: .utf8)!
         #expect(throws: PresetFile.Failure.self) { try PresetFile.decode(data) }
