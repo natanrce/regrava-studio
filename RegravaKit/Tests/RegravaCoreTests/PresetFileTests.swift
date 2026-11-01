@@ -75,6 +75,31 @@ struct PresetFileTests {
         #expect(old.background.edgeFalloff01 == 0.4)
     }
 
+    /// The gradient's start and end points and its stop positions are read and written; a
+    /// plain list of colours is spread evenly from (0, 0) to (1, 1).
+    @Test func keepsGradientPointsAndStopPositions() throws {
+        let gradient = BackgroundGradient(start: Vec2(0.5, 0), end: Vec2(0.5, 1), stops: [
+            .init(color: RGBA(hex: 0x112233), at: 0.2), .init(color: RGBA(hex: 0x445566), at: 0.9),
+        ])
+        let project = Project(recording: RecordingInfo(videoSize: Size2(width: 100, height: 100), pointPixelScale: 1, durationMs: 1000, fps: 60), mouseEvents: [])
+        var config = project.presetConfig
+        config.style.background.gradient = gradient
+        let back = try PresetFile.decode(PresetFile.encode(config, appVersion: "1.0"))
+        #expect(back.style.background.gradient == gradient)
+        let list = PresetFile.gradient(["#ff0000", "#00ff00", "#0000ff"], .default)
+        #expect(list.start == Vec2(0, 0) && list.end == Vec2(1, 1))
+        #expect(list.stops.map(\.at) == [0, 0.5, 1])
+        // Projects that stored only the colours keep them, evenly spaced.
+        let old = try JSONDecoder().decode(BackgroundConfig.self, from: Data(#"{"gradientStops":[{"r":1,"g":0,"b":0,"a":1},{"r":0,"g":0,"b":1,"a":1}]}"#.utf8))
+        #expect(old.gradient.stops.map(\.at) == [0, 1])
+        #expect(old.gradient.end == Vec2(1, 1))
+        // New colours keep the points and are spread evenly.
+        var edited = BackgroundConfig(gradient: gradient)
+        edited.gradientStops = [RGBA(hex: 0), RGBA(hex: 0xFFFFFF), RGBA(hex: 0x808080)]
+        #expect(edited.gradient.start == Vec2(0.5, 0))
+        #expect(edited.gradient.stops.map(\.at) == [0, 0.5, 1])
+    }
+
     @Test func rejectsABadVersion() {
         let data = #"{"json":{"version":"x","projectConfig":{}}}"#.data(using: .utf8)!
         #expect(throws: PresetFile.Failure.self) { try PresetFile.decode(data) }

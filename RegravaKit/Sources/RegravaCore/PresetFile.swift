@@ -43,7 +43,7 @@ public enum PresetFile {
         func spring(_ s: SpringConfig) -> [String: Any] {
             ["stiffness": s.stiffness, "damping": s.damping, "mass": s.mass, "clamp": s.clampOvershoot, "precision": s.precision]
         }
-        let stops = style.background.gradientStops
+        let gradient = style.background.gradient
         var processingJSON: [String: Any] = ["improveRecordingQuality01": processing.improveRecordingQuality01]
         // These are written only when they differ from their defaults.
         if processing.autoMaskSensitiveData { processingJSON["autoMaskSensitiveData"] = true }
@@ -168,9 +168,9 @@ public enum PresetFile {
                     "type": style.background.kind.rawValue,
                     "color": style.background.color.hexString,
                     "gradient": [
-                        "start": ["x": 0, "y": 0],
-                        "end": ["x": 1, "y": 1],
-                        "stops": stops.enumerated().map { i, c in ["color": c.hexString, "at": stops.count > 1 ? Double(i) / Double(stops.count - 1) : 0] as [String: Any] },
+                        "start": vec(gradient.start),
+                        "end": vec(gradient.end),
+                        "stops": gradient.stops.map { ["color": $0.color.hexString, "at": $0.at] as [String: Any] },
                     ] as [String: Any],
                     "systemName": style.background.systemName,
                     "image": style.background.imageFileName ?? NSNull(),
@@ -182,6 +182,26 @@ public enum PresetFile {
     }
 
     // MARK: Reading
+
+    /// `background.gradient`: `{start, end, stops: [{color, at}]}`, or a plain list of colours
+    /// spread evenly from (0, 0) to (1, 1).
+    static func gradient(_ value: Any?, _ fallback: BackgroundGradient) -> BackgroundGradient {
+        if let colors = value as? [String] {
+            let parsed = colors.compactMap(RGBA.init(hexString:))
+            return parsed.isEmpty ? fallback : BackgroundGradient(colors: parsed)
+        }
+        guard let object = value as? [String: Any] else { return fallback }
+        func point(_ key: String, _ d: Vec2) -> Vec2 {
+            guard let p = object[key] as? [String: Any] else { return d }
+            return Vec2((p["x"] as? NSNumber)?.doubleValue ?? d.x, (p["y"] as? NSNumber)?.doubleValue ?? d.y)
+        }
+        let stops = (object["stops"] as? [[String: Any]] ?? []).compactMap { stop -> BackgroundGradient.Stop? in
+            guard let color = (stop["color"] as? String).flatMap(RGBA.init(hexString:)), let at = (stop["at"] as? NSNumber)?.doubleValue else { return nil }
+            return BackgroundGradient.Stop(color: color, at: at)
+        }
+        guard !stops.isEmpty else { return fallback }
+        return BackgroundGradient(start: point("start", Vec2(0, 0)), end: point("end", Vec2(1, 1)), stops: stops)
+    }
 
     public static func decode(_ data: Data) throws -> PresetConfig {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -234,8 +254,7 @@ public enum PresetFile {
         let background = dict(styles, "background")
         if let kind = str(background, "type").flatMap(BackgroundKind.init(rawValue:)) { style.background.kind = kind }
         style.background.color = color(background, "color", style.background.color)
-        let stops = (dict(background, "gradient")["stops"] as? [[String: Any]] ?? []).compactMap { str($0, "color").flatMap(RGBA.init(hexString:)) }
-        if !stops.isEmpty { style.background.gradientStops = stops }
+        style.background.gradient = Self.gradient(background["gradient"], style.background.gradient)
         if let name = str(background, "systemName") { style.background.systemName = name }
         style.background.imageFileName = str(background, "image")
         style.background.blur = num(background, "blur", style.background.blur)

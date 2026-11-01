@@ -57,14 +57,54 @@ public enum BackgroundKind: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// `background.gradient`: a linear gradient from `start` to `end` (fractions of the stage,
+/// top-left origin) through colour stops at positions 0…1.
+public struct BackgroundGradient: Codable, Hashable, Sendable {
+    public struct Stop: Codable, Hashable, Sendable {
+        public var color: RGBA
+        /// Position along the gradient line, 0…1.
+        public var at: Double
+
+        public init(color: RGBA, at: Double) {
+            self.color = color
+            self.at = at
+        }
+    }
+
+    public var start: Vec2
+    public var end: Vec2
+    public var stops: [Stop]
+
+    public init(start: Vec2 = Vec2(0, 0), end: Vec2 = Vec2(1, 1), stops: [Stop]) {
+        self.start = start
+        self.end = end
+        self.stops = stops
+    }
+
+    /// Colours spread evenly from the top-left to the bottom-right corner (the list form).
+    public init(colors: [RGBA]) {
+        self.init(stops: colors.enumerated().map { i, color in
+            Stop(color: color, at: colors.count > 1 ? Double(i) / Double(colors.count - 1) : 0)
+        })
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = c.value(.start, default: Vec2(0, 0))
+        end = c.value(.end, default: Vec2(1, 1))
+        stops = c.value(.stops, default: [])
+    }
+
+    public static let `default` = BackgroundGradient(colors: [RGBA(hex: 0x4776E6), RGBA(hex: 0x8E54E9)])
+}
+
 public struct BackgroundConfig: Codable, Hashable, Sendable {
     /// Wallpaper shown by default.
     public static let defaultWallpaper = "macOS/san-francisco-dark.jpg"
 
     public var kind: BackgroundKind
     public var color: RGBA
-    /// Gradient colours from the top-left to the bottom-right corner (2 or more).
-    public var gradientStops: [RGBA]
+    public var gradient: BackgroundGradient
     /// Wallpaper id: its path in the wallpaper library ("macOS/sonoma-light.jpg").
     public var systemName: String
     /// Image copied into the project folder.
@@ -75,38 +115,62 @@ public struct BackgroundConfig: Codable, Hashable, Sendable {
     public init(
         kind: BackgroundKind = .wallpaper,
         color: RGBA = RGBA(hex: 0x4776E6),
-        gradientStops: [RGBA] = [RGBA(hex: 0x4776E6), RGBA(hex: 0x8E54E9)],
+        gradient: BackgroundGradient = .default,
         systemName: String = BackgroundConfig.defaultWallpaper,
         imageFileName: String? = nil,
         blur: Double = 0
     ) {
         self.kind = kind
         self.color = color
-        self.gradientStops = gradientStops
+        self.gradient = gradient
         self.systemName = systemName
         self.imageFileName = imageFileName
         self.blur = blur
     }
 
-    private enum LegacyKeys: String, CodingKey { case gradientFrom, gradientTo }
+    public init(
+        kind: BackgroundKind = .wallpaper,
+        color: RGBA = RGBA(hex: 0x4776E6),
+        gradientStops: [RGBA],
+        systemName: String = BackgroundConfig.defaultWallpaper,
+        imageFileName: String? = nil,
+        blur: Double = 0
+    ) {
+        self.init(kind: kind, color: color, gradient: BackgroundGradient(colors: gradientStops), systemName: systemName, imageFileName: imageFileName, blur: blur)
+    }
+
+    private enum LegacyKeys: String, CodingKey { case gradientStops, gradientFrom, gradientTo }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = BackgroundConfig()
         kind = c.value(.kind, default: d.kind)
         color = c.value(.color, default: d.color)
-        if let stops = try? c.decodeIfPresent([RGBA].self, forKey: .gradientStops), stops.count >= 2 {
-            gradientStops = stops
-        } else if let legacy = try? decoder.container(keyedBy: LegacyKeys.self),
-                  let from = try? legacy.decode(RGBA.self, forKey: .gradientFrom),
-                  let to = try? legacy.decode(RGBA.self, forKey: .gradientTo) {
-            gradientStops = [from, to]
+        let legacy = try? decoder.container(keyedBy: LegacyKeys.self)
+        if let gradient = try? c.decodeIfPresent(BackgroundGradient.self, forKey: .gradient), !gradient.stops.isEmpty {
+            self.gradient = gradient
+        } else if let stops = try? legacy?.decodeIfPresent([RGBA].self, forKey: .gradientStops), stops.count >= 2 {
+            gradient = BackgroundGradient(colors: stops)
+        } else if let from = try? legacy?.decode(RGBA.self, forKey: .gradientFrom),
+                  let to = try? legacy?.decode(RGBA.self, forKey: .gradientTo) {
+            gradient = BackgroundGradient(colors: [from, to])
         } else {
-            gradientStops = d.gradientStops
+            gradient = d.gradient
         }
         systemName = c.value(.systemName, default: d.systemName)
         imageFileName = c.value(.imageFileName, default: d.imageFileName)
         blur = c.value(.blur, default: d.blur)
+    }
+
+    /// The stop colours; setting them spreads them evenly between the same start and end.
+    public var gradientStops: [RGBA] {
+        get { gradient.stops.map(\.color) }
+        set {
+            var spread = BackgroundGradient(colors: newValue)
+            spread.start = gradient.start
+            spread.end = gradient.end
+            gradient = spread
+        }
     }
 
     /// First stop; editing it rebuilds a 2-stop gradient.
