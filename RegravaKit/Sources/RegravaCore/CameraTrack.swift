@@ -49,6 +49,8 @@ public struct CameraFrame: Hashable, Sendable {
     public var cursorScale: Double = 1
     /// Sprung cursor rotation in radians (base plus motion rotation), positive clockwise.
     public var cursorRotationRad: Double = 0
+    /// Sprung blur of a fading cursor, in stage units (10 when hidden).
+    public var cursorFadeBlurRadius: Double = 0
     /// Inside an instant zoom's snap window (motion blur is off there).
     public var isInstantSnap = false
     /// The same values one playback frame earlier, for motion blur.
@@ -167,6 +169,7 @@ public final class CameraTrack: @unchecked Sendable {
         var press = SpringValue(1)
         var opacity = SpringValue(1)
         var rotation = SpringValue(0)
+        var fadeBlur = SpringValue(0)
         let rotationSpring = CursorRotation.spring(for: project.cursor.rotationMode)
         let baseRotationRad = project.cursor.baseRotation * .pi / 180
         // Face tracking: the focal point always uses its own spring.
@@ -271,6 +274,14 @@ public final class CameraTrack: @unchecked Sendable {
             rotation.setTarget(baseRotationRad + cursorPlan.motionRotation(at: t), config: rotationSpring)
             if i == 0 { rotation.snapToTarget() } else { rotation.advance(by: sampleIntervalMs, config: rotationSpring) }
             frame.cursorRotationRad = rotation.value
+            // A fading cursor blurs toward 10 with the visibility spring; none when it is not drawn.
+            if project.cursor.hide {
+                fadeBlur = SpringValue(0)
+            } else {
+                fadeBlur.setTarget(typing || !visible ? Self.fadeOutBlurRadius : 0, config: Self.visibilitySpring)
+                if i == 0 { fadeBlur.snapToTarget() } else { fadeBlur.advance(by: sampleIntervalMs, config: Self.visibilitySpring) }
+            }
+            frame.cursorFadeBlurRadius = fadeBlur.value
             frame.mask = maskAnimator.frame(at: source, stepMs: sampleIntervalMs, first: i == 0)
             frames.append(frame)
         }
@@ -353,6 +364,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
         frame.cursorRotationRad = a.cursorRotationRad + (b.cursorRotationRad - a.cursorRotationRad) * f
+        frame.cursorFadeBlurRadius = a.cursorFadeBlurRadius + (b.cursorFadeBlurRadius - a.cursorFadeBlurRadius) * f
         frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
         frame.mask = Self.interpolate(a.mask, b.mask, f)
         frame.cameraRect = Self.interpolate(a.cameraRect, b.cameraRect, f)
@@ -428,6 +440,8 @@ public final class CameraTrack: @unchecked Sendable {
     public static let typingFadeSpring = SpringConfig(stiffness: 600, damping: 50, mass: 1)
     /// Spring for showing and hiding the cursor.
     public static let visibilitySpring = SpringConfig(stiffness: 340, damping: 60, mass: 3)
+    /// Blur of a hidden cursor, in stage units.
+    public static let fadeOutBlurRadius = 10.0
 
     /// Whether the cursor should be shown at `t`: once the path starts and, with "Hide cursor
     /// if not moving", only while the last mouse event is at most that long ago.

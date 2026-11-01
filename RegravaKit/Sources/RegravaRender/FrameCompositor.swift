@@ -568,6 +568,12 @@ public final class FrameCompositor: @unchecked Sendable {
             .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
             .transformed(by: CGAffineTransform(scaleX: target.width / image.extent.width, y: target.height / image.extent.height))
             .transformed(by: CGAffineTransform(translationX: target.minX, y: target.minY))
+        // A fading cursor is blurred by its sprung radius (stage units, σ = radius / 2).
+        let blurSigma = frame.cursorFadeBlurRadius * 0.5 * layout.scale
+        if blurSigma > 0.01 {
+            let extent = placed.extent
+            placed = placed.applyingGaussianBlur(sigma: blurSigma).cropped(to: extent.insetBy(dx: -3 * blurSigma, dy: -3 * blurSigma))
+        }
         if rotation != 0 {
             // Rotate around the hotspot; positive = clockwise.
             let pivot = ciPoint(tip)

@@ -63,6 +63,21 @@ private let probes: [Double] = [0, 400, 600, 800, 1200, 1600, 2400]
     }
 }
 
+@Suite struct CursorFadeTests {
+    @Test func aHiddenCursorIsBlurred() {
+        var project = Project(
+            recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 6000, fps: 60),
+            mouseEvents: [MouseEvent(kind: .move, timeMs: 0, position: Vec2(100, 100))]
+        )
+        project.cursor.hideNotMovingAfterMs = 1000
+        let track = CameraTrack(project: project)
+        #expect(track.frame(at: 500).cursorFadeBlurRadius == 0)
+        #expect(abs(track.frame(at: 5900).cursorFadeBlurRadius - 10) < 0.05)
+        project.cursor.hide = true
+        #expect(CameraTrack(project: project).frame(at: 5900).cursorFadeBlurRadius == 0)
+    }
+}
+
 @Suite struct CursorPlanTests {
     func plan(events: [MouseEvent], durationMs: Double, spring: SpringConfig? = .cursor) -> CursorPlan {
         CursorPlan(inputs: CursorPlan.Inputs(
