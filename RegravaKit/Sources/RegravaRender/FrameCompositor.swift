@@ -14,7 +14,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let pointPixelScale: Double
     private let cursors: CursorLibrary?
     private let background: CIImage
-    /// The loupe's frosted backdrop: the background blurred by 0.5% of the stage width.
+    /// The loupe's frosted backdrop: the background blurred further by a radius of 0.5% of the
+    /// stage width (a Gaussian of half of it), so the two radii add as √(blur² + frost²).
     private let frost: CIImage
     private let motionBlurAmount: Double
     /// Rate frames are produced at (`playback.fps`).
@@ -63,7 +64,7 @@ public final class FrameCompositor: @unchecked Sendable {
         // new compositor, so a new image and a new cache entry.
         let c = layout.canvas
         let canvasRect = CGRect(x: c.x, y: c.height - c.y - c.height, width: c.width, height: c.height)
-        frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005).cropped(to: canvasRect).insertingIntermediate(cache: true)
+        frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005 * 0.5).cropped(to: canvasRect).insertingIntermediate(cache: true)
     }
 
     private var canvasHeight: Double { layout.canvas.height }
@@ -634,9 +635,13 @@ public final class FrameCompositor: @unchecked Sendable {
         return output?.cropped(to: extent) ?? src
     }
 
-    /// An image, Unsplash or system background without a file shows the plain colour.
+    /// An image, Unsplash or system background without a file shows the plain colour. Every
+    /// kind blurs by `stageWidth × blur / 100 × 0.05` stage pixels, read as a Gaussian of half
+    /// that radius.
     static func makeBackground(_ config: BackgroundConfig, canvas: Rect2, assetsDirectory: URL?) -> CIImage {
         let rect = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
+        let scale = canvas.height / LayoutResolver.stageHeight
+        let sigma = config.blurRadius(stageWidth: canvas.width / max(scale, 0.000001)) * 0.5 * scale
         let solid = CIImage(color: ciColor(config.color)).cropped(to: rect)
         switch config.kind {
         case .color, .unsplash:
@@ -644,21 +649,21 @@ public final class FrameCompositor: @unchecked Sendable {
         case .image:
             if let name = config.imageFileName, let directory = assetsDirectory,
                let image = CIImage(contentsOf: directory.appendingPathComponent(name)) {
-                return filled(image, rect: rect, blur: config.blur)
+                return filled(image, rect: rect, sigma: sigma)
             }
             return solid
         case .wallpaper:
             if let url = WallpaperLibrary.url(for: config.systemName), let image = CIImage(contentsOf: url) {
-                return filled(image, rect: rect, blur: config.blur)
+                return filled(image, rect: rect, sigma: sigma)
             }
             return solid
         case .gradient:
-            return gradient(config, rect: rect)
+            return gradient(config, rect: rect, sigma: sigma)
         }
     }
 
     /// Aspect-fill, then blur (clamped so edges stay opaque).
-    static func filled(_ image: CIImage, rect: CGRect, blur: Double) -> CIImage {
+    static func filled(_ image: CIImage, rect: CGRect, sigma: Double) -> CIImage {
         let scale = max(rect.width / image.extent.width, rect.height / image.extent.height)
         var filled = image
             .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
@@ -667,8 +672,8 @@ public final class FrameCompositor: @unchecked Sendable {
             translationX: (rect.width - filled.extent.width) / 2,
             y: (rect.height - filled.extent.height) / 2
         ))
-        if blur > 0 {
-            filled = filled.clampedToExtent().applyingGaussianBlur(sigma: blur / 2)
+        if sigma > 0.02 {
+            filled = filled.clampedToExtent().applyingGaussianBlur(sigma: sigma)
         }
         // Kept by Core Image once drawn instead of decoded, scaled and blurred every frame. A
         // new image or canvas makes a new compositor, so a new cache entry.
@@ -676,9 +681,9 @@ public final class FrameCompositor: @unchecked Sendable {
     }
 
     /// The gradient texture, drawn at the stage's aspect ratio, scaled to cover `rect`.
-    static func gradient(_ config: BackgroundConfig, rect: CGRect) -> CIImage {
+    static func gradient(_ config: BackgroundConfig, rect: CGRect, sigma: Double = 0) -> CIImage {
         let stage = Size2(width: rect.width * LayoutResolver.stageHeight / max(rect.height, 1), height: LayoutResolver.stageHeight)
-        return filled(Backdrop.gradient(config.gradient, stage: stage), rect: rect, blur: 0)
+        return filled(Backdrop.gradient(config.gradient, stage: stage), rect: rect, sigma: sigma)
     }
 
     static func ciColor(_ c: RGBA, alpha: Double? = nil) -> CIColor {

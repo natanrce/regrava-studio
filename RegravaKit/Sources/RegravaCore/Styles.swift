@@ -162,6 +162,12 @@ public struct BackgroundConfig: Codable, Hashable, Sendable {
         blur = c.value(.blur, default: d.blur)
     }
 
+    /// The blur radius of `blur`, `stageWidth × blur / 100 × 0.05` stage pixels, for
+    /// every kind of background.
+    public func blurRadius(stageWidth: Double) -> Double {
+        blur <= 0 ? 0 : stageWidth * (blur / 100) * 0.05
+    }
+
     /// The stop colours; setting them spreads them evenly between the same start and end.
     public var gradientStops: [RGBA] {
         get { gradient.stops.map(\.color) }
