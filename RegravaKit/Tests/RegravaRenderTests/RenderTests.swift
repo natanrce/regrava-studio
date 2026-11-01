@@ -173,15 +173,14 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
             try context.writePNGRepresentation(of: image, to: url, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
         }
         // Click effects in the middle of a resting screen.
-        for effect in ClickEffect.allCases {
-            project.cursor.clickEffect = effect
+        for kind in ClickEffect.Kind.allCases {
+            project.cursor.clickEffect = ClickEffect(type: kind)
             let effectSnapshot = RenderState.makeSnapshot(project: project, cursors: nil)
             var frame = effectSnapshot.track.frame(at: 0)
             frame.screenRect = effectSnapshot.track.layout.restScreen
-            frame.clickProgress = 0.3
-            frame.clickPosition = Vec2(320, 180)
+            frame.clicks = [CursorClick(ageMs: kind == .ripple ? 300 : 135, position: Vec2(320, 180))]
             let image = effectSnapshot.compositor.compose(source: checker, frame: frame)
-            let url = URL(fileURLWithPath: dir).appendingPathComponent("click-\(effect.rawValue).png")
+            let url = URL(fileURLWithPath: dir).appendingPathComponent("click-\(kind.rawValue).png")
             try context.writePNGRepresentation(of: image, to: url, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
         }
     }

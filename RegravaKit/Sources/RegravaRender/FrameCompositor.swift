@@ -101,6 +101,8 @@ public final class FrameCompositor: @unchecked Sendable {
             let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), timeline: sensitiveData, config: processing, videoSize: videoSize)
             src = AutoMaskRenderer.apply(covers, to: src, crop01: screenCrop01, videoSize: videoSize)
         }
+        // Click effects are part of the screen content: masks and motion blur carry them.
+        src = clickEffects(on: src, frame: frame, quality: quality)
         // The webcam frame is matted, sharpened and graded once, for the stage and the loupe.
         let camera = cameraImage.map { image in PreparedCamera { self.preparedCamera(image, frame: frame, quality: quality) } }
         var output = session(over: background, source: src, camera: camera, frame: frame, quality: quality)
@@ -149,12 +151,6 @@ public final class FrameCompositor: @unchecked Sendable {
         output = Self.dithered(screenImage).composited(over: output)
 
         let videoToCanvas = frame.screenRect.width / max(layout.videoSize.width, 1)
-        let pixelsPerPoint = pointPixelScale * cursorConfig.sizeMultiplier * videoToCanvas
-
-        if let effect = cursorConfig.clickEffect, let progress = frame.clickProgress, let position = frame.clickPosition {
-            let center = ciPoint(layout.canvasPoint(videoPoint: position, screenRect: frame.screenRect))
-            output = Self.clickEffect(effect, center: center, progress: progress, maxRadius: 22 * pixelsPerPoint).composited(over: output)
-        }
 
         if !cursorConfig.hide, frame.cursorOpacity > 0, let cursors, let position = frame.cursor {
             let cursor = cursors.asset(named: frame.cursorName)
@@ -590,44 +586,52 @@ public final class FrameCompositor: @unchecked Sendable {
         return placed
     }
 
-    /// Circle: a filled disc that grows and fades. Ripple: an expanding ring.
-    static func clickEffect(_ effect: ClickEffect, center: CGPoint, progress: Double, maxRadius: Double) -> CIImage {
-        let eased = 1 - pow(1 - progress, 3)
-        let radius = max(maxRadius * (0.35 + 0.65 * eased), 1)
-        let alpha = 0.45 * (1 - progress)
-        let white = CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(alpha))
-        let clear = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
-        let gradient = CIFilter.radialGradient()
-        gradient.center = center
-        switch effect {
-        case .circle:
-            gradient.radius0 = Float(radius * 0.85)
-            gradient.radius1 = Float(radius)
-            gradient.color0 = white
-            gradient.color1 = clear
-        case .ripple:
-            // Bright edge fading inward; the outside is cropped by the circle mask below.
-            gradient.radius0 = Float(radius * 0.55)
-            gradient.radius1 = Float(radius)
-            gradient.color0 = clear
-            gradient.color1 = white
+    // MARK: Click effects
+
+    private static let clickKernel = RenderKernels.general("clickEffects")
+
+    /// The click effect drawn into the recording `src` (crop space, origin at zero): up to three
+    /// presses, sized by the recording's width, antialiased over 1.5 output pixels.
+    private func clickEffects(on src: CIImage, frame: CameraFrame, quality: RenderQuality) -> CIImage {
+        guard let effect = cursorConfig.clickEffect, !frame.clicks.isEmpty, let kernel = Self.clickKernel else { return src }
+        let extent = src.extent
+        guard extent.width > 0, extent.height > 0 else { return src }
+        // Recording pixels to pixels of `src`.
+        let k = extent.width / max(layout.videoSize.width, 1)
+        let videoWidth = videoSize.width * k
+        let knobs = ClickEffects.knobs(effect, videoWidth: videoWidth)
+        var points: [CIVector] = []
+        var states: [CIVector] = []
+        for i in 0..<ClickEffects.maxClicks {
+            if i < frame.clicks.count, let state = ClickEffects.state(effect.type, ageMs: frame.clicks[i].ageMs, knobs: knobs, videoWidth: videoWidth) {
+                let p = frame.clicks[i].position
+                points.append(CIVector(x: extent.minX + p.x * k, y: extent.maxY - p.y * k, z: 0, w: 1))
+                states.append(CIVector(x: state.x, y: state.y, z: state.z, w: state.w))
+            } else {
+                points.append(CIVector(x: 0, y: 0, z: 0, w: 0))
+                states.append(CIVector(x: 0, y: 0, z: 0, w: 0))
+            }
         }
-        var image = gradient.outputImage ?? CIImage.empty()
-        if effect == .ripple {
-            let disc = CIFilter.radialGradient()
-            disc.center = center
-            disc.radius0 = Float(radius)
-            disc.radius1 = Float(radius + 1)
-            disc.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 1)
-            disc.color1 = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
-            let blend = CIFilter.blendWithAlphaMask()
-            blend.inputImage = image
-            blend.backgroundImage = CIImage.empty()
-            blend.maskImage = disc.outputImage
-            image = blend.outputImage ?? image
-        }
-        let box = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-        return image.cropped(to: box)
+        guard points.contains(where: { $0.w > 0 }) else { return src }
+        // Where the recording lands on the canvas: output pixels for the antialiasing and the noise.
+        let video = videoRect(inBody: frame.screenRect)
+        let outputPerPixel = max(video.width, 0.0001) / extent.width
+        let maxReads: Double = quality == .export || quality == .pausedHigh ? 32 : 4
+        let reach = ClickEffects.readReach01(effect.type) * videoWidth + 2
+        let output = kernel.apply(
+            extent: extent,
+            roiCallback: { _, rect in rect.insetBy(dx: -reach, dy: -reach) },
+            arguments: [
+                src.clampedToExtent(), points[0], points[1], points[2], states[0], states[1], states[2],
+                CIVector(x: knobs.x, y: knobs.y, z: knobs.z, w: knobs.w),
+                CIVector(x: effect.type == .ripple ? 1 : 2, y: videoWidth, z: 1.5 / outputPerPixel, w: maxReads),
+                CIVector(
+                    x: outputPerPixel, y: video.x - extent.minX * outputPerPixel,
+                    z: -max(video.height, 0.0001) / extent.height, w: video.y + max(video.height, 0.0001) / extent.height * extent.maxY
+                ),
+            ]
+        )
+        return output?.cropped(to: extent) ?? src
     }
 
     static func makeBackground(_ config: BackgroundConfig, canvas: Rect2, assetsDirectory: URL?) -> CIImage {

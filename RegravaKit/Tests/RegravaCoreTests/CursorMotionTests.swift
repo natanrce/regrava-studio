@@ -78,6 +78,47 @@ private let probes: [Double] = [0, 400, 600, 800, 1200, 1600, 2400]
     }
 }
 
+@Suite struct ClickEffectTests {
+    @Test func circleMatchesReferenceValues() {
+        #expect(near(ClickEffects.circleRadius(ageMs: 135, videoWidth: 1920), 39.16032))
+        #expect(near(ClickEffects.circleFade(ageMs: 135), 0.896))
+        #expect(near(ClickEffects.circleFade(ageMs: 30), 0.41700960219478744))
+        #expect(near(ClickEffects.circleRadius(ageMs: 450, videoWidth: 1920), 57.599999999999994))
+        #expect(ClickEffects.circleFade(ageMs: 450) == 0)
+        #expect(ClickEffects.state(.circle, ageMs: 450, knobs: .zero, videoWidth: 1920) == nil)
+    }
+
+    @Test func rippleMatchesReferenceValues() {
+        let knobs = ClickEffects.knobs(.ripple, videoWidth: 1920)
+        #expect(near(knobs.x, 76.8))
+        #expect(near(ClickEffects.rippleRadius(ageMs: 300, pullSize: knobs.x, videoWidth: 1920), 192))
+        #expect(near(ClickEffects.rippleBounce(ageMs: 300), 0.12850771036322883))
+        #expect(near(ClickEffects.rippleBounce(ageMs: 1000), 0.0012334958008892395))
+        #expect(ClickEffects.state(.ripple, ageMs: 1001, knobs: knobs, videoWidth: 1920) == nil)
+        #expect(near(ClickEffects.knobs(ClickEffect(type: .ripple, pullSize01: 0.5), videoWidth: 100).x, 50))
+    }
+
+    @Test func keepsTheLastThreePressesOfTheLastSecond() {
+        let presses = [100.0, 700, 800, 900, 1000].map { MouseEvent(kind: .down, timeMs: $0, position: Vec2($0, 0)) }
+        #expect(ClickEffects.recentClicks(at: 1100, presses: presses, kind: .ripple).map(\.ageMs) == [300, 200, 100])
+        // The three are picked before the circle's shorter duration drops the older ones.
+        #expect(ClickEffects.recentClicks(at: 1300, presses: presses, kind: .circle).map(\.ageMs) == [400, 300])
+        #expect(ClickEffects.recentClicks(at: 50, presses: presses, kind: .ripple).isEmpty)
+        #expect(ClickEffects.recentClicks(at: 2500, presses: presses, kind: .ripple).isEmpty)
+    }
+
+    @Test func decodesBothForms() throws {
+        let old = try JSONDecoder().decode(CursorConfig.self, from: Data(#"{"clickEffect":"circle"}"#.utf8))
+        #expect(old.clickEffect == .circle)
+        let object = try JSONDecoder().decode(CursorConfig.self, from: Data(#"{"clickEffect":{"type":"ripple","pullSize01":0.1}}"#.utf8))
+        #expect(object.clickEffect == ClickEffect(type: .ripple, pullSize01: 0.1))
+        let none = try JSONDecoder().decode(CursorConfig.self, from: Data(#"{"clickEffect":null}"#.utf8))
+        #expect(none.clickEffect == nil)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ClickEffect.ripple)) as? [String: Any]
+        #expect(encoded?["type"] as? String == "ripple")
+    }
+}
+
 @Suite struct CursorPlanTests {
     func plan(events: [MouseEvent], durationMs: Double, spring: SpringConfig? = .cursor) -> CursorPlan {
         CursorPlan(inputs: CursorPlan.Inputs(

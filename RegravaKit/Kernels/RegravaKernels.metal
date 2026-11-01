@@ -666,5 +666,102 @@ float4 autoMaskApply(sampler src, sampler blurred, sampler boxes, sampler colors
     return out;
 }
 
+// MARK: Click effects
+// Drawn into the recording itself; lengths are pixels of that image. Up to three clicks:
+// point = (centre, 0, live), state = (radius, fade or bounce, 0, 0), knobs = (pull size, 0, 0, 0),
+// params = (mode 1 ripple / 2 circle, video width, antialias width, most reads),
+// output = (x scale, x offset, y scale, y offset) to top-left output pixels.
+
+/// `$offsets` of one ripple: xy = how far back to read (the pull), zw = the colour split.
+float4 clickRippleOffsets(float2 pixel, float4 point, float4 state, float4 knobs, float videoWidth) {
+    if (point.w <= 0.0) return float4(0.0);
+    float bounce = state.y;
+    if (bounce == 0.0) return float4(0.0);
+    float2 relative = pixel - point.xy;
+    float distance = length(relative);
+    float radius = state.x;
+    float band = videoWidth * 0.05;
+    if (abs(distance - radius) > band * 3.0) return float4(0.0);
+    float ringDistance = (distance - radius) / band;
+    float ring = exp(-ringDistance * ringDistance * 4.0);
+    if (distance == 0.0) return float4(0.0);
+    float pullSize = knobs.x;
+    float calmZoneFade = 1.0;
+    if (pullSize > 0.5) calmZoneFade = smoothstep(pullSize * 0.35, pullSize, distance);
+    float2 direction = relative * (1.0 / distance);
+    float2 pull = direction * (bounce * ring * videoWidth * 0.015 * calmZoneFade);
+    float2 split = direction * (abs(bounce) * ring * (1.0 - ring) * 4.0 * videoWidth * 0.004 * calmZoneFade);
+    return float4(pull, split);
+}
+
+float4 clickRipplesOffsets(float2 pixel, float4 p0, float4 p1, float4 p2, float4 s0, float4 s1, float4 s2, float4 knobs, float videoWidth) {
+    return clickRippleOffsets(pixel, p0, s0, knobs, videoWidth)
+        + clickRippleOffsets(pixel, p1, s1, knobs, videoWidth)
+        + clickRippleOffsets(pixel, p2, s2, knobs, videoWidth);
+}
+
+/// `$overlay` of one circle: a light grey disc with a thin dark rim, over `color`.
+float4 clickCircleOverlay(float4 color, float2 pixel, float4 point, float4 state, float videoWidth, float antialiasWidth) {
+    if (point.w <= 0.0) return color;
+    float fade = state.y;
+    if (fade <= 0.0) return color;
+    float radius = state.x;
+    float distance = length(pixel - point.xy);
+    if (distance > radius + antialiasWidth) return color;
+    float fill = 1.0 - smoothstep(radius - antialiasWidth, radius + antialiasWidth, distance);
+    float rimWidth = videoWidth * 0.0007;
+    float rim = 1.0 - smoothstep(rimWidth, rimWidth + antialiasWidth, abs(distance - radius));
+    float3 fillColor = float3(0.87 * 0.87);
+    float3 rimColor = float3(0.0);
+    float rimAlpha = rim * 0.5;
+    float shapeAlpha = rimAlpha + fill * (1.0 - rimAlpha);
+    float3 shapeColor = rimColor * rimAlpha + fillColor * (fill * (1.0 - rimAlpha));
+    float4 circle = float4(shapeColor * (0.6 * fade), shapeAlpha * 0.6 * fade);
+    return color * (1.0 - circle.w) + circle;
+}
+
+/// `$getInterleavedGradientNoise01` at an output pixel.
+float interleavedGradientNoise(float2 px) {
+    float x = floor(px.x), y = floor(px.y);
+    return fract(52.9829189 * fract(0.06711056 * x + 0.00583715 * y));
+}
+
+float4 clickEffects(sampler image, float4 p0, float4 p1, float4 p2, float4 s0, float4 s1, float4 s2, float4 knobs, float4 params, float4 output, destination dest) {
+    float2 pos = dest.coord();
+    float mode = params.x;
+    float videoWidth = params.y;
+    float antialiasWidth = params.z;
+    if (mode == 2.0) {
+        float4 color = image.sample(image.transform(pos));
+        color = clickCircleOverlay(color, pos, p0, s0, videoWidth, antialiasWidth);
+        color = clickCircleOverlay(color, pos, p1, s1, videoWidth, antialiasWidth);
+        return clickCircleOverlay(color, pos, p2, s2, videoWidth, antialiasWidth);
+    }
+    // The ripple pulls the read position, then splits colours where it is read.
+    float2 readPixel = pos - clickRipplesOffsets(pos, p0, p1, p2, s0, s1, s2, knobs, videoWidth).xy;
+    float2 split = clickRipplesOffsets(readPixel, p0, p1, p2, s0, s1, s2, knobs, videoWidth).zw;
+    if (dot(split, split) < 0.01 * 0.01) return image.sample(image.transform(readPixel));
+    float jitter = interleavedGradientNoise(float2(pos.x * output.x + output.y, pos.y * output.z + output.w));
+    int reads = int(clamp(ceil(length(split) * 2.0), 3.0, params.w));
+    float segment = 2.0 / float(reads);
+    float3 color = float3(0.0), colorWeight = float3(0.0);
+    float alpha = 0.0;
+    for (int i = 0; i < 32; i++) {
+        if (i >= reads) break;
+        float bandEnd = 1.0 - float(i) * segment;
+        float strataJitter = fract(jitter + float(i) * 0.61803398875);
+        float s = bandEnd - strataJitter * segment;
+        float4 c = image.sample(image.transform(readPixel + split * s));
+        float b = bandEnd - segment;
+        float3 weight = float3(spectrumBand(b, bandEnd, 0.85, 0.7) + 0.3 * spectrumBand(b, bandEnd, -0.95, 0.35),
+                               spectrumBand(b, bandEnd, 0.05, 0.65),
+                               spectrumBand(b, bandEnd, -0.75, 0.65));
+        color += c.rgb * weight;
+        colorWeight += weight;
+        alpha += c.a;
+    }
+    return float4(color / colorWeight, alpha / float(reads));
+}
+
 }
 }

@@ -290,8 +290,42 @@ public struct StyleConfig: Codable, Hashable, Sendable {
 
 // MARK: - Cursor
 
-public enum ClickEffect: String, Codable, CaseIterable, Sendable {
-    case circle, ripple
+/// `cursor.clickEffect`: `{type: "ripple", pullSize01?}` or `{type: "circle"}`.
+public struct ClickEffect: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case ripple, circle
+    }
+
+    public var type: Kind
+    /// Ripple only: radius of the calm centre, in video widths (nil = 0.04).
+    public var pullSize01: Double?
+
+    public init(type: Kind, pullSize01: Double? = nil) {
+        self.type = type
+        self.pullSize01 = pullSize01
+    }
+
+    public static let circle = ClickEffect(type: .circle)
+    public static let ripple = ClickEffect(type: .ripple)
+
+    enum CodingKeys: String, CodingKey { case type, pullSize01 }
+
+    public init(from decoder: Decoder) throws {
+        // Projects written before the object form stored the type alone.
+        if let single = try? decoder.singleValueContainer(), let kind = try? single.decode(Kind.self) {
+            self.init(type: kind)
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try c.decode(Kind.self, forKey: .type)
+        self.init(type: kind, pullSize01: kind == .ripple ? try c.decodeIfPresent(Double.self, forKey: .pullSize01) : nil)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encodeIfPresent(pullSize01, forKey: .pullSize01)
+    }
 }
 
 /// "Rotate while moving": Tilt leans with horizontal speed, Follow points along the travel.

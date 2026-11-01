@@ -288,9 +288,12 @@ struct CursorPanel: View {
                 SidebarSection {
                     NamedField(name: "Click effect") {
                         SegmentedPicker(
-                            options: [nil, ClickEffect.circle, .ripple],
+                            options: [nil, ClickEffect.Kind.circle, .ripple],
                             label: { $0 == nil ? "None" : $0 == .circle ? "Circle" : "Ripple" },
-                            selection: editor.binding(\.cursor.clickEffect)
+                            selection: Binding(
+                                get: { cursor.clickEffect?.type },
+                                set: { kind in editor.change { $0.cursor.clickEffect = kind.map { ClickEffect(type: $0) } } }
+                            )
                         )
                     }
                     ClickSoundField(editor: editor)

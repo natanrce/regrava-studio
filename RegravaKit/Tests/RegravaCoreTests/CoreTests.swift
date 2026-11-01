@@ -306,10 +306,18 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(track.frame(at: 2000).cursorOpacity > 0.99)
     }
 
-    @Test func clickRippleIsReported() {
-        let track = CameraTrack(project: project(zooms: [], events: [click(1000, 10, 10)]))
-        #expect(track.frame(at: 1100).clickProgress != nil)
-        #expect(track.frame(at: 2000).clickProgress == nil)
+    @Test func clicksAreReportedForTheEffectsDuration() {
+        var p = project(zooms: [], events: [move(0, 10, 10), click(1000, 10, 10)])
+        p.cursor.clickEffect = .circle
+        var track = CameraTrack(project: p)
+        #expect(track.frame(at: 1100).clicks.map(\.ageMs) == [100])
+        #expect(track.frame(at: 1460).clicks.isEmpty)
+        p.cursor.clickEffect = .ripple
+        track = CameraTrack(project: p)
+        #expect(track.frame(at: 1900).clicks.map(\.ageMs) == [900])
+        #expect(track.frame(at: 2000).clicks.isEmpty)
+        p.cursor.clickEffect = nil
+        #expect(CameraTrack(project: p).frame(at: 1100).clicks.isEmpty)
     }
 
     @Test func plainStageDropsZoomCursorAndClicks() {
@@ -320,7 +328,7 @@ private func move(_ t: Double, _ x: Double, _ y: Double) -> MouseEvent {
         #expect(plain.screenRect == track.layout.restScreen)
         #expect(plain.previousScreenRect == plain.screenRect)
         #expect(plain.cursorOpacity == 0)
-        #expect(plain.clickProgress == nil)
+        #expect(plain.clicks.isEmpty)
         #expect(plain.loupe == nil)
         #expect(plain.cameraOpacity == 0)
     }

@@ -83,9 +83,8 @@ public struct CameraFrame: Hashable, Sendable {
     public var isBackgroundVisible = true
     /// The glass loupe, sprung; nil when it shows nothing.
     public var loupe: LoupeFrame?
-    /// Click effect: 0...1 progress and position in video pixels.
-    public var clickProgress: Double?
-    public var clickPosition: Vec2?
+    /// Presses the click effect draws (at most three), oldest first.
+    public var clicks: [CursorClick] = []
 }
 
 /// Precomputed, deterministic camera and cursor animation for a whole project.
@@ -100,7 +99,6 @@ public final class CameraTrack: @unchecked Sendable {
     public let durationMs: Double
     public let sampleIntervalMs: Double
     public let resolver: TimeResolver
-    public static let clickRippleMs: Double = 450
     /// Frame rate of the editor's playback: springs, motion blur and the previous frame follow
     /// the rate frames are produced at, this while editing and the chosen rate on export.
     public static let previewFps = 60.0
@@ -109,6 +107,7 @@ public final class CameraTrack: @unchecked Sendable {
     public static let pressedCursorScale = 0.9
 
     private let samples: [CameraFrame]
+    /// Presses of the drawn cursor's events.
     private let clicks: [MouseEvent]
     private let typeEvents: [MouseEvent]
     /// Image names of `typeEvents`, index for index.
@@ -131,7 +130,6 @@ public final class CameraTrack: @unchecked Sendable {
 
         let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
         let cleaned = MouseProcessing.removeShakes(sorted, threshold: project.cursor.removeShakeThreshold)
-        clicks = cleaned.filter { $0.kind == .down }
         cursorConfig = project.cursor
         let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)
         self.typeEvents = typeEvents
@@ -139,6 +137,7 @@ public final class CameraTrack: @unchecked Sendable {
         self.typeEventNames = typeEventNames
         let imageChanges = CursorTypes.imageChangeTimes(typeEvents, names: typeEventNames, config: project.cursor)
         let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
+        clicks = pathEvents.filter { $0.kind == .down }
         let hoverTimes = project.cursorHoverTimes(hovers)
 
         let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, pathEvents: pathEvents, silence: silence)
@@ -318,8 +317,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.loupe = nil
         frame.cursorOpacity = 0
         frame.previousCursor = nil
-        frame.clickProgress = nil
-        frame.clickPosition = nil
+        frame.clicks = []
         frame.cameraOpacity = 0
         frame.previousCameraRect = nil
         return frame
@@ -383,12 +381,8 @@ public final class CameraTrack: @unchecked Sendable {
         frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, names: typeEventNames, config: cursorConfig)
-        if let i = MouseProcessing.lastIndex(atOrBefore: source, in: clicks) {
-            let age = source - clicks[i].timeMs
-            if age >= 0 && age < Self.clickRippleMs {
-                frame.clickProgress = age / Self.clickRippleMs
-                frame.clickPosition = clicks[i].position
-            }
+        if let effect = cursorConfig.clickEffect {
+            frame.clicks = ClickEffects.recentClicks(at: source, presses: clicks, kind: effect.type)
         }
         return frame
     }

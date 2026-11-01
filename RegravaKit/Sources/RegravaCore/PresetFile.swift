@@ -67,7 +67,11 @@ public enum PresetFile {
                 "removeShakeTreshold": cursor.removeShakeThreshold,
                 "optimizeOriginalTypes": cursor.optimizeOriginalTypes,
                 "followRecordedPositionOnHover": cursor.followRecordedPositionOnHover,
-                "clickEffect": cursor.clickEffect?.rawValue ?? NSNull(),
+                "clickEffect": cursor.clickEffect.map { effect -> [String: Any] in
+                    var json: [String: Any] = ["type": effect.type.rawValue]
+                    if let pull = effect.pullSize01 { json["pullSize01"] = pull }
+                    return json
+                } ?? NSNull(),
             ] as [String: Any],
             "captions": [
                 "enableTranscript": captions.enableTranscript,
@@ -255,7 +259,10 @@ public enum PresetFile {
         cursor.removeShakeThreshold = num(cc, "removeShakeTreshold", cursor.removeShakeThreshold)
         cursor.optimizeOriginalTypes = bool(cc, "optimizeOriginalTypes", cursor.optimizeOriginalTypes)
         cursor.followRecordedPositionOnHover = bool(cc, "followRecordedPositionOnHover", cursor.followRecordedPositionOnHover)
-        cursor.clickEffect = str(cc, "clickEffect").flatMap(ClickEffect.init(rawValue:))
+        let click = dict(cc, "clickEffect")
+        cursor.clickEffect = str(click, "type").flatMap(ClickEffect.Kind.init(rawValue:)).map { kind in
+            ClickEffect(type: kind, pullSize01: kind == .ripple ? (click["pullSize01"] as? NSNumber)?.doubleValue : nil)
+        }
 
         var animation = AnimationConfig()
         let animations = dict(c, "animations")
