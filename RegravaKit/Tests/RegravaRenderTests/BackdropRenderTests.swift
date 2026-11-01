@@ -41,4 +41,19 @@ import Testing
         let green = pixel(Backdrop.gradient(shifted, stage: Size2(width: 1920, height: 1080)), 600, 300)
         #expect(green[1] > 0.95 && green[0] < 0.02)
     }
+
+    /// An image, Unsplash or wallpaper background without a file shows the plain colour.
+    @Test func missingImagesFallBackToTheColour() {
+        let canvas = Rect2(x: 0, y: 0, width: 320, height: 180)
+        var config = BackgroundConfig(kind: .image, color: RGBA(0, 1, 0))
+        config.imageFileName = "missing.png"
+        for kind in [BackgroundKind.image, .unsplash, .wallpaper] {
+            config.kind = kind
+            config.systemName = "missing/none.jpg"
+            let image = FrameCompositor.makeBackground(config, canvas: canvas, assetsDirectory: nil)
+            #expect(image.extent == CGRect(x: 0, y: 0, width: 320, height: 180))
+            let p = pixel(image, 100, 100)
+            #expect(p[1] > 0.99 && p[0] < 0.01)
+        }
+    }
 }

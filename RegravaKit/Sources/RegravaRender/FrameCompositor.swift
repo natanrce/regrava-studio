@@ -634,24 +634,25 @@ public final class FrameCompositor: @unchecked Sendable {
         return output?.cropped(to: extent) ?? src
     }
 
+    /// An image, Unsplash or system background without a file shows the plain colour.
     static func makeBackground(_ config: BackgroundConfig, canvas: Rect2, assetsDirectory: URL?) -> CIImage {
         let rect = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
+        let solid = CIImage(color: ciColor(config.color)).cropped(to: rect)
         switch config.kind {
-        case .color:
-            return CIImage(color: ciColor(config.color)).cropped(to: rect)
+        case .color, .unsplash:
+            return solid
         case .image:
             if let name = config.imageFileName, let directory = assetsDirectory,
                let image = CIImage(contentsOf: directory.appendingPathComponent(name)) {
                 return filled(image, rect: rect, blur: config.blur)
             }
-            return gradient(config, rect: rect)
+            return solid
         case .wallpaper:
             if let url = WallpaperLibrary.url(for: config.systemName), let image = CIImage(contentsOf: url) {
                 return filled(image, rect: rect, blur: config.blur)
             }
-            return gradient(config, rect: rect)
-        case .gradient, .unsplash:
-            // Unsplash photos are not available; they fall back to the gradient.
+            return solid
+        case .gradient:
             return gradient(config, rect: rect)
         }
     }
