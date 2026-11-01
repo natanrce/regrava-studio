@@ -50,6 +50,17 @@ private let probes: [Double] = [0, 400, 600, 800, 1200, 1600, 2400]
         #expect(follow.rotationMode == .directional)
         #expect(follow.rotateOnXMovementRatio == 1.5)
     }
+
+    @Test func trackTiltsAMovingCursor() {
+        let project = Project(
+            recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 4000, fps: 60),
+            mouseEvents: sweep
+        )
+        let track = CameraTrack(project: project)
+        // Sprung toward the keyframes: leaning left while moving left, upright long after.
+        #expect(track.frame(at: 900).cursorRotationRad < -0.05)
+        #expect(abs(track.frame(at: 3900).cursorRotationRad) < 0.01)
+    }
 }
 
 @Suite struct CursorPlanTests {

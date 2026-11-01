@@ -47,12 +47,15 @@ public struct CameraFrame: Hashable, Sendable {
     public var cursorName: String = CursorTypes.defaultName
     /// Spring-animated press scale: 0.9 while pressed.
     public var cursorScale: Double = 1
+    /// Sprung cursor rotation in radians (base plus motion rotation), positive clockwise.
+    public var cursorRotationRad: Double = 0
     /// Inside an instant zoom's snap window (motion blur is off there).
     public var isInstantSnap = false
     /// The same values one playback frame earlier, for motion blur.
     public var previousScreenRect: Rect2?
     public var previousCursor: Vec2?
     public var previousCursorScale: Double = 1
+    public var previousCursorRotationRad: Double = 0
     /// Webcam placement one playback frame earlier, for its motion blur.
     public var previousCameraRect: Rect2?
     /// Mask applied to the recording.
@@ -163,6 +166,9 @@ public final class CameraTrack: @unchecked Sendable {
         var maskAnimator = MaskAnimator(masks: project.masks, recordingSize: project.recording.videoSize)
         var press = SpringValue(1)
         var opacity = SpringValue(1)
+        var rotation = SpringValue(0)
+        let rotationSpring = CursorRotation.spring(for: project.cursor.rotationMode)
+        let baseRotationRad = project.cursor.baseRotation * .pi / 180
         // Face tracking: the focal point always uses its own spring.
         let confidentFaces = project.camera.enableFaceTracking ? FaceTracking.confident(faces) : nil
         var focalX = SpringValue(0.5), focalY = SpringValue(0.5)
@@ -261,6 +267,10 @@ public final class CameraTrack: @unchecked Sendable {
             opacity.setTarget(typing || !visible ? 0 : 1, config: opacitySpring)
             if i == 0 { opacity.snapToTarget() } else { opacity.advance(by: sampleIntervalMs, config: opacitySpring) }
             frame.cursorOpacity = opacity.value
+            // Rotation: the base plus the motion rotation, sprung.
+            rotation.setTarget(baseRotationRad + cursorPlan.motionRotation(at: t), config: rotationSpring)
+            if i == 0 { rotation.snapToTarget() } else { rotation.advance(by: sampleIntervalMs, config: rotationSpring) }
+            frame.cursorRotationRad = rotation.value
             frame.mask = maskAnimator.frame(at: source, stepMs: sampleIntervalMs, first: i == 0)
             frames.append(frame)
         }
@@ -274,6 +284,7 @@ public final class CameraTrack: @unchecked Sendable {
         frame.previousScreenRect = before.screenRect
         frame.previousCursor = before.cursor
         frame.previousCursorScale = before.cursorScale
+        frame.previousCursorRotationRad = before.cursorRotationRad
         frame.previousCameraRect = before.cameraRect
         return frame
     }
@@ -312,13 +323,14 @@ public final class CameraTrack: @unchecked Sendable {
     }
 
     /// Screen, cursor, press scale and camera placement of `interpolatedFrame(at:)`, without the rest.
-    private func interpolatedMotion(at timeMs: Double) -> (screenRect: Rect2, cursor: Vec2?, cursorScale: Double, cameraRect: Rect2?) {
-        guard let first = samples.first else { return (layout.restScreen, nil, 1, nil) }
+    private func interpolatedMotion(at timeMs: Double) -> (screenRect: Rect2, cursor: Vec2?, cursorScale: Double, cursorRotationRad: Double, cameraRect: Rect2?) {
+        guard let first = samples.first else { return (layout.restScreen, nil, 1, 0, nil) }
         let (a, b, f) = neighbours(at: timeMs)
         return (
             a.screenRect.lerp(to: b.screenRect, f),
             interpolate(a.cursor, b.cursor, f) ?? first.cursor,
             a.cursorScale + (b.cursorScale - a.cursorScale) * f,
+            a.cursorRotationRad + (b.cursorRotationRad - a.cursorRotationRad) * f,
             Self.interpolate(a.cameraRect, b.cameraRect, f)
         )
     }
@@ -340,6 +352,7 @@ public final class CameraTrack: @unchecked Sendable {
         )
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
+        frame.cursorRotationRad = a.cursorRotationRad + (b.cursorRotationRad - a.cursorRotationRad) * f
         frame.isInstantSnap = a.isInstantSnap || b.isInstantSnap
         frame.mask = Self.interpolate(a.mask, b.mask, f)
         frame.cameraRect = Self.interpolate(a.cameraRect, b.cameraRect, f)

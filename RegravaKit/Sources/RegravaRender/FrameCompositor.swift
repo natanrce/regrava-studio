@@ -167,20 +167,23 @@ public final class FrameCompositor: @unchecked Sendable {
             let trailTip = tip.lerp(to: tipBefore, cursorStrength)
             let scaleNow = frame.cursorScale
             let trailScale = scaleNow + (frame.previousCursorScale - scaleNow) * cursorStrength
+            let rotationNow = frame.cursorRotationRad
+            let trailRotation = rotationNow + (frame.previousCursorRotationRad - rotationNow) * cursorStrength
             let travel = tip.distance(to: trailTip)
             // The visible cursor is `size` source pixels tall, times the press scale.
             let visibleHeight = cursorConfig.size * videoToCanvas
-            var cursorImage = placedCursor(cursor, tip: tip, frame: frame, visibleHeight: visibleHeight * scaleNow)
+            var cursorImage = placedCursor(cursor, tip: tip, frame: frame, visibleHeight: visibleHeight * scaleNow, rotation: rotationNow)
             if cursorStrength > 0 && travel >= 1 {
                 let bounds = cursorImage.extent
-                    .union(placedCursor(cursor, tip: trailTip, frame: frame, visibleHeight: visibleHeight * trailScale).extent)
+                    .union(placedCursor(cursor, tip: trailTip, frame: frame, visibleHeight: visibleHeight * trailScale, rotation: trailRotation).extent)
                     .integral
                 if let blurred = MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel, quality: quality), bounds: bounds, layer: { t in
                     self.placedCursor(
                         cursor,
                         tip: trailTip.lerp(to: tip, t),
                         frame: frame,
-                        visibleHeight: visibleHeight * (trailScale + (scaleNow - trailScale) * t)
+                        visibleHeight: visibleHeight * (trailScale + (scaleNow - trailScale) * t),
+                        rotation: trailRotation + (rotationNow - trailRotation) * t
                     )
                 }) {
                     cursorImage = blurred
@@ -558,20 +561,20 @@ public final class FrameCompositor: @unchecked Sendable {
     }
 
     /// The cursor drawn with its hotspot at `tip` (canvas pixels).
-    private func placedCursor(_ cursor: CursorAsset, tip: Vec2, frame: CameraFrame, visibleHeight: Double) -> CIImage {
+    private func placedCursor(_ cursor: CursorAsset, tip: Vec2, frame: CameraFrame, visibleHeight: Double, rotation: Double) -> CIImage {
         let target = ciRect(cursor.rect(tip: tip, visibleHeight: visibleHeight))
         let image = cursor.image
         var placed = image
             .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
             .transformed(by: CGAffineTransform(scaleX: target.width / image.extent.width, y: target.height / image.extent.height))
             .transformed(by: CGAffineTransform(translationX: target.minX, y: target.minY))
-        if cursorConfig.baseRotation != 0 {
+        if rotation != 0 {
             // Rotate around the hotspot; positive = clockwise.
             let pivot = ciPoint(tip)
-            let rotation = CGAffineTransform(translationX: pivot.x, y: pivot.y)
-                .rotated(by: -cursorConfig.baseRotation * .pi / 180)
+            let transform = CGAffineTransform(translationX: pivot.x, y: pivot.y)
+                .rotated(by: -rotation)
                 .translatedBy(x: -pivot.x, y: -pivot.y)
-            placed = placed.transformed(by: rotation)
+            placed = placed.transformed(by: transform)
         }
         if frame.cursorOpacity < 1 {
             placed = placed.applyingFilter("CIColorMatrix", parameters: [
