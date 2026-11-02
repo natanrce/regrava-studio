@@ -55,6 +55,27 @@ extension EditorModel {
         removeMasks([id])
     }
 
+    /// "Copy…" (⌘C) on the targets: a single zoom, layout or mask, else a clip's settings, else
+    /// the current frame.
+    func copyToClipboard(_ context: ActionContext) {
+        if let zoom = context.singleID(.zoom) { copyZoom(zoom) }
+        else if let layout = context.singleID(.layout) { copyLayout(layout) }
+        else if let mask = context.singleID(.mask) { copyMask(mask) }
+        else if let slice = context.singleID(.slice) { copySlice(slice) }
+        else if context.single(.editor) != nil { copyCurrentFrame() }
+    }
+
+    /// "Cut to clipboard" (⌘X): a clip cannot be cut.
+    func cutToClipboard(_ context: ActionContext) {
+        if context.has(.slice) {
+            showToast("Slice cannot be cut")
+            return
+        }
+        if let zoom = context.singleID(.zoom) { cutZoom(zoom) }
+        else if let layout = context.singleID(.layout) { cutLayout(layout) }
+        else if let mask = context.singleID(.mask) { cutMask(mask) }
+    }
+
     /// ⌘V (`pasteFromClipboard`). Returns false when there is nothing to paste.
     @discardableResult
     func pasteItem() -> Bool {

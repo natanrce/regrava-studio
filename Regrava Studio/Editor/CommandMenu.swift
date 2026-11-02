@@ -1,138 +1,94 @@
 import AppKit
+import Combine
 import RegravaCore
 import SwiftUI
 
-/// An editor action listed in the command menu (names, icons and shortcuts from the
-/// actions, e.g.).
-struct EditorAction: Identifiable {
-    var id: String { group + "/" + name }
-    var name: String
-    var group: String
-    var icon: String
-    var shortcut: String?
-    var isEnabled = true
-    var perform: () -> Void
+/// The command menu's sessions: ⌘K opens the root list over a dimmed window; an action with
+/// sub-actions replaces it with a nested list (no dimming), and Backspace in an empty search
+/// goes back to the parent.
+@MainActor
+final class CommandMenuController: ObservableObject {
+    final class Session {
+        let actions: [EditorAction]
+        let trigger: EditorAction?
+        let parent: Session?
+        /// The root list dims what is behind it.
+        let overlayLayer: Bool
+        var keyword = ""
+
+        init(actions: [EditorAction], trigger: EditorAction?, parent: Session?, overlayLayer: Bool) {
+            self.actions = actions
+            self.trigger = trigger
+            self.parent = parent
+            self.overlayLayer = overlayLayer
+        }
+
+        /// The actions that led here, from the root.
+        var breadcrumb: [EditorAction] {
+            var chain: [EditorAction] = []
+            var session: Session? = self
+            while let current = session {
+                if let trigger = current.trigger { chain.insert(trigger, at: 0) }
+                session = current.parent
+            }
+            return chain
+        }
+    }
+
+    @Published private(set) var session: Session?
+    /// Every action, for the targets when the menu opens.
+    var rootActions: () -> [EditorAction] = { [] }
+
+    func open() {
+        session = Session(actions: rootActions(), trigger: nil, parent: nil, overlayLayer: true)
+    }
+
+    func toggle() {
+        if session == nil { open() } else { close() }
+    }
+
+    func close() { session = nil }
+
+    /// Runs an action (from a shortcut or the menu): its sub-actions open as a nested list.
+    func execute(_ action: EditorAction) {
+        guard action.canApply else { return }
+        if let perform = action.perform {
+            perform()
+        } else if let subActions = action.subActions {
+            session = Session(actions: subActions(), trigger: action, parent: session, overlayLayer: false)
+        }
+    }
+
+    /// Chosen in the menu: the menu closes unless the action opened a nested list.
+    func choose(_ action: EditorAction) {
+        let current = session
+        execute(action)
+        if let current, session === current { close() }
+    }
+
+    func back() {
+        guard let parent = session?.parent else { return }
+        session = parent
+    }
 }
 
-extension EditorModel {
-    /// Preview size steps of the layout controls.
-    private static let previewSizes = [480, 720, 1080, 1440, 2160]
+/// Shows the command menu while a session is open.
+struct CommandMenuHost: View {
+    @ObservedObject var menu: CommandMenuController
 
-    private func stepPreviewSize(_ direction: Int) {
-        let current = Preferences.shared.playbackPreviewMaxHeight
-        let next = direction < 0 ? Self.previewSizes.last { $0 < current } : Self.previewSizes.first { $0 > current }
-        if let next { Preferences.shared.playbackPreviewMaxHeight = next }
-    }
-
-    /// S on a clip: the speeds as a command list (`setSliceSpeed` sub-actions).
-    func openSliceSpeedList() -> Bool {
-        guard let id = sliceTarget else { return false }
-        let speeds: [Double] = [1, 1.2, 1.4, 1.6, 1.8, 2, 3, 4, 8, 16, 24, 0.5, 0.75]
-        commandSubSession = speeds.map { speed in
-            let name = (speed.rounded() == speed ? String(Int(speed)) : String(speed)) + "x"
-            return EditorAction(name: name, group: speed > 2 ? "fast" : speed < 1 ? "slow" : "regular", icon: "gauge.with.dots.needle.67percent") { [weak self] in
-                self?.setSliceSpeed(id, speed)
-            }
+    var body: some View {
+        if let session = menu.session {
+            CommandMenuOverlay(menu: menu, session: session)
+                .id(ObjectIdentifier(session))
         }
-        isCommandMenuOpen = true
-        return true
-    }
-
-    /// V / ⌃V on a clip: microphone or system audio volumes.
-    func openSliceVolumeList(systemAudio: Bool) -> Bool {
-        guard let id = sliceTarget, systemAudio ? project.recording.hasSystemAudio : project.recording.hasMicrophone else { return false }
-        let volumes: [Double] = [1, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-        commandSubSession = volumes.map { volume in
-            EditorAction(name: "\(Int((volume * 100).rounded()))%", group: volume < 0.1 ? "muted" : volume >= 1 ? "medium" : "regular", icon: "speaker") { [weak self] in
-                self?.updateSlice(id) { if systemAudio { $0.systemAudioVolume = volume } else { $0.volume = volume } }
-            }
-        }
-        isCommandMenuOpen = true
-        return true
-    }
-
-    var commandActions: [EditorAction] {
-        let finder: () -> Void = { [bundleURL] in NSWorkspace.shared.activateFileViewerSelecting([bundleURL]) }
-        return [
-            EditorAction(name: isPlaying ? "Pause" : "Play", group: "Playback", icon: isPlaying ? "pause.circle" : "play.circle", shortcut: "Space") { [weak self] in self?.togglePlay() },
-            EditorAction(name: "Remove slice till previous cut", group: "Slice", icon: "scissors", shortcut: "X", isEnabled: project.slices.count > 1 && (project.sliceIndex(atSource: currentSourceTimeMs) ?? 0) > 0) { [weak self] in self?.rippleRemoveSlice() },
-            EditorAction(name: "Create project from video...", group: "Project", icon: "folder") { VideoImport.pickAndCreate() },
-            EditorAction(name: "Copy and zip project", group: "Project", icon: "doc.zipper") { [weak self] in self?.copyAndZipProject() },
-            EditorAction(name: "Export to file... with current settings", group: "Export", icon: "square.and.arrow.down", isEnabled: !exports.isExporting) { [weak self] in self?.exportWithCurrentSettings(.file) },
-            EditorAction(name: "Export to clipboard with current settings", group: "Export", icon: "doc.on.clipboard", isEnabled: !exports.isExporting) { [weak self] in self?.exportWithCurrentSettings(.clipboard) },
-            EditorAction(name: "Toggle split", group: "Editor", icon: "scissors") { [weak self] in self?.isSplitToolActive.toggle() },
-            EditorAction(name: "Play or increase speed", group: "Playback", icon: "forward", shortcut: "L") { [weak self] in self?.playToward(1) },
-            EditorAction(name: "Play backward or increase speed", group: "Playback", icon: "backward", shortcut: "J") { [weak self] in self?.playToward(-1) },
-            EditorAction(name: Preferences.shared.playbackLoop ? "Disable loop playback" : "Enable loop playback", group: "Playback", icon: "repeat") { Preferences.shared.playbackLoop.toggle() },
-            EditorAction(name: Preferences.shared.alwaysShowTimelineScrollbar ? "Hide timeline scrollbar" : "Always show timeline scrollbar", group: "View", icon: "chevron.up.chevron.down") { Preferences.shared.alwaysShowTimelineScrollbar.toggle() },
-            EditorAction(name: "Go to first frame", group: "Playback", icon: "backward.end", shortcut: "⌘ ←") { [weak self] in self?.seek(to: 0) },
-            EditorAction(name: "Go to last frame", group: "Playback", icon: "forward.end", shortcut: "⌘ →") { [weak self] in self.map { $0.seek(to: $0.durationMs) } },
-            EditorAction(name: "Move backwards", group: "Playback", icon: "arrow.turn.up.left", shortcut: "←") { [weak self] in self?.step(frames: -1) },
-            EditorAction(name: "Move backwards fast", group: "Playback", icon: "arrow.turn.up.left", shortcut: "⇧ ←") { [weak self] in self?.step(milliseconds: -2000) },
-            EditorAction(name: "Move forwards", group: "Playback", icon: "arrow.turn.up.right", shortcut: "→") { [weak self] in self?.step(frames: 1) },
-            EditorAction(name: "Move forwards fast", group: "Playback", icon: "arrow.turn.up.right", shortcut: "⇧ →") { [weak self] in self?.step(milliseconds: 1000) },
-            EditorAction(name: "Decrease preview size", group: "Playback", icon: "minus.magnifyingglass", isEnabled: Self.previewSizes.contains { $0 < Preferences.shared.playbackPreviewMaxHeight }) { [weak self] in self?.stepPreviewSize(-1) },
-            EditorAction(name: "Increase preview size", group: "Playback", icon: "plus.magnifyingglass", isEnabled: Self.previewSizes.contains { $0 > Preferences.shared.playbackPreviewMaxHeight }) { [weak self] in self?.stepPreviewSize(1) },
-            EditorAction(name: "Zoom in", group: "Playback", icon: "plus", shortcut: "⌘ =") { [weak self] in self?.zoomTimeline(in: true) },
-            EditorAction(name: "Zoom out", group: "Playback", icon: "minus", shortcut: "⌘ −") { [weak self] in self?.zoomTimeline(in: false) },
-            EditorAction(name: "Undo", group: "Project", icon: "arrow.uturn.backward", shortcut: "⌘ Z", isEnabled: canUndo) { [weak self] in self?.undo() },
-            EditorAction(name: "Redo", group: "Project", icon: "arrow.uturn.forward", shortcut: "⌘ ⇧ Z", isEnabled: canRedo) { [weak self] in self?.redo() },
-            EditorAction(name: "Show project in Finder", group: "Project", icon: "folder", shortcut: "⌘ ⇧ O", perform: finder),
-            EditorAction(name: RecordingRecovery.shared.actionName, group: "Recording", icon: "arrow.up.circle", isEnabled: !RecordingRecovery.shared.unfinished.isEmpty) {
-                Task { await RecordingRecovery.shared.recoverAll() }
-            },
-            EditorAction(name: "Try to recover recording from recording folder", group: "Recording", icon: "arrow.up.circle") {
-                Task { await RecordingRecovery.shared.recoverFromPickedFolder() }
-            },
-            EditorAction(name: "Crop", group: "Editor", icon: "crop", isEnabled: project.canChangeCrop) { [weak self] in
-                self.map { ScreenCropWindow.show(for: $0) }
-            },
-            EditorAction(name: "Split at current time", group: "Slice", icon: "scissors", shortcut: "C") { [weak self] in self.map { $0.splitSlice(atPlayback: $0.currentTimeMs) } },
-            EditorAction(name: "Reset trims and cuts for all slices", group: "Slice", icon: "arrowshape.turn.up.left") { [weak self] in self?.resetAllSlices() },
-            // "Add " + the add tool's presentation label.
-            EditorAction(
-                name: addZoomPresentation == .loupe ? "Add loupe zoom" : "Add classic zoom", group: "Zooms",
-                icon: addZoomPresentation == .loupe ? "sparkle.magnifyingglass" : "arrow.up.left.and.down.right.magnifyingglass"
-            ) { [weak self] in
-                self?.isAddZoomToolArmed = true
-                self?.pause()
-            },
-            EditorAction(name: "Enable all zoom ranges", group: "Zooms", icon: "checkmark.circle") { [weak self] in self?.setAllZooms(disabled: false) },
-            EditorAction(name: "Disable all zoom ranges", group: "Zooms", icon: "slash.circle") { [weak self] in self?.setAllZooms(disabled: true) },
-            EditorAction(name: "Restore default zoom ranges", group: "Zooms", icon: "arrow.clockwise") { [weak self] in self?.restoreDefaultZooms() },
-            EditorAction(name: "Remove all zoom ranges", group: "Zooms", icon: "trash", isEnabled: !project.zooms.isEmpty) { [weak self] in
-                self.map { $0.removeZooms(Set($0.project.zooms.map(\.id))) }
-            },
-            // `addLayout` / `removeAllLayouts`, titled after the last layout type.
-            EditorAction(name: addLayoutTitle, group: "Layouts", icon: AddToolsRail.layoutIcon(addLayoutType), shortcut: "⌃ L", isEnabled: project.recording.hasCamera) { [weak self] in
-                self?.toggleAddLayoutTool()
-            },
-            EditorAction(name: "Remove all layouts", group: "Layouts", icon: "trash") { [weak self] in
-                self.map { $0.removeLayouts(Set($0.project.cameraLayouts.map(\.id))) }
-            },
-            EditorAction(name: "Add sensitive data mask", group: "Masks", icon: "circle.filled.pattern.diagonalline.rectangle") { [weak self] in self?.armMaskTool(.sensitiveData) },
-            EditorAction(name: "Add highlight mask", group: "Masks", icon: "circle.rectangle.filled.pattern.diagonalline") { [weak self] in self?.armMaskTool(.highlight) },
-            EditorAction(name: "Disable all masks", group: "Masks", icon: "slash.circle", isEnabled: project.masks.contains { !$0.isDisabled }) { [weak self] in self?.setAllMasks(disabled: true) },
-            EditorAction(name: "Remove all masks", group: "Masks", icon: "trash", isEnabled: !project.masks.isEmpty) { [weak self] in
-                self.map { $0.removeMasks(Set($0.project.masks.map(\.id))) }
-            },
-            EditorAction(name: "Export...", group: "Export", icon: "square.and.arrow.up.fill", shortcut: "⌘ ⇧ E") { [weak self] in self?.openExportPicker() },
-            EditorAction(name: "Copy current frame as image", group: "Export", icon: "document.on.document", shortcut: "⌘ C") { [weak self] in self?.copyCurrentFrame() },
-            EditorAction(name: layoutType == .preview ? "Exit preview mode" : "Enter preview mode", group: "View", icon: "inset.filled.bottomhalf.rectangle", shortcut: "⌘ ⇧ ↩") { [weak self] in
-                self.map { $0.layoutType = $0.layoutType == .preview ? .edit : .preview }
-            },
-            EditorAction(name: "General", group: "Sidebar", icon: "inset.filled.square.dashed", shortcut: "⌘ 1") { [weak self] in self?.openSidebar(.background) },
-            EditorAction(name: "Cursor", group: "Sidebar", icon: "cursorarrow", shortcut: "⌘ 2") { [weak self] in self?.openSidebar(.cursor) },
-            EditorAction(name: "Audio", group: "Sidebar", icon: "speaker.wave.1", shortcut: "⌘ 7") { [weak self] in self?.openSidebar(.audio) },
-            EditorAction(name: "Animations", group: "Sidebar", icon: "point.topleft.down.to.point.bottomright.curvepath.fill", shortcut: "⌘ 9") { [weak self] in self?.openSidebar(.animation) },
-        ]
     }
 }
 
 /// Command menu: full-window overlay at 0.9, a 640 px card (#1e1e1eee, 1 px
 /// #ffffff2e, radius 16), 64 px input "Type to find a command".
 struct CommandMenuOverlay: View {
-    @ObservedObject var editor: EditorModel
+    @ObservedObject var menu: CommandMenuController
+    let session: CommandMenuController.Session
     @State private var query = ""
     @State private var selection = 0
     @FocusState private var focused: Bool
@@ -141,15 +97,15 @@ struct CommandMenuOverlay: View {
     private var sections: [(group: String, actions: [EditorAction])] {
         let words = query.lowercased().split(separator: " ")
         // Actions that cannot apply right now are not listed.
-        let matching = (editor.commandSubSession ?? editor.commandActions).filter { action in
-            guard action.isEnabled else { return false }
-            let text = (action.name + " " + action.group).lowercased()
+        let matching = session.actions.filter { action in
+            guard action.canApply else { return false }
+            let text = (action.name + " " + (action.group ?? "")).lowercased()
             return words.allSatisfy { text.contains($0) }
         }
         var order: [String] = []
-        for action in matching where !order.contains(action.group) { order.append(action.group) }
+        for action in matching where !order.contains(action.group ?? "") { order.append(action.group ?? "") }
         return order.map { group in
-            (group, matching.filter { $0.group == group }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+            (group, matching.filter { ($0.group ?? "") == group }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
         }
     }
 
@@ -224,13 +180,13 @@ struct CommandMenuOverlay: View {
 
     private func row(_ action: EditorAction, isSelected: Bool) -> some View {
         HStack(spacing: 0) {
-            Image(systemName: action.icon)
+            Image(systemName: action.icon ?? "arrow.right")
                 .font(.system(size: 15))
                 .frame(width: 22)
                 .padding(.trailing, 14)
             Text(action.name).font(.system(size: 14))
             Spacer()
-            if let shortcut = action.shortcut {
+            if let shortcut = action.shortcutLabel {
                 ShortcutBadge(keys: shortcut)
             }
         }
@@ -238,7 +194,7 @@ struct CommandMenuOverlay: View {
         .frame(height: 52)
         .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.white.opacity(0.06) : .clear))
         .padding(.horizontal, 8)
-        .opacity(action.isEnabled ? 1 : Theme.disabledOpacity)
+        .opacity(action.canApply ? 1 : Theme.disabledOpacity)
         .contentShape(Rectangle())
     }
 
@@ -249,15 +205,11 @@ struct CommandMenuOverlay: View {
 
     private func run() {
         guard results.indices.contains(selection) else { return }
-        let action = results[selection]
-        guard action.isEnabled else { return }
-        close()
-        action.perform()
+        menu.choose(results[selection])
     }
 
     private func close() {
-        editor.isCommandMenuOpen = false
-        editor.commandSubSession = nil
+        menu.close()
     }
 }
 

@@ -100,10 +100,10 @@ final class EditorModel: ObservableObject {
     var openItemFocusToken: Int?
     /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
     var itemClipboard: ItemClipboard?
-    /// A nested command list (a shortcut's sub-actions) shown instead of every action.
-    @Published var commandSubSession: [EditorAction]?
-    /// The clip a shortcut acts on: the open one, else the hovered one.
-    var sliceTarget: UUID? { openSliceID ?? actionContext.singleID(.slice) }
+    /// The command menu's sessions (⌘K, or a shortcut's sub-actions).
+    let commandMenu = CommandMenuController()
+    /// The space the preview may use (set by the preview), for the preview size steps.
+    var previewAvailableSpace: CGSize?
     /// Microphone renders under way, 0…1 (`media.audioRenderState` partial).
     @Published var microphoneRenderProgress: [MicrophoneAudioPreset: Double] = [:]
     /// Renders paused by re-clicking their option.
@@ -116,8 +116,6 @@ final class EditorModel: ObservableObject {
     }
     /// Which zoom the add tool places (`view.addZoomPresentation`).
     @Published var addZoomPresentation = ZoomPresentation.screen
-    /// Command menu (⌘K).
-    @Published var isCommandMenuOpen = false
     /// Mask add tool (`activeAddTool = "mask"`, `addMaskType`).
     @Published var isAddMaskToolArmed = false {
         didSet { updatePlainScreen() }
@@ -221,6 +219,7 @@ final class EditorModel: ObservableObject {
         Publishers.Merge(preferences.$playbackPreviewResolution.dropFirst().map { _ in () }, preferences.$playbackPreviewMaxHeight.dropFirst().map { _ in () })
             .sink { [weak self] in DispatchQueue.main.async { Task { await self?.rebuildComposition() } } }
             .store(in: &cancellables)
+        commandMenu.rootActions = { [weak self] in self?.actionCatalog.all ?? [] }
     }
 
     /// Playback duration (clips sped up, slowed down or cut).

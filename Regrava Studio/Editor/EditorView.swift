@@ -62,7 +62,7 @@ struct EditorView: View {
             if exports.isExporting { ExportStatusOverlay(exports: exports) }
         }
         .overlay {
-            if editor.isCommandMenuOpen { CommandMenuOverlay(editor: editor) }
+            CommandMenuHost(menu: editor.commandMenu)
         }
         .overlay(alignment: .top) {
             if let message = editor.toast {
@@ -105,7 +105,7 @@ private struct Topbar: View {
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: Theme.gap(1)) {
-                RSIconButton(icon: "command.circle", size: .toolbar, tooltip: "Show command menu...  ⌘K") { editor.isCommandMenuOpen = true }
+                RSIconButton(icon: "command.circle", size: .toolbar, tooltip: "Show command menu...  ⌘K") { editor.commandMenu.open() }
                 Rectangle().fill(Theme.Colors.systemBorder.opacity(0.6)).frame(width: 1, height: 24)
                 HStack(spacing: 2) {
                     RSIconButton(icon: "arrow.uturn.backward", size: .toolbar, tooltip: "Undo  ⌘Z") { editor.undo() }
@@ -264,6 +264,7 @@ private struct PreviewSpace: View {
         GeometryReader { geometry in
             let canvas = editor.project.canvasSize
             let available = CGSize(width: geometry.size.width, height: max(geometry.size.height - 40, 50))
+            let _ = editor.previewAvailableSpace = available
             let maxHeight = min(available.height, CGFloat(preferences.playbackPreviewMaxHeight) / (NSScreen.main?.backingScaleFactor ?? 2))
             let scale = min(available.width / canvas.width, maxHeight / canvas.height)
             let size = CGSize(width: canvas.width * scale, height: canvas.height * scale)

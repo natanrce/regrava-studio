@@ -1028,10 +1028,6 @@ private struct ZoomItem: View {
 }
 
 /// Zoom levels for keys 1…9 (and 0 = default level).
-enum EditorShortcuts {
-    static let zoomLevels: [Double] = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6]
-}
-
 /// A hovered timeline item is an action target until the pointer leaves it.
 private struct ActionTargetOnHover: ViewModifier {
     let target: EditorTarget
