@@ -1601,7 +1601,6 @@ final class EditorModel: ObservableObject {
         copy.endMs = end
         copy.isGenerated = false
         change { $0.zooms.append(copy) }
-        openZoom(copy.id)
     }
 
     /// Splits a zoom at `timeMs` (the playhead, or the split tool's beam).
