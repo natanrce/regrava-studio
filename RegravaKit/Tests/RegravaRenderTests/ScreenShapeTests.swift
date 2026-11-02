@@ -57,3 +57,32 @@ struct ScreenShapeTests {
         #expect(band[0] > 200 && band[1] < 80, "\(band)")
     }
 }
+
+@Suite struct ContentShadowTests {
+    private func alpha(_ image: CIImage, _ x: CGFloat, _ y: CGFloat) -> Float {
+        var p = [Float](repeating: 0, count: 4)
+        CIContext().render(image, toBitmap: &p, rowBytes: 16, bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        return p[3]
+    }
+
+    /// A cut-out person casts the shadow of their own alpha, not of the frame: a disc inside a
+    /// 200 px square shades under the disc and leaves the square's empty corners clear.
+    @Test func classicSilhouetteFollowsTheAlpha() {
+        let square = CGRect(x: 100, y: 100, width: 200, height: 200)
+        let disc = CIFilter(name: "CIRadialGradient", parameters: [
+            "inputCenter": CIVector(x: 200, y: 200), "inputRadius0": 60, "inputRadius1": 61,
+            "inputColor0": CIColor.white, "inputColor1": CIColor.clear,
+        ])!.outputImage!.cropped(to: square)
+        let shadow = SmoothShapes.Shadow(alpha: 0.5, blur: 4, offset: CGVector(dx: 10, dy: -10), directional: nil, unit: 1)
+        let out = SmoothShapes.contentShadow(disc, caster: square, radius: 0, shadow)
+        // Under the disc's centre, moved by the offset: full alpha × smoothstep(0, 0.75, 1).
+        #expect(abs(alpha(out, 210, 190) - 0.5) < 0.01)
+        // A corner of the square, empty in the content, casts nothing.
+        #expect(alpha(out, 120, 120) < 0.01)
+        // Directional: still nothing from the empty corner, something next to the disc.
+        let directional = SmoothShapes.Shadow(alpha: 0.5, blur: 4, offset: CGVector(dx: 10, dy: -10), directional: (CGPoint(x: -1000, y: 1200), 10, 60), unit: 1)
+        let cast = SmoothShapes.contentShadow(disc, caster: square, radius: 0, directional)
+        #expect(alpha(cast, 120, 120) < 0.05)
+        #expect(alpha(cast, 270, 160) > 0.05)
+    }
+}

@@ -952,5 +952,62 @@ float4 maskCoverColors(sampler mip, float4 lattice, float4 taps, destination des
     return sum / (taps.x * taps.y);
 }
 
+// MARK: - Content shadow
+
+/// Blurred alpha at radius `r` between 8 levels spaced by `levels.y` (log2) from `levels.x`.
+float blurredAlpha(sampler a0, sampler a1, sampler a2, sampler a3, sampler a4, sampler a5, sampler a6, sampler a7,
+                   float2 p, float r, float4 levels) {
+    float f = clamp(log2(max(r, 0.000001) / levels.x) / max(levels.y, 0.000001), 0.0, 7.0);
+    int i = min(int(floor(f)), 6);
+    float values[8] = {
+        a0.sample(a0.transform(p)).a, a1.sample(a1.transform(p)).a, a2.sample(a2.transform(p)).a, a3.sample(a3.transform(p)).a,
+        a4.sample(a4.transform(p)).a, a5.sample(a5.transform(p)).a, a6.sample(a6.transform(p)).a, a7.sample(a7.transform(p)).a,
+    };
+    return levels.y <= 0.0 ? values[0] : mix(values[i], values[i + 1], f - float(i));
+}
+
+/// `$getContentShadowMask`: the shadow cast by a part's own alpha. Classic: the alpha blurred
+/// by max(blur, aa) at `p − offset`, clipped by the caster within that radius,
+/// smoothstep(0, 0.75); directional: 6 reads marching toward the light, each blurred by the
+/// light's spread. shape = (centre, half size); corner = (R, rs, aa, directional); shadow =
+/// (blur, offset.xy, alpha); light = (position relative to the centre, lightRadius, falloff);
+/// levels = (first radius, log2 step, -, -).
+float4 contentShadow(sampler a0, sampler a1, sampler a2, sampler a3, sampler a4, sampler a5, sampler a6, sampler a7,
+                     float4 shape, float4 corner, float4 shadow, float4 light, float4 levels,
+                     float4 l0, float4 l1, float4 l2, float4 l3, destination dest) {
+    float2 p = dest.coord() - shape.xy;
+    float2 h = shape.zw;
+    float R = corner.x, rs = corner.y, aa = corner.z;
+    float value;
+    if (corner.w < 0.5) {
+        float r = max(shadow.x, aa);
+        float2 q = p - shadow.yz;
+        float clip = rampStep(r, -r, casterSD(q, h, R, rs, l0, l1, l2, l3));
+        float coverage = clip <= 0.0 ? 0.0 : blurredAlpha(a0, a1, a2, a3, a4, a5, a6, a7, q + shape.xy, r, levels) * clip;
+        value = smoothstep(0.0, 0.75, coverage);
+    } else {
+        float falloff = max(light.w, 1.0);
+        if (casterSD(p, h, R, rs, l0, l1, l2, l3) > falloff) return float4(0.0);
+        float2 toLight = light.xy - p;
+        float distToLight = max(length(toLight), 1.0);
+        float2 direction = toLight / distToLight;
+        float spread = light.z / distToLight;
+        value = 0.0;
+        float previous = 0.0;
+        for (int i = 0; i < 6; i++) {
+            float along = 0.1 + 0.75 * float(i) / 5.0;
+            float distance = falloff * along * along;
+            float r = max(max(distance * spread, (distance - previous) * 1.5), aa);
+            float2 q = p + direction * distance;
+            float clip = rampStep(r, -r, casterSD(q, h, R, rs, l0, l1, l2, l3));
+            float coverage = clip <= 0.0 ? 0.0 : blurredAlpha(a0, a1, a2, a3, a4, a5, a6, a7, q + shape.xy, r, levels) * clip;
+            float proximity = 1.0 - along * along;
+            value = max(value, coverage * proximity * proximity);
+            previous = distance;
+        }
+    }
+    return float4(0.0, 0.0, 0.0, shadow.w * value);
+}
+
 }
 }

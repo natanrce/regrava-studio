@@ -8,6 +8,7 @@ import RegravaCore
 enum SmoothShapes {
     private static let coverageKernel = RenderKernels.general("smoothRectCoverage")
     private static let shadowKernel = RenderKernels.general("partShadow")
+    private static let contentShadowKernel = RenderKernels.general("contentShadow")
 
     /// `ANTIALIAS_SCREEN_PIXELS`: half the edge ramp.
     static let antialias = 1.5
@@ -100,6 +101,56 @@ enum SmoothShapes {
                 CIVector(x: s.blur, y: s.offset.dx, z: s.offset.dy, w: s.alpha),
                 light,
                 Float(s.unit),
+            ] + corner.lut
+        ) ?? CIImage.empty()
+    }
+
+    /// The black shadow `content`'s own alpha casts (a cutout camera's silhouette), to draw
+    /// under it; `rect` and `radius` are the shape that clips the content. Classic: the alpha
+    /// blurred by max(blur, 1.5 px) at the offset, clipped by the shape within that radius and
+    /// eased by smoothstep(0, 0.75). Directional: six reads marching toward the light, each
+    /// blurred by the light's spread at that distance (at least the gap since the previous
+    /// read × 1.5), the strongest one weighted by (1 − along²)². Blurs read 8 levels
+    /// spaced evenly in log radius; a radius r is a Gaussian of sigma r / 2.
+    static func contentShadow(_ content: CIImage, caster rect: CGRect, radius: Double, _ s: Shadow) -> CIImage {
+        guard let kernel = contentShadowKernel, s.alpha > 0, rect.width > 0, rect.height > 0, !content.extent.isEmpty else { return CIImage.empty() }
+        let corner = Corner(size: rect.size, radius: radius, smoothing: s.smoothing)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let reach: Double
+        let smallest: Double, largest: Double
+        if let d = s.directional {
+            let falloff = max(d.falloff, 1)
+            reach = falloff
+            // The light is never closer than the nearest point of the reachable area.
+            let area = rect.insetBy(dx: -falloff, dy: -falloff)
+            let nearest = CGPoint(x: clamp(d.light.x, area.minX, area.maxX), y: clamp(d.light.y, area.minY, area.maxY))
+            let distance = max(hypot(d.light.x - nearest.x, d.light.y - nearest.y), 1)
+            smallest = antialias
+            largest = max(falloff * 0.85 * 0.85 * d.radius / distance, falloff * (0.85 * 0.85 - 0.7 * 0.7) * 1.5, falloff * 0.01 * 1.5, antialias)
+        } else {
+            let r = max(s.blur, antialias)
+            reach = max(abs(s.offset.dx), abs(s.offset.dy)) + r
+            smallest = r
+            largest = r
+        }
+        let step = largest > smallest ? log2(largest / smallest) / 7 : 0
+        let extent = rect.insetBy(dx: -(reach + 2), dy: -(reach + 2)).integral
+        let alpha = content.clampedToExtent()
+        let levels = (0..<8).map { k -> CIImage in
+            let sigma = smallest * pow(2, Double(k) * step) * 0.5
+            let image = sigma > 0.02 ? alpha.applyingGaussianBlur(sigma: sigma) : alpha
+            return image.cropped(to: extent.insetBy(dx: -(reach + 2), dy: -(reach + 2)))
+        }
+        let light = s.directional.map { CIVector(x: $0.light.x - center.x, y: $0.light.y - center.y, z: $0.radius, w: $0.falloff) } ?? CIVector(x: 0, y: 0, z: 1, w: 1)
+        return kernel.apply(
+            extent: extent,
+            roiCallback: { _, r in r.insetBy(dx: -(reach + 2), dy: -(reach + 2)) },
+            arguments: levels + [
+                CIVector(x: center.x, y: center.y, z: rect.width / 2, w: rect.height / 2),
+                CIVector(x: corner.extent, y: corner.circular, z: antialias, w: s.directional == nil ? 0 : 1),
+                CIVector(x: s.blur, y: s.offset.dx, z: s.offset.dy, w: s.alpha),
+                light,
+                CIVector(x: smallest, y: step, z: 0, w: 0),
             ] + corner.lut
         ) ?? CIImage.empty()
     }

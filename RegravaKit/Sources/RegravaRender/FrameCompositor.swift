@@ -417,7 +417,7 @@ public final class FrameCompositor: @unchecked Sendable {
                 let c = frame.cameraCutout01
                 var cast = partShadow(target, radius: radius, zoomFactor: frame.cameraSizeFactor, perspective: perspective)
                 if c > 0.001 {
-                    let silhouette = silhouetteShadow(of: layer, zoomFactor: frame.cameraSizeFactor, perspective: perspective)
+                    let silhouette = silhouetteShadow(of: placed, caster: target, radius: radius, zoomFactor: frame.cameraSizeFactor, perspective: perspective)
                     cast = c >= 0.999 ? silhouette : Self.scaled(silhouette, c).composited(over: Self.scaled(cast, 1 - c))
                 }
                 layer = layer.composited(over: cast)
@@ -529,6 +529,15 @@ public final class FrameCompositor: @unchecked Sendable {
         }
     }
 
+    /// The Directional shadow's light: stage centre − polar(angle, 1.5 × |stage / 2|), y down,
+    /// fixed on the stage; Core Image coordinates.
+    private func shadowLight(_ perspective: Perspective) -> CGPoint {
+        let canvas = layout.canvas
+        let a = style.shadow.angle * .pi / 180
+        let reach = 1.5 * hypot(canvas.width / 2, canvas.height / 2)
+        return perspective.point(CGPoint(x: canvas.width / 2 - cos(a) * reach, y: canvas.height - (canvas.height / 2 - sin(a) * reach)))
+    }
+
     /// The screen's or the camera's shadow: black at the intensity, blur `blur × 8 × k`;
     /// Directional marches toward a light fixed on the stage.
     private func partShadow(_ rect: CGRect, radius: Double, zoomFactor k: Double, perspective: Perspective = .identity, smoothing: Double = 1, inset: Double = 0) -> CIImage {
@@ -538,29 +547,24 @@ public final class FrameCompositor: @unchecked Sendable {
         let offset = CGVector(dx: shadowOffset.dx * perspective.scale, dy: shadowOffset.dy * perspective.scale)
         var directional: (light: CGPoint, radius: Double, falloff: Double)?
         if s.isDirectional {
-            // Stage centre − polar(angle, 1.5 × |stage / 2|), y down.
-            let canvas = layout.canvas
-            let a = s.angle * .pi / 180
-            let reach = 1.5 * hypot(canvas.width / 2, canvas.height / 2)
-            let light = perspective.point(CGPoint(x: canvas.width / 2 - cos(a) * reach, y: canvas.height - (canvas.height / 2 - sin(a) * reach)))
-            directional = (light, max(blur * 2.5, 4 * unit), max(hypot(offset.dx, offset.dy) * 6, 40 * unit))
+            directional = (shadowLight(perspective), max(blur * 2.5, 4 * unit), max(hypot(offset.dx, offset.dy) * 6, 40 * unit))
         }
         return SmoothShapes.shadow(rect, radius: radius, .init(alpha: s.intensity, blur: blur, offset: offset, directional: directional, unit: unit, smoothing: smoothing, inset: inset))
     }
 
-    /// The shadow cast by the camera's own alpha (`getContentShadowMask`), with the same alpha
-    /// and offset; its blur kernel is not known, a Gaussian stands in.
-    private func silhouetteShadow(of layer: CIImage, zoomFactor: Double, perspective: Perspective = .identity) -> CIImage {
+    /// The shadow cast by the camera's own alpha (`getContentShadowMask`), with the screen
+    /// shadow's alpha, offset and light. `content` is the placed frame before its shape clips
+    /// it; `caster` and `radius` are that shape.
+    private func silhouetteShadow(of content: CIImage, caster: CGRect, radius: Double, zoomFactor: Double, perspective: Perspective = .identity) -> CIImage {
         let s = style.shadow
+        let unit = layout.scale
+        let blur = s.blur * 8 * zoomFactor * unit
         let offset = CGVector(dx: shadowOffset.dx * perspective.scale, dy: shadowOffset.dy * perspective.scale)
-        let blur = s.blur * 8 * zoomFactor * layout.scale
-        let shape = layer.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(s.intensity)),
-        ]).transformed(by: CGAffineTransform(translationX: offset.dx, y: offset.dy))
-        return shape.applyingGaussianBlur(sigma: max(blur * 0.4, 0.1))
+        var directional: (light: CGPoint, radius: Double, falloff: Double)?
+        if s.isDirectional {
+            directional = (shadowLight(perspective), max(blur * 2.5, 4 * unit), max(hypot(offset.dx, offset.dy) * 6, 40 * unit))
+        }
+        return SmoothShapes.contentShadow(content, caster: caster, radius: radius, .init(alpha: s.intensity, blur: blur, offset: offset, directional: directional, unit: unit))
     }
 
     private static func scaled(_ image: CIImage, _ k: Double) -> CIImage {
