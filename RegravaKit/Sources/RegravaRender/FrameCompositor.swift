@@ -13,10 +13,8 @@ public final class FrameCompositor: @unchecked Sendable {
     private let cursorConfig: CursorConfig
     private let pointPixelScale: Double
     private let cursors: CursorLibrary?
-    private let background: CIImage
-    /// The loupe's frosted backdrop: the background blurred further by a radius of 0.5% of the
-    /// stage width (a Gaussian of half of it), so the two radii add as √(blur² + frost²).
-    private let frost: CIImage
+    /// The background, laid out and blurred per frame.
+    private let backdrop: Backdrop
     private let motionBlurAmount: Double
     /// Rate frames are produced at (`playback.fps`).
     private let fps: Double
@@ -59,12 +57,21 @@ public final class FrameCompositor: @unchecked Sendable {
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         deviceFrame = project.activeDeviceFrame
         screenCrop01 = project.screenCrop01
-        background = Self.makeBackground(project.style.background, canvas: layout.canvas, assetsDirectory: assetsDirectory)
-        // Kept by Core Image once drawn. Every change to the background or the canvas builds a
-        // new compositor, so a new image and a new cache entry.
-        let c = layout.canvas
-        let canvasRect = CGRect(x: c.x, y: c.height - c.y - c.height, width: c.width, height: c.height)
-        frost = background.clampedToExtent().applyingGaussianBlur(sigma: layout.canvas.width * 0.005 * 0.5).cropped(to: canvasRect).insertingIntermediate(cache: true)
+        backdrop = Backdrop(project.style.background, layout: layout, assetsDirectory: assetsDirectory)
+    }
+
+    /// The background of `frame`: laid out over its rect and blurred (`backdrop.$sample`).
+    /// Each placement is drawn once and kept while it repeats; a moving zoom draws new ones.
+    private func background(_ frame: CameraFrame) -> CIImage {
+        backdrop.image(bounds: frame.backgroundRect ?? layout.canvas, radius: frame.backgroundBlurRadius ?? backdrop.styleBlurRadius)
+    }
+
+    /// The loupe's frosted backdrop: the background read with the frost's extra blur, the two
+    /// radii combined as √(blur² + frost²).
+    private func frost(_ frame: CameraFrame) -> CIImage {
+        let blur = frame.backgroundBlurRadius ?? backdrop.styleBlurRadius
+        let frost = frame.frostBlurRadius ?? layout.canvas.width / max(layout.scale, 0.000001) * 0.005
+        return backdrop.image(bounds: frame.backgroundRect ?? layout.canvas, radius: (blur * blur + frost * frost).squareRoot())
     }
 
     private var canvasHeight: Double { layout.canvas.height }
@@ -106,7 +113,7 @@ public final class FrameCompositor: @unchecked Sendable {
         src = clickEffects(on: src, frame: frame, quality: quality)
         // The webcam frame is matted, sharpened and graded once, for the stage and the loupe.
         let camera = cameraImage.map { image in PreparedCamera { self.preparedCamera(image, frame: frame, quality: quality) } }
-        var output = session(over: background, source: src, camera: camera, frame: frame, quality: quality)
+        var output = session(over: background(frame), source: src, camera: camera, frame: frame, quality: quality)
         // The glass loupe over the whole session, camera and cursor included.
         if let lens = frame.loupe {
             output = loupe(lens, over: output, source: src, camera: camera, frame: frame, quality: quality)
@@ -299,7 +306,7 @@ public final class FrameCompositor: @unchecked Sendable {
                 }
             },
             arguments: [
-                content, levels[0], levels[1], levels[2], levels[3], scene.cropped(to: canvasRect), frost,
+                content, levels[0], levels[1], levels[2], levels[3], scene.cropped(to: canvasRect), frost(frame),
                 CIVector(x: c.x, y: c.y, z: radius, w: radius * clamp(lens.bevelRatio, 0, 1)),
                 CIVector(x: zoom, y: clamp(lens.chromaticAberration, 0, 1), z: clamp(lens.presence, 0, 1), w: clamp(lens.shadowAlpha, 0, 1)),
                 CIVector(x: direction.x, y: -direction.y, z: shineExponent, w: lightTilt),
@@ -633,57 +640,6 @@ public final class FrameCompositor: @unchecked Sendable {
             ]
         )
         return output?.cropped(to: extent) ?? src
-    }
-
-    /// An image, Unsplash or system background without a file shows the plain colour. Every
-    /// kind blurs by `stageWidth × blur / 100 × 0.05` stage pixels, read as a Gaussian of half
-    /// that radius.
-    static func makeBackground(_ config: BackgroundConfig, canvas: Rect2, assetsDirectory: URL?) -> CIImage {
-        let rect = CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)
-        let scale = canvas.height / LayoutResolver.stageHeight
-        let sigma = config.blurRadius(stageWidth: canvas.width / max(scale, 0.000001)) * 0.5 * scale
-        let solid = CIImage(color: ciColor(config.color)).cropped(to: rect)
-        switch config.kind {
-        case .color, .unsplash:
-            return solid
-        case .image:
-            if let name = config.imageFileName, let directory = assetsDirectory,
-               let image = CIImage(contentsOf: directory.appendingPathComponent(name)) {
-                return filled(image, rect: rect, sigma: sigma)
-            }
-            return solid
-        case .wallpaper:
-            if let url = WallpaperLibrary.url(for: config.systemName), let image = CIImage(contentsOf: url) {
-                return filled(image, rect: rect, sigma: sigma)
-            }
-            return solid
-        case .gradient:
-            return gradient(config, rect: rect, sigma: sigma)
-        }
-    }
-
-    /// Aspect-fill, then blur (clamped so edges stay opaque).
-    static func filled(_ image: CIImage, rect: CGRect, sigma: Double) -> CIImage {
-        let scale = max(rect.width / image.extent.width, rect.height / image.extent.height)
-        var filled = image
-            .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        filled = filled.transformed(by: CGAffineTransform(
-            translationX: (rect.width - filled.extent.width) / 2,
-            y: (rect.height - filled.extent.height) / 2
-        ))
-        if sigma > 0.02 {
-            filled = filled.clampedToExtent().applyingGaussianBlur(sigma: sigma)
-        }
-        // Kept by Core Image once drawn instead of decoded, scaled and blurred every frame. A
-        // new image or canvas makes a new compositor, so a new cache entry.
-        return filled.cropped(to: rect).insertingIntermediate(cache: true)
-    }
-
-    /// The gradient texture, drawn at the stage's aspect ratio, scaled to cover `rect`.
-    static func gradient(_ config: BackgroundConfig, rect: CGRect, sigma: Double = 0) -> CIImage {
-        let stage = Size2(width: rect.width * LayoutResolver.stageHeight / max(rect.height, 1), height: LayoutResolver.stageHeight)
-        return filled(Backdrop.gradient(config.gradient, stage: stage), rect: rect, sigma: sigma)
     }
 
     static func ciColor(_ c: RGBA, alpha: Double? = nil) -> CIColor {

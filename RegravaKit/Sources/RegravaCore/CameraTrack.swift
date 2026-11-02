@@ -85,6 +85,12 @@ public struct CameraFrame: Hashable, Sendable {
     public var loupe: LoupeFrame?
     /// Presses the click effect draws (at most three), oldest first.
     public var clicks: [CursorClick] = []
+    /// Where the background is laid out (canvas pixels), sprung; nil = the canvas.
+    public var backgroundRect: Rect2?
+    /// The background's blur and the loupe frost's extra blur, in stage pixels, sprung; nil =
+    /// from the style alone.
+    public var backgroundBlurRadius: Double?
+    public var frostBlurRadius: Double?
 }
 
 /// Precomputed, deterministic camera and cursor animation for a whole project.
@@ -176,6 +182,9 @@ public final class CameraTrack: @unchecked Sendable {
         var focalX = SpringValue(0.5), focalY = SpringValue(0.5)
         var cutout = SpringValue(0)
         var loupe = LoupeSpring(.none)
+        var backdrop = BackdropSpring()
+        // The canvas in stage units.
+        let stage = Rect2(x: 0, y: 0, width: layout.canvas.width / layout.scale, height: layout.canvas.height / layout.scale)
         let buttonEvents = pathEvents.filter(\.isClick)
         var frames: [CameraFrame] = []
         let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
@@ -231,6 +240,10 @@ public final class CameraTrack: @unchecked Sendable {
             if i == 0 { loupe = LoupeSpring(loupeTarget.frame) } else { loupe.advance(toward: loupeTarget.frame, config: planner.loupeSpring(at: source), milliseconds: sampleIntervalMs) }
             let lens = loupe.frame
             frame.loupe = lens.isVisible(recordingWidth: project.recording.videoSize.width, k: 0.1) ? lens : nil
+            backdrop.advance(toward: planner.backdropTarget(at: source, loupeActive: loupeTarget.isActive, stage: stage), config: project.animation.screenSpring, milliseconds: sampleIntervalMs, first: i == 0)
+            frame.backgroundRect = layout.toCanvas(backdrop.rect.rect)
+            frame.backgroundBlurRadius = backdrop.blurRadius.value
+            frame.frostBlurRadius = backdrop.frostBlurRadius.value
             frame.screenReferenceWidth = target.screenReferenceWidth * layout.scale
             frame.allowsScreenBorderRadius = target.allowsScreenBorderRadius
             frame.isBackgroundVisible = target.isBackgroundVisible
@@ -344,6 +357,11 @@ public final class CameraTrack: @unchecked Sendable {
         )
     }
 
+    private static func interpolate(_ a: Double?, _ b: Double?, _ f: Double) -> Double? {
+        if let a, let b { return a + (b - a) * f }
+        return a ?? b
+    }
+
     private static func interpolate(_ a: Rect2?, _ b: Rect2?, _ f: Double) -> Rect2? {
         if let a, let b { return a.lerp(to: b, f) }
         return a ?? b
@@ -378,6 +396,9 @@ public final class CameraTrack: @unchecked Sendable {
         default: frame.loupe = f < 0.5 ? a.loupe : b.loupe
         }
         frame.cameraFocal01 = a.cameraFocal01.lerp(to: b.cameraFocal01, f)
+        frame.backgroundRect = Self.interpolate(a.backgroundRect, b.backgroundRect, f)
+        frame.backgroundBlurRadius = Self.interpolate(a.backgroundBlurRadius, b.backgroundBlurRadius, f)
+        frame.frostBlurRadius = Self.interpolate(a.frostBlurRadius, b.frostBlurRadius, f)
         frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
         frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, names: typeEventNames, config: cursorConfig)
@@ -727,5 +748,58 @@ final class CursorPathCache: @unchecked Sendable {
         let plan = CursorPlan(inputs: inputs)
         entry = plan
         return plan
+    }
+}
+
+/// Where the background wants to be (`rects.background`, `background.blurRadius` and
+/// `frostBlurRadius`), in stage units.
+struct BackdropTarget: Equatable {
+    var rect: Rect2
+    var blurRadius: Double
+    var frostBlurRadius: Double
+}
+
+/// The background's placement and blurs, sprung together with the screen movement spring.
+struct BackdropSpring {
+    var rect = SpringRect(Rect2(x: 0, y: 0, width: 0, height: 0))
+    var blurRadius = SpringValue(0)
+    var frostBlurRadius = SpringValue(0)
+
+    mutating func advance(toward target: BackdropTarget, config: SpringConfig, milliseconds: Double, first: Bool) {
+        if first {
+            rect = SpringRect(target.rect)
+            blurRadius = SpringValue(target.blurRadius)
+            frostBlurRadius = SpringValue(target.frostBlurRadius)
+            return
+        }
+        rect.advance(toward: target.rect, config: config, milliseconds: milliseconds)
+        blurRadius.advance(toward: target.blurRadius, config: config, milliseconds: milliseconds)
+        frostBlurRadius.advance(toward: target.frostBlurRadius, config: config, milliseconds: milliseconds)
+    }
+}
+
+extension CameraPlanner {
+    /// The background grows by 1/8 of every zoom step beyond 1.
+    static let backgroundZoomPerStep = 0.125
+    /// Stage pixels of background blur per zoom level while the screen zooms, when the
+    /// style has no blur.
+    static let zoomBlurPerLevel = 8.0
+    /// The loupe's frost, as a share of the stage width.
+    static let frostBlurShare = 0.005
+
+    /// While a zoom moves the screen the background scales by 1 + (zoom − 1) / 8 around the
+    /// zoom's point (the screen's focus), rounded outward.
+    func backdropTarget(at t: Double, loupeActive: Bool, stage: Rect2) -> BackdropTarget {
+        let styleBlur = project.style.background.blurRadius(stageWidth: stage.width)
+        let frost = loupeActive ? stage.width * Self.frostBlurShare : 0
+        guard let zoom = activeZoom(at: t) else {
+            return BackdropTarget(rect: stage, blurRadius: styleBlur, frostBlurRadius: frost)
+        }
+        let k = 1 + max(0, zoom.scale - 1) * Self.backgroundZoomPerStep
+        // Without a focus the screen holds its resting focus, and so does the background.
+        let point = focus(for: zoom, at: t) ?? restingFocus(at: t).center
+        let scaled = stage.scaled(k, origin01: Vec2(clamp(point.x, 0, 1), clamp(point.y, 0, 1)))
+        let rect = Rect2(x: scaled.x.rounded(.down), y: scaled.y.rounded(.down), width: scaled.width.rounded(.up), height: scaled.height.rounded(.up))
+        return BackdropTarget(rect: rect, blurRadius: styleBlur > 0 ? styleBlur : Self.zoomBlurPerLevel * zoom.scale, frostBlurRadius: frost)
     }
 }

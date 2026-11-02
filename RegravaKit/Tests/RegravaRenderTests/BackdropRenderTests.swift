@@ -10,6 +10,12 @@ import Testing
         return p
     }
 
+    private func layout(_ background: BackgroundConfig) -> CanvasLayout {
+        var p = Project(recording: RecordingInfo(videoSize: Size2(width: 1920, height: 1080), pointPixelScale: 1, durationMs: 1000, fps: 60), mouseEvents: [])
+        p.style.background = background
+        return CanvasLayout(project: p)
+    }
+
     /// OKLCH of sRGB red: L 0.62796, C 0.25768, h 29.23°.
     @Test func stopsAreConvertedToOklch() {
         let red = Backdrop.Oklch(srgb: RGBA(1, 0, 0))
@@ -42,18 +48,44 @@ import Testing
         #expect(green[1] > 0.95 && green[0] < 0.02)
     }
 
-    /// An image, Unsplash or wallpaper background without a file shows the plain colour.
+    /// An image or wallpaper background without a file shows the plain colour.
     @Test func missingImagesFallBackToTheColour() {
-        let canvas = Rect2(x: 0, y: 0, width: 320, height: 180)
         var config = BackgroundConfig(kind: .image, color: RGBA(0, 1, 0))
         config.imageFileName = "missing.png"
-        for kind in [BackgroundKind.image, .unsplash, .wallpaper] {
-            config.kind = kind
-            config.systemName = "missing/none.jpg"
-            let image = FrameCompositor.makeBackground(config, canvas: canvas, assetsDirectory: nil)
-            #expect(image.extent == CGRect(x: 0, y: 0, width: 320, height: 180))
-            let p = pixel(image, 100, 100)
-            #expect(p[1] > 0.99 && p[0] < 0.01)
-        }
+        let backdrop = Backdrop(config, layout: layout(config), assetsDirectory: nil)
+        let canvas = layout(config).canvas
+        let image = backdrop.image(bounds: canvas, radius: 0)
+        #expect(image.extent == CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
+        let p = pixel(image, 100, 100)
+        #expect(p[1] > 0.99 && p[0] < 0.01)
+        config.kind = .unsplash
+        #expect(pixel(Backdrop(config, layout: layout(config), assetsDirectory: nil).image(bounds: canvas, radius: 0), 5, 5)[1] > 0.99)
+        config.kind = .wallpaper
+        config.systemName = "missing/none.jpg"
+        #expect(pixel(Backdrop(config, layout: layout(config), assetsDirectory: nil).image(bounds: canvas, radius: 0), 5, 5)[1] > 0.99)
+    }
+
+    /// The background covers its rect: a larger rect magnifies the texture around it.
+    @Test func theBackgroundCoversItsRect() {
+        let gradient = BackgroundGradient(start: Vec2(0, 0), end: Vec2(1, 0), stops: [.init(color: RGBA(0, 0, 0), at: 0), .init(color: RGBA(1, 1, 1), at: 1)])
+        let config = BackgroundConfig(kind: .gradient, gradient: gradient)
+        let l = layout(config)
+        let backdrop = Backdrop(config, layout: l, assetsDirectory: nil)
+        let canvas = l.canvas
+        // Twice as wide, starting at x = 0: the middle of the canvas is a quarter along.
+        let wide = backdrop.image(bounds: Rect2(x: 0, y: 0, width: canvas.width * 2, height: canvas.height * 2), radius: 0)
+        let atRest = backdrop.image(bounds: canvas, radius: 0)
+        let quarter = pixel(atRest, canvas.width / 4, 100)[0]
+        #expect(abs(pixel(wide, canvas.width / 2, canvas.height - 1)[0] - quarter) < 0.01)
+        // The same placement is drawn once.
+        #expect(backdrop.image(bounds: canvas, radius: 0) === atRest)
+    }
+
+    @Test func newProjectsUseTheDefaultWallpaper() {
+        let config = BackgroundConfig()
+        #expect(config.kind == .wallpaper)
+        let l = layout(config)
+        let image = Backdrop(config, layout: l, assetsDirectory: nil).image(bounds: l.canvas, radius: 0)
+        #expect(image.extent == CGRect(x: 0, y: 0, width: l.canvas.width, height: l.canvas.height))
     }
 }
