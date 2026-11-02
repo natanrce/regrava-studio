@@ -568,7 +568,7 @@ private struct SliceItem: View {
             resolver: geometry.resolver,
             contains: { [slice] in slice.contains(sourceTime: $0) },
             isActive: isOpen,
-            isSelected: isOpen
+            isSelected: editor.showsSelectionOutline(.slice(slice.id), isOpen: isOpen)
         )
         .overlay(alignment: .bottomLeading) { waveform(start: start, width: width) }
         .overlay { timeLines(start: start, width: width) }
@@ -578,11 +578,8 @@ private struct SliceItem: View {
         .frame(width: width, height: 48)
         .opacity(editor.openSliceID != nil && !isOpen ? 0.6 : 1)
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .onHover { inside in
-            hovered = inside
-            // The hovered clip is a shortcut target.
-            if inside { editor.hoveredSliceID = slice.id } else if editor.hoveredSliceID == slice.id { editor.hoveredSliceID = nil }
-        }
+        .onHover { inside in hovered = inside }
+        .actionTarget(.slice(slice.id), editor: editor)
         .onTapGesture {
             if editor.isSplitToolActive, let hoverPlaybackMs = hoverPlaybackMs() {
                 if let source = editor.beamSplitSource(startMs: slice.sourceStartMs, endMs: slice.sourceEndMs, minimumMs: Slice.minimumDurationMs, hoverPlaybackMs: hoverPlaybackMs) {
@@ -945,7 +942,7 @@ private struct ZoomItem: View {
     @State private var dragOrigin: ZoomRange?
 
     private var isOpen: Bool { editor.openZoomID == zoom.id }
-    private var isSelected: Bool { editor.selectedZoomIDs.contains(zoom.id) || isOpen }
+    private var isSelected: Bool { editor.showsSelectionOutline(.zoom(zoom.id), isOpen: isOpen) }
     private var isDimmed: Bool { editor.openZoomID != nil && !isOpen }
 
     var body: some View {
@@ -976,6 +973,7 @@ private struct ZoomItem: View {
             hovered = inside
             if inside && !editor.isSplitToolActive { NSCursor.openHand.push() } else if !inside { NSCursor.pop() }
         }
+        .actionTarget(.zoom(zoom.id), editor: editor)
         .gesture(moveGesture)
         .simultaneousGesture(TapGesture().onEnded { tap() })
         .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.zoomMenu(zoom) }
@@ -988,8 +986,9 @@ private struct ZoomItem: View {
             return
         }
         if NSEvent.modifierFlags.contains(.command) {
-            if editor.selectedZoomIDs.contains(zoom.id) { editor.selectedZoomIDs.remove(zoom.id) } else { editor.selectedZoomIDs.insert(zoom.id) }
+            editor.toggleSelected(.zoom(zoom.id))
         } else {
+            editor.clearSelected()
             editor.openZoom(zoom.id)
         }
     }
@@ -1031,6 +1030,35 @@ private struct ZoomItem: View {
 /// Zoom levels for keys 1…9 (and 0 = default level).
 enum EditorShortcuts {
     static let zoomLevels: [Double] = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6]
+}
+
+/// A hovered timeline item is an action target until the pointer leaves it.
+private struct ActionTargetOnHover: ViewModifier {
+    let target: EditorTarget
+    let editor: EditorModel
+    @State private var token: Int?
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                if inside, token == nil {
+                    token = editor.focusTarget(target)
+                } else if !inside, let token {
+                    editor.unfocusTarget(token)
+                    self.token = nil
+                }
+            }
+            .onDisappear {
+                if let token { editor.unfocusTarget(token) }
+                token = nil
+            }
+    }
+}
+
+extension View {
+    func actionTarget(_ target: EditorTarget, editor: EditorModel) -> some View {
+        modifier(ActionTargetOnHover(target: target, editor: editor))
+    }
 }
 
 // MARK: - Masks track
@@ -1144,7 +1172,7 @@ private struct MaskItem: View {
         let width = max(geometry.sx(mask.endMs) - geometry.sx(mask.startMs) - 1, 1)
         let handle = floor(min(16, width / 3))
         let chip = mask.type == .sensitiveData ? "Sensitive data" : "Highlight \(Int((mask.highlightMaskOpacity * 100).rounded()))%"
-        PlayheadTrackItemBody(color: TrackColors.mask, resolver: geometry.resolver, contains: { [mask] in mask.contains($0) }, isActive: isOpen, isSelected: isOpen)
+        PlayheadTrackItemBody(color: TrackColors.mask, resolver: geometry.resolver, contains: { [mask] in mask.contains($0) }, isActive: isOpen, isSelected: editor.showsSelectionOutline(.mask(mask.id), isOpen: isOpen))
             .overlay { if isFocused { TrackItemLabels(kind: "Mask", chips: [("rectangle.fill", chip)], width: width) } }
             .overlay(alignment: .leading) { if handle >= 16 && isFocused { resizeHandle(leading: true, width: handle) } }
             .overlay(alignment: .trailing) { if handle >= 16 && isFocused { resizeHandle(leading: false, width: handle) } }
@@ -1165,10 +1193,14 @@ private struct MaskItem: View {
             .simultaneousGesture(TapGesture().onEnded {
                 if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
                     if let source = editor.beamSplitSource(startMs: mask.startMs, endMs: mask.endMs, minimumMs: MaskRange.minimumDurationMs, hoverPlaybackMs: editor.project.resolver.sourceToPlayback(hoverTimeMs)) { editor.splitMask(mask.id, at: source) }
+                } else if NSEvent.modifierFlags.contains(.command) {
+                    editor.toggleSelected(.mask(mask.id))
                 } else {
+                    editor.clearSelected()
                     editor.openMask(mask.id)
                 }
             })
+            .actionTarget(.mask(mask.id), editor: editor)
             .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.maskMenu(mask) }
             .offset(x: geometry.sx(mask.startMs) + 1)
     }
@@ -1318,7 +1350,7 @@ private struct LayoutItem: View {
         let handle = floor(min(16, width / 3))
         // Disabled look when disabled or when it changes nothing over the default layout.
         let looksDisabled = layout.isDisabled || editor.project.isEqualToDefaultLayout(layout)
-        PlayheadTrackItemBody(color: TrackColors.layout, resolver: geometry.resolver, contains: { [layout] in layout.contains($0) }, isActive: isOpen, isSelected: isOpen)
+        PlayheadTrackItemBody(color: TrackColors.layout, resolver: geometry.resolver, contains: { [layout] in layout.contains($0) }, isActive: isOpen, isSelected: editor.showsSelectionOutline(.layout(layout.id), isOpen: isOpen))
             .overlay { if isFocused { TrackItemLabels(kind: "Layout", chips: [("warninglight", Self.chip(layout.type))], width: width) } }
             .overlay(alignment: .leading) { if handle >= 16 && isFocused { resizeHandle(leading: true, width: handle) } }
             .overlay(alignment: .trailing) { if handle >= 16 && isFocused { resizeHandle(leading: false, width: handle) } }
@@ -1339,10 +1371,14 @@ private struct LayoutItem: View {
             .simultaneousGesture(TapGesture().onEnded {
                 if editor.isSplitToolActive, let hoverTimeMs = hoverTimeMs() {
                     if let source = editor.beamSplitSource(startMs: layout.startMs, endMs: layout.endMs, minimumMs: CameraLayoutRange.minimumDurationMs, hoverPlaybackMs: editor.project.resolver.sourceToPlayback(hoverTimeMs)) { editor.splitLayout(layout.id, at: source) }
+                } else if NSEvent.modifierFlags.contains(.command) {
+                    editor.toggleSelected(.layout(layout.id))
                 } else {
+                    editor.clearSelected()
                     editor.openLayout(layout.id)
                 }
             })
+            .actionTarget(.layout(layout.id), editor: editor)
             .nativeContextMenu(onClose: { editor.menuPreview = nil }) { editor.layoutMenu(layout) }
             .offset(x: geometry.sx(layout.startMs) + 1)
     }

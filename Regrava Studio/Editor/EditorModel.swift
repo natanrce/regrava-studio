@@ -83,20 +83,27 @@ final class EditorModel: ObservableObject {
     private var manualRate: Double = 0
 
     // View state
-    @Published var layoutType: EditorLayoutType = .edit
+    @Published var layoutType: EditorLayoutType = .edit {
+        didSet { if oldValue.showsSidebar != layoutType.showsSidebar { refocusOpenItem() } }
+    }
     @Published var sidebarRoot: SidebarRoot = .background
     @Published var sidebarItem: SidebarItem? {
-        didSet { updatePlainScreen() }
+        didSet {
+            updatePlainScreen()
+            if oldValue != sidebarItem { refocusOpenItem() }
+        }
     }
-    @Published var selectedZoomIDs: Set<UUID> = []
+    /// ⌘-clicked timeline items, all of one kind.
+    @Published var selectedTargets: [EditorTarget] = []
+    /// Selection and focused targets (hover changes are not published: only actions read them).
+    var targetStack = ActionTargetStack<EditorTarget, EditorTarget.Kind>(kind: \.kind)
+    var openItemFocusToken: Int?
     /// The copied zoom, layout or mask (⌘C / Cut to clipboard), pasted with ⌘V.
     var itemClipboard: ItemClipboard?
     /// A nested command list (a shortcut's sub-actions) shown instead of every action.
     @Published var commandSubSession: [EditorAction]?
-    /// The clip under the pointer (not published: only shortcuts read it).
-    var hoveredSliceID: UUID?
     /// The clip a shortcut acts on: the open one, else the hovered one.
-    var sliceTarget: UUID? { openSliceID ?? hoveredSliceID }
+    var sliceTarget: UUID? { openSliceID ?? actionContext.singleID(.slice) }
     /// Microphone renders under way, 0…1 (`media.audioRenderState` partial).
     @Published var microphoneRenderProgress: [MicrophoneAudioPreset: Double] = [:]
     /// Renders paused by re-clicking their option.
@@ -205,6 +212,9 @@ final class EditorModel: ObservableObject {
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
         renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
         transcript = SessionTranscript.load(bundle: bundleURL)
+        // The editor and its project are targets while the window is open.
+        targetStack.focus(.editor)
+        targetStack.focus(.project)
         let saved = UserDefaults.standard.double(forKey: "project-view-timeline-zoom.\(bundleURL.path)")
         visibleDurationMs = clampVisibleDuration(saved > 0 ? saved : 30_000)
         // Each publisher sends its current value first; only later changes rebuild.
@@ -427,8 +437,7 @@ final class EditorModel: ObservableObject {
         if case .slice(let id) = sidebarItem, !project.slices.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .mask(let id) = sidebarItem, !project.masks.contains(where: { $0.id == id }) { sidebarItem = nil }
         if case .layout(let id) = sidebarItem, !project.cameraLayouts.contains(where: { $0.id == id }) { sidebarItem = nil }
-        let selected = selectedZoomIDs.filter { id in project.zooms.contains { $0.id == id } }
-        if selected != selectedZoomIDs { selectedZoomIDs = selected }
+        if !selectedTargets.isEmpty { pruneSelection() }
         if !isDirty { isDirty = true }
         scheduleAutosave()
         updatePlainScreen()
