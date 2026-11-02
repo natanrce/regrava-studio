@@ -585,7 +585,7 @@ private struct SliceItem: View {
                 if let source = editor.beamSplitSource(startMs: slice.sourceStartMs, endMs: slice.sourceEndMs, minimumMs: Slice.minimumDurationMs, hoverPlaybackMs: hoverPlaybackMs) {
                     editor.splitSlice(atPlayback: editor.project.resolver.sourceToPlayback(source))
                 }
-            } else {
+            } else if editor.sidebarRoot != .transcript {
                 editor.openSlice(slice.id)
             }
         }
