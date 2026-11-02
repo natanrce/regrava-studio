@@ -107,8 +107,11 @@ public final class FrameCompositor: @unchecked Sendable {
             source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)),
             settings: Deband.recordingSettings(quality01: processing.improveRecordingQuality01, motionBlurAmount: motionBlurAmount, screen: frame.screenRect, before: frame.previousScreenRect, quality: quality)
         )
-        // Masks act on the recording itself, so they follow zoom and motion blur.
-        var src = MaskRenderer.apply(frame.mask, to: cropped(recording))
+        // Masks act on the recording itself, so they follow zoom and motion blur. Their edge
+        // is 1.5 output pixels wide, in recording pixels.
+        let screenSource = cropped(recording)
+        let videoPerCanvas = screenSource.extent.width / max(videoRect(inBody: frame.screenRect).width, 0.0001)
+        var src = MaskRenderer.apply(frame.mask, to: screenSource, antialias: SmoothShapes.antialias * max(1, videoPerCanvas))
         // Auto masks after the manual one, never on the timeline.
         if !sensitiveData.isEmpty {
             let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), timeline: sensitiveData, config: processing, videoSize: videoSize)

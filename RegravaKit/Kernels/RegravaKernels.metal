@@ -880,5 +880,77 @@ float4 motionBlurTrail(sampler layer, float4 now, float4 start, float4 params, d
     return weights > 0.0 ? fromBlurLinear(sum / weights) : float4(0.0);
 }
 
+// MARK: - Masks
+
+/// The mask on the recording (encoded values, Core Image pixels of a `size.y` tall image):
+/// cover or highlight through a smooth-cornered rect, mixed squared. bounds = top-left
+/// (x, y, width, height); corner = (R, antialias, opacity, highlightOpacity); size = (width,
+/// height, mode, -). `colors` is the 2×2 quadrant texture (row 1 on top).
+float4 maskApply(sampler src, sampler colors, float4 bounds, float4 corner, float4 size,
+                 float4 l0, float4 l1, float4 l2, float4 l3, destination dest) {
+    float2 coord = dest.coord();
+    float4 color = src.sample(src.transform(coord));
+    float2 pixel = float2(coord.x, size.y - coord.y);
+    float2 h = bounds.zw * 0.5;
+    float sd = smoothRectSD(pixel - (bounds.xy + h), h, corner.x, l0, l1, l2, l3);
+    float inside = rampStep(corner.y, -corner.y, sd);
+    float4 linear = toBlurLinear(color);
+    float2 blend = clamp((pixel - bounds.xy) / max(bounds.zw, float2(0.000001)), 0.0, 1.0);
+    float2 uv = blend * 0.5 + 0.25;
+    float4 texel = colors.sample(colors.transform(float2(uv.x * 2.0, (1.0 - uv.y) * 2.0)));
+    float3 straight = texel.rgb / max(texel.a, 0.00001);
+    float4 cover = float4(straight * straight, 1.0);
+    float4 covered = mix(linear, cover, inside * corner.z);
+    float4 dimmed = mix(linear, float4(0.0, 0.0, 0.0, 1.0), corner.w * (1.0 - inside) * corner.z);
+    return fromBlurLinear(mix(dimmed, covered, size.z));
+}
+
+/// One mip level down (`box@1:binomial4`): level 1 averages 2×2 texels, deeper levels a
+/// [1, 3, 3, 1] / 8 tap per axis around the pair, edges clamped. Top-left texel indices; `size`
+/// = (previous width, previous height, this height, binomial).
+float4 mipDown(sampler src, float4 size, destination dest) {
+    float2 coord = dest.coord();
+    float2 texel = float2(floor(coord.x), size.z - 1.0 - floor(coord.y));
+    float4 sum = float4(0.0);
+    if (size.w < 0.5) {
+        for (int j = 0; j < 2; j++) {
+            for (int i = 0; i < 2; i++) {
+                float2 q = clamp(texel * 2.0 + float2(i, j), float2(0.0), size.xy - 1.0);
+                sum += src.sample(src.transform(float2(q.x + 0.5, size.y - q.y - 0.5))) * 0.25;
+            }
+        }
+        return sum;
+    }
+    const float w[4] = { 0.125, 0.375, 0.375, 0.125 };
+    for (int j = 0; j < 4; j++) {
+        for (int i = 0; i < 4; i++) {
+            float2 q = clamp(texel * 2.0 + float2(i - 1, j - 1), float2(0.0), size.xy - 1.0);
+            sum += src.sample(src.transform(float2(q.x + 0.5, size.y - q.y - 0.5))) * (w[i] * w[j]);
+        }
+    }
+    return sum;
+}
+
+/// `mask-cover-colors`: per quadrant of the lattice (top-left content pixels), the mean of
+/// taps.x × taps.y bilinear reads of mip `level` at the quadrant's cell centres. 2×2 out, row
+/// 1 = the top quadrants. taps = (x, y, 2^level, mip height).
+float4 maskCoverColors(sampler mip, float4 lattice, float4 taps, destination dest) {
+    float2 coord = dest.coord();
+    float2 quadrant = float2(floor(coord.x), 1.0 - floor(coord.y));
+    float2 quadrantSize = lattice.zw * 0.5;
+    float2 origin = lattice.xy + quadrantSize * quadrant;
+    float2 step = quadrantSize / taps.xy;
+    float4 sum = float4(0.0);
+    for (int y = 0; y < 256; y++) {
+        if (float(y) >= taps.y) break;
+        for (int x = 0; x < 256; x++) {
+            if (float(x) >= taps.x) break;
+            float2 q = (origin + step * float2(float(x) + 0.5, float(y) + 0.5)) / taps.z;
+            sum += mip.sample(mip.transform(float2(q.x, taps.w - q.y)));
+        }
+    }
+    return sum / (taps.x * taps.y);
+}
+
 }
 }
