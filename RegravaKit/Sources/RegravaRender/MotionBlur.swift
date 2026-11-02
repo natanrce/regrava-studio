@@ -35,6 +35,30 @@ enum MotionBlur {
         Int(clamp((travel / quality.texelsPerSample).rounded(.up), 1, Double(quality.maxSamples)))
     }
 
+    private static let trailKernel = RenderKernels.general("motionBlurTrail")
+
+    /// A layer drawn at `now` averaged along its trail from `start` (Core Image rects), the
+    /// reads at (k + phase) / samples of the way with the phase from 8×8 Bayer noise at each
+    /// output pixel (`ditherRatio` 1), so steps between reads do not band. Colours average as
+    /// squares of their encoded values.
+    static func trail(_ layer: CIImage, now: CGRect, start: CGRect, samples: Int, bounds: CGRect, canvasHeight: Double, falloffRatio: Double = 0) -> CIImage? {
+        guard samples > 1, let kernel = trailKernel, now.width > 0, now.height > 0 else { return nil }
+        let encoded = layer.applyingFilter("CILinearToSRGBToneCurve")
+        // Two clear pixels around the layer: reads past it land on them.
+        let source = encoded.extent.insetBy(dx: -2, dy: -2)
+        guard let out = kernel.apply(
+            extent: bounds,
+            roiCallback: { _, _ in source },
+            arguments: [
+                encoded,
+                CIVector(cgRect: now),
+                CIVector(cgRect: start),
+                CIVector(x: CGFloat(samples), y: falloffRatio, z: canvasHeight, w: 0),
+            ]
+        ) else { return nil }
+        return out.applyingFilter("CISRGBToneCurveToLinear").cropped(to: bounds)
+    }
+
     /// Averages `layer(t)` for t spread over the trail (0 = trail start, 1 = now), inside `bounds`.
     static func accumulate(samples: Int, bounds: CGRect, falloffRatio: Double = 0, layer: (Double) -> CIImage) -> CIImage? {
         guard samples > 1, let weighted = weightedKernel, let weightOnly = weightKernel, let divide = divideKernel else { return nil }

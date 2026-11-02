@@ -844,5 +844,41 @@ float4 deband(sampler src, float4 params, float4 size, destination dest) {
     return float4(color.rgb + noise, color.a);
 }
 
+// MARK: - Motion blur trail
+
+/// `$convertSampleToBlurLinear`: encoded premultiplied to squared premultiplied.
+float4 toBlurLinear(float4 c) {
+    float3 rgb = clamp(c.rgb, float3(0.0), float3(c.a));
+    return float4(rgb * rgb / max(c.a, 0.00001), c.a);
+}
+
+/// Squared premultiplied back to encoded premultiplied.
+float4 fromBlurLinear(float4 c) {
+    return float4(sqrt(max(c.rgb * c.a, float3(0.0))), c.a);
+}
+
+/// A layer drawn at `now` (x, y, width, height; Core Image) averaged along its trail from
+/// `start`: `samples` reads at (k + Bayer phase) / samples of the way, each the layer moved
+/// and scaled into that rect, weighted 1 + falloff · smoothstep(0, 1, 1 − alpha), averaged
+/// squared. params = (samples, falloff, canvas height, -). Encoded values in and out.
+float4 motionBlurTrail(sampler layer, float4 now, float4 start, float4 params, destination dest) {
+    float2 p = dest.coord();
+    int count = int(params.x);
+    float phase = bayer8(float2(p.x, params.z - p.y));
+    float4 sum = float4(0.0);
+    float weights = 0.0;
+    for (int k = 0; k < 16; k++) {
+        if (k >= count) break;
+        float t = (float(k) + phase) / float(count);
+        float4 r = mix(start, now, t);
+        float2 q = now.xy + (p - r.xy) * now.zw / max(r.zw, float2(0.0001));
+        float4 s = layer.sample(layer.transform(q));
+        float w = 1.0 + params.y * smoothstep(0.0, 1.0, 1.0 - s.a);
+        sum += toBlurLinear(s) * w;
+        weights += w;
+    }
+    return weights > 0.0 ? fromBlurLinear(sum / weights) : float4(0.0);
+}
+
 }
 }

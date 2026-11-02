@@ -155,9 +155,9 @@ public final class FrameCompositor: @unchecked Sendable {
         if !isStatic {
             let bounds = ciRect(now).union(ciRect(trailStart)).integral
             let samples = MotionBlur.sampleCount(travel: now.cornerTravel(to: trailStart), quality: quality)
-            if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, falloffRatio: MotionBlur.screenFalloffRatio, layer: { t in
-                self.screenLayer(src, rect: trailStart.lerp(to: now, t), frame: frame)
-            }) {
+            // Every read is the layer at `now` moved and scaled into the trail's rect.
+            if let blurred = MotionBlur.trail(screenImage, now: ciRect(now), start: ciRect(trailStart), samples: samples, bounds: bounds,
+                                              canvasHeight: canvasHeight, falloffRatio: MotionBlur.screenFalloffRatio) {
                 screenImage = blurred
             }
         }

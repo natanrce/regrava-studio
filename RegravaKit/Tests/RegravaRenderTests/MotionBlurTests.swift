@@ -23,6 +23,37 @@ import Testing
         #expect(middle > 0.02 && middle < 0.5)
     }
 
+    /// 8×8 Bayer threshold v / 64 of a top-left output pixel.
+    private func bayer(_ x: Int, _ y: Int) -> Double {
+        let x0 = x & 1, y0 = y & 1, x1 = (x >> 1) & 1, y1 = (y >> 1) & 1, x2 = (x >> 2) & 1, y2 = (y >> 2) & 1
+        let v = ((x0 ^ y0) * 2 + y0) * 16 + ((x1 ^ y1) * 2 + y1) * 4 + (x2 ^ y2) * 2 + y2
+        return Double(v) / 64
+    }
+
+    /// Reads at (k + phase) / n of the way, the phase from Bayer noise at the output pixel,
+    /// each the block at `now` moved back into that read's rect (read bilinearly).
+    @Test func trailReadsAreDitheredPerPixel() throws {
+        let now = CGRect(x: 100, y: 0, width: 20, height: 16)
+        let layer = CIImage(color: .white).cropped(to: now)
+        let bounds = CGRect(x: 0, y: 0, width: 200, height: 16)
+        let blurred = try #require(MotionBlur.trail(layer, now: now, start: CGRect(x: 60, y: 0, width: 20, height: 16), samples: 4, bounds: bounds, canvasHeight: 16))
+        for y in 0..<8 {
+            for x in 72..<80 {
+                let phase = bayer(x, 15 - y)
+                let expected = (0..<4).map { k -> Double in
+                    let t = (Double(k) + phase) / 4
+                    let q = 100 + (Double(x) + 0.5 - (60 + 40 * t))
+                    return min(max(q - 99.5, 0), 1) * min(max(120.5 - q, 0), 1)
+                }.reduce(0, +) / 4
+                #expect(abs(alpha(of: blurred, at: CGPoint(x: x, y: y)) - expected) < 2e-3, "\(x), \(y)")
+            }
+        }
+        // At rest the layer comes back unchanged.
+        let still = try #require(MotionBlur.trail(layer, now: now, start: now, samples: 4, bounds: bounds, canvasHeight: 16))
+        #expect(abs(alpha(of: still, at: CGPoint(x: 110, y: 4)) - 1) < 1e-3)
+        #expect(alpha(of: still, at: CGPoint(x: 90, y: 4)) < 1e-3)
+    }
+
     @Test func staticFramesAreNotBlurred() {
         #expect(MotionBlur.strength(amount: 1, fps: 60, disabled: true) == 0)
         #expect(MotionBlur.strength(amount: 0.5, fps: 30, disabled: false) == 0.25)
