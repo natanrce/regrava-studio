@@ -1869,6 +1869,7 @@ final class EditorModel: ObservableObject {
             let nsImage = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects([nsImage])
+            showToast("Current frame image copied to clipboard")
         }
     }
 
