@@ -1224,7 +1224,12 @@ final class EditorModel: ObservableObject {
             toast = "Not enough space in selected timeline position to add a new mask"
             return
         }
-        let mask = MaskRange(startMs: start, endMs: end, bounds: bounds.map { [$0] } ?? project.defaultMaskBounds, type: type)
+        var mask = MaskRange(startMs: start, endMs: end, bounds: bounds.map { [$0] } ?? project.defaultMaskBounds, type: type)
+        // The last edited mask style, under the explicit inputs.
+        if let style = LastEditedMaskStyle.stored {
+            mask.blur = style.blur
+            mask.highlightMaskOpacity = style.highlightMaskOpacity
+        }
         change { $0.masks.append(mask) }
         openMask(mask.id)
         if !isPlaying { seek(to: project.resolver.sourceToPlayback(start + (end - start) / 2)) }
@@ -1239,10 +1244,12 @@ final class EditorModel: ObservableObject {
     }
 
     func updateMask(_ id: UUID, _ body: (inout MaskRange) -> Void) {
+        let before = project.masks.first(where: { $0.id == id })
         change { project in
             guard let index = project.masks.firstIndex(where: { $0.id == id }) else { return }
             body(&project.masks[index])
         }
+        if let before, let mask = project.masks.first(where: { $0.id == id }) { LastEditedMaskStyle.capture(mask, ifChangedFrom: before) }
     }
 
     func freeMaskRange(around timeMs: Double, excluding id: UUID? = nil) -> (start: Double, end: Double)? {
@@ -1310,9 +1317,11 @@ final class EditorModel: ObservableObject {
     /// "Apply to all masks" for the highlight opacity.
     func applyHighlightOpacityToAllMasks(from id: UUID) {
         guard let opacity = project.masks.first(where: { $0.id == id })?.highlightMaskOpacity else { return }
+        let before = project.masks
         change { project in
             for index in project.masks.indices { project.masks[index].highlightMaskOpacity = opacity }
         }
+        for (old, new) in zip(before, project.masks) { LastEditedMaskStyle.capture(new, ifChangedFrom: old) }
         toast = "Highlight mask opacity applied to all masks"
     }
 
@@ -1497,12 +1506,13 @@ final class EditorModel: ObservableObject {
     }
 
     func updateZoom(_ id: UUID, _ body: (inout ZoomRange) -> Void) {
+        let before = project.zooms.first(where: { $0.id == id })
         change { project in
             guard let index = project.zooms.firstIndex(where: { $0.id == id }) else { return }
             body(&project.zooms[index])
             project.zooms[index].isGenerated = false
         }
-        if let zoom = project.zooms.first(where: { $0.id == id }) { LastEditedZoomStyle.capture(zoom) }
+        if let before, let zoom = project.zooms.first(where: { $0.id == id }) { LastEditedZoomStyle.capture(zoom, ifChangedFrom: before) }
     }
 
     /// `addZoomAtPlayhead`: the add tool and its "Automatic zoom" button. The last edited zoom
