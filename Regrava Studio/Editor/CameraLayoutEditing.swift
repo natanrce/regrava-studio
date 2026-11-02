@@ -139,7 +139,7 @@ extension EditorModel {
         guard let layout = project.cameraLayouts.first(where: { $0.id == id }) else { return }
         let minimum = CameraLayoutRange.minimumDurationMs
         guard timeMs - layout.startMs >= minimum, layout.endMs - timeMs >= minimum else {
-            NSSound.beep()
+            showToast("The part you want to cut is too short", durationMs: 2000)
             return
         }
         var second = layout

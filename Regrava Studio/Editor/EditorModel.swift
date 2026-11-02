@@ -1291,7 +1291,7 @@ final class EditorModel: ObservableObject {
         guard let mask = project.masks.first(where: { $0.id == id }) else { return }
         let minimum = MaskRange.minimumDurationMs
         guard timeMs - mask.startMs >= minimum, mask.endMs - timeMs >= minimum else {
-            NSSound.beep()
+            showToast("The part you want to cut is too short", durationMs: 2000)
             return
         }
         var second = mask
@@ -1604,7 +1604,7 @@ final class EditorModel: ObservableObject {
         guard let zoom = project.zooms.first(where: { $0.id == id }) else { return }
         let minimum = ZoomRange.minimumDurationMs
         guard timeMs - zoom.startMs >= minimum, zoom.endMs - timeMs >= minimum else {
-            NSSound.beep()
+            showToast("The part you want to cut is too short", durationMs: 2000)
             return
         }
         var second = zoom
