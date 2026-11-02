@@ -622,7 +622,7 @@ struct ActionCatalog {
                 e?.cutToClipboard(context)
             },
             global("pasteFromClipboard", "Paste from clipboard", group: "Clipboard", visibleGroup: "Clipboard", shortcut: ["Meta", "V"], canApply: e?.itemClipboard != nil) {
-                e?.pasteItem()
+                e?.pasteItem(context)
             },
         ]
     }

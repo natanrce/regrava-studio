@@ -76,17 +76,18 @@ extension EditorModel {
         else if let mask = context.singleID(.mask) { cutMask(mask) }
     }
 
-    /// ⌘V (`pasteFromClipboard`). Returns false when there is nothing to paste.
-    @discardableResult
-    func pasteItem() -> Bool {
-        guard let clipboard = itemClipboard else { return false }
+    /// "Paste from clipboard" (⌘V): onto the target of the copied kind, else added at the
+    /// playhead with the same duration.
+    func pasteItem(_ context: ActionContext) {
+        guard let clipboard = itemClipboard else { return }
         let start = currentSourceTimeMs
         switch clipboard {
         case .slice(let id, let timeScale, let volume):
             // The live clip when it still exists, onto the clip under the playhead unless
             // it is that same clip.
+            guard context.single(.editor) != nil else { return }
             let live = project.slices.first { $0.id == id }
-            guard let index = project.sliceIndex(atSource: start), project.slices[index].id != id else { return true }
+            guard let index = project.sliceIndex(atSource: start), project.slices[index].id != id else { return }
             let speed = live?.timeScale ?? timeScale, micVolume = live?.volume ?? volume
             change {
                 $0.slices[index].timeScale = speed
@@ -94,7 +95,7 @@ extension EditorModel {
             }
             showToast("Slice settings pasted")
         case .zoom(let copied):
-            if let target = openZoomID {
+            if let target = context.singleID(.zoom) {
                 updateZoom(target) {
                     $0.mode = copied.mode
                     $0.scale = copied.scale
@@ -102,16 +103,17 @@ extension EditorModel {
                     $0.manualTarget = copied.manualTarget
                 }
                 showToast("Zoom range settings pasted")
-            } else if let id = addZoom(startMs: start, durationMs: copied.durationMs, manualTarget: copied.mode == .manual ? copied.manualTarget : nil, presentation: copied.presentation) {
-                updateZoom(id) {
-                    $0.mode = copied.mode
-                    $0.scale = copied.scale
-                    $0.isDisabled = copied.isDisabled
-                    $0.loupeOptions = copied.loupeOptions
-                }
+            } else if context.single(.editor) != nil {
+                let items = sortedZooms.map { (start: $0.startMs, end: $0.endMs) }
+                guard let range = TimelineFreeRange.at(start, durationMs: max(copied.durationMs, ZoomRange.minimumDurationMs), items: items, minimumMs: ZoomRange.minimumDurationMs, totalMs: project.recording.durationMs) else { return }
+                var zoom = copied
+                zoom.id = UUID()
+                zoom.startMs = range.start
+                zoom.endMs = range.end
+                change { $0.zooms.append(zoom) }
             }
         case .layout(let copied):
-            if let target = openLayoutID {
+            if let target = context.singleID(.layout) {
                 updateLayout(target) {
                     $0.isDisabled = copied.isDisabled
                     $0.overlayPosition01 = copied.overlayPosition01
@@ -120,42 +122,34 @@ extension EditorModel {
                     $0.overlayPaddingRatio01 = copied.overlayPaddingRatio01
                 }
                 showToast("Layout settings pasted")
-            } else {
-                guard let range = project.freeLayoutRange(startingAt: start) else {
-                    toast = "Not enough space in selected timeline position to add a new layout"
-                    return true
-                }
+            } else if context.single(.editor) != nil {
+                let items = project.sortedCameraLayouts.map { (start: $0.startMs, end: $0.endMs) }
+                let duration = copied.endMs - copied.startMs
+                guard let range = TimelineFreeRange.at(start, durationMs: max(duration, CameraLayoutRange.minimumDurationMs), items: items, minimumMs: CameraLayoutRange.minimumDurationMs, totalMs: project.recording.durationMs) else { return }
                 var layout = copied
                 layout.id = UUID()
                 layout.startMs = range.start
-                layout.endMs = min(range.end, range.start + (copied.endMs - copied.startMs))
+                layout.endMs = range.end
                 change { $0.cameraLayouts.append(layout) }
-                openLayout(layout.id)
             }
         case .mask(let copied):
-            if let target = openMaskID {
-                updateMask(target) {
-                    $0.isDisabled = copied.isDisabled
-                    $0.type = copied.type
-                    $0.bounds = copied.bounds
-                    $0.blur = copied.blur
-                    $0.highlightMaskOpacity = copied.highlightMaskOpacity
+            if let target = context.singleID(.mask) {
+                // Everything but the id, its time range included.
+                updateMask(target) { mask in
+                    let id = mask.id
+                    mask = copied
+                    mask.id = id
                 }
-            } else {
-                guard let free = freeMaskRange(around: start) else { return true }
-                let end = min(free.end, start + (copied.endMs - copied.startMs))
-                guard end - start >= MaskRange.minimumDurationMs else {
-                    toast = "Not enough space in selected timeline position to add a new mask"
-                    return true
-                }
+            } else if context.single(.editor) != nil {
+                let items = project.sortedMasks.map { (start: $0.startMs, end: $0.endMs) }
+                let duration = copied.endMs - copied.startMs
+                guard let range = TimelineFreeRange.at(start, durationMs: max(duration, MaskRange.minimumDurationMs), items: items, minimumMs: MaskRange.minimumDurationMs, totalMs: project.recording.durationMs) else { return }
                 var mask = copied
                 mask.id = UUID()
-                mask.startMs = start
-                mask.endMs = end
+                mask.startMs = range.start
+                mask.endMs = range.end
                 change { $0.masks.append(mask) }
-                openMask(mask.id)
             }
         }
-        return true
     }
 }
