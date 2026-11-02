@@ -11,8 +11,7 @@ extension EditorModel {
 
     /// Opening a layout focuses the "camera-mode" track.
     func openLayout(_ id: UUID) {
-        sidebarItem = .layout(id)
-        selectedZoomIDs = []
+        setSidebarItem(.layout(id))
         focusedTrack = "camera-mode"
     }
 

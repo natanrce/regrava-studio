@@ -1065,9 +1065,16 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// `setSidebarItem`: opening an item disarms the add tool.
+    func setSidebarItem(_ item: SidebarItem) {
+        isAddZoomToolArmed = false
+        isAddMaskToolArmed = false
+        isAddLayoutToolArmed = false
+        sidebarItem = item
+    }
+
     func openZoom(_ id: UUID) {
-        sidebarItem = .zoom(id)
-        selectedZoomIDs = []
+        setSidebarItem(.zoom(id))
         focusedTrack = "zooms"
     }
 
@@ -1083,8 +1090,7 @@ final class EditorModel: ObservableObject {
 
     /// Clicking a clip opens the slice editor.
     func openSlice(_ id: UUID) {
-        sidebarItem = .slice(id)
-        selectedZoomIDs = []
+        setSidebarItem(.slice(id))
     }
 
     var openMaskID: UUID? {
@@ -1093,8 +1099,7 @@ final class EditorModel: ObservableObject {
     }
 
     func openMask(_ id: UUID) {
-        sidebarItem = .mask(id)
-        selectedZoomIDs = []
+        setSidebarItem(.mask(id))
         focusedTrack = "masks"
     }
 
