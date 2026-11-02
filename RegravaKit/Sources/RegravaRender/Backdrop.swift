@@ -8,6 +8,8 @@ import RegravaCore
 /// Blur radii follow the texture sampler's convention: a radius `r` is a Gaussian of
 /// sigma `r / 2`.
 final class Backdrop: @unchecked Sendable {
+    /// Wallpapers are debanded while the style blur is under this many stage pixels.
+    static let wallpaperDebandBlurLimit = 4.0
     /// Gradients are drawn at most this many pixels on the long side.
     static let gradientMaxSide = 1024.0
     /// `BLUR_SIGMA_PER_RADIUS`.
@@ -58,7 +60,11 @@ final class Backdrop: @unchecked Sendable {
             return .image(atOrigin(image).insertingIntermediate(cache: true))
         case .wallpaper:
             guard let url = WallpaperLibrary.url(for: config.systemName), let image = CIImage(contentsOf: url) else { return solid }
-            return .image(atOrigin(image).insertingIntermediate(cache: true))
+            var texture = atOrigin(image)
+            if styleBlurRadius < wallpaperDebandBlurLimit {
+                texture = Deband.apply(texture, settings: .wallpaper)
+            }
+            return .image(texture.insertingIntermediate(cache: true))
         }
     }
 

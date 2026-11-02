@@ -807,5 +807,42 @@ float4 oklchGradient(float4 line, float4 size, float4 o0, float4 o1,
     return ditherColor(float4(srgb * color.w, color.w), float2(coord.x, size.y - coord.y));
 }
 
+/// `$debandHash01`.
+float debandHash(float2 seed) {
+    return fract(sin(dot(seed, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+/// Texel of a `size` texture at top-left pixel position `q`, clamped half a texel inside.
+float4 debandRead(sampler src, float2 q, float4 size) {
+    float2 c = clamp(q, float2(0.5), size.xy - 0.5);
+    return src.sample(src.transform(float2(size.z + c.x, size.w + size.y - c.y)));
+}
+
+/// `processors/deband` on encoded values: up to 4 rounds, each replacing the colour with the
+/// mean of a cross of 4 taps (random angle, reach hash × radius × round) when every channel is
+/// within `threshold` of it, then `$ditherColorWithStep`. params = (threshold, radiusTexels,
+/// iterations, ditherStep); size = (width, height, origin.xy).
+float4 deband(sampler src, float4 params, float4 size, destination dest) {
+    float2 coord = dest.coord();
+    float2 pixel = float2(coord.x - size.z, size.y - (coord.y - size.w));
+    float4 color = debandRead(src, pixel, size);
+    for (int i = 1; i <= 4; i++) {
+        float iteration = float(i);
+        if (iteration <= params.z) {
+            float angle = debandHash(pixel + float2(iteration * 17.0, 0.5)) * 6.283185307179586;
+            float reach = debandHash(pixel + float2(0.5, iteration * 29.0)) * params.y * iteration;
+            float2 arm = float2(cos(angle), sin(angle)) * reach;
+            float2 perpendicular = float2(-arm.y, arm.x);
+            float4 average = (debandRead(src, pixel + arm, size) + debandRead(src, pixel - arm, size)
+                + debandRead(src, pixel + perpendicular, size) + debandRead(src, pixel - perpendicular, size)) * 0.25;
+            float4 difference = abs(color - average);
+            float largest = max(max(difference.x, difference.y), max(difference.z, difference.w));
+            color = largest > params.x ? color : average;
+        }
+    }
+    float noise = (bayer8(pixel) - 0.5) * params.w * color.a;
+    return float4(color.rgb + noise, color.a);
+}
+
 }
 }
