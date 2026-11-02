@@ -18,6 +18,8 @@ final class AppController {
     private init() {}
 
     func launch() {
+        // ⌘K with no project open.
+        AppCommandMenuPanel.shared.install()
         // iPhones and iPads appear asynchronously once screen capture devices are allowed.
         ExternalDeviceDiscovery.shared.start()
         // Recordings a crash or a quit left unfinished.

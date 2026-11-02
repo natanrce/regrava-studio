@@ -326,3 +326,60 @@ struct ShortcutBadge: View {
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0x2E / 255)))
     }
 }
+
+/// With no project open: ⌘K opens the command menu in a transparent always-on-top panel, with
+/// the actions that need no project; Esc or ⌘K closes it.
+@MainActor
+final class AppCommandMenuPanel: NSObject, NSWindowDelegate {
+    static let shared = AppCommandMenuPanel()
+    private let menu = CommandMenuController()
+    private var panel: NSPanel?
+    private var keyMonitor: Any?
+    private var cancellable: AnyCancellable?
+
+    func install() {
+        guard keyMonitor == nil else { return }
+        menu.rootActions = { ActionCatalog(editor: nil, context: .empty).all }
+        cancellable = menu.$session.sink { [weak self] session in
+            if session == nil { DispatchQueue.main.async { self?.panel?.orderOut(nil) } }
+        }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, AppController.shared.editors.isEmpty else { return event }
+            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            if flags == [.command], event.charactersIgnoringModifiers?.lowercased() == "k" {
+                if self.menu.session == nil { self.show() } else { self.menu.close() }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func show() {
+        let panel = self.panel ?? makePanel()
+        self.panel = panel
+        menu.open()
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func makePanel() -> NSPanel {
+        let panel = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: 615, height: 640), styleMask: [.borderless], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hasShadow = false
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.contentView = NSHostingView(rootView: CommandMenuHost(menu: menu))
+        panel.delegate = self
+        return panel
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        menu.close()
+    }
+}
+
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
