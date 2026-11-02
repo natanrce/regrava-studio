@@ -102,8 +102,13 @@ public final class FrameCompositor: @unchecked Sendable {
 
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
         let canvasRect = ciRect(layout.canvas)
+        // The recording is debanded first (`screenDeband`), on the whole frame.
+        let recording = Deband.apply(
+            source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY)),
+            settings: Deband.recordingSettings(quality01: processing.improveRecordingQuality01, motionBlurAmount: motionBlurAmount, screen: frame.screenRect, before: frame.previousScreenRect, quality: quality)
+        )
         // Masks act on the recording itself, so they follow zoom and motion blur.
-        var src = MaskRenderer.apply(frame.mask, to: cropped(source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))))
+        var src = MaskRenderer.apply(frame.mask, to: cropped(recording))
         // Auto masks after the manual one, never on the timeline.
         if !sensitiveData.isEmpty {
             let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), timeline: sensitiveData, config: processing, videoSize: videoSize)

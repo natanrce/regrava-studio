@@ -20,6 +20,41 @@ enum Deband {
         var isOff: Bool { thresholdEightBitSteps <= 0 || radiusTexels <= 0 || iterations <= 0 }
     }
 
+    /// The recording's settings for `improveRecordingQuality01`, before motion.
+    static func recordingKnobs(quality01: Double) -> (thresholdEightBitSteps: Double, iterations: Int) {
+        let q = min(1, max(0, quality01))
+        guard q > 0 else { return (0, 0) }
+        return (q * 4, Int(min(4, max(1, (q * 4).rounded(.up)))))
+    }
+
+    /// Full strength up to this much motion, none from `zeroStrengthMotionDevicePx`.
+    static let fullStrengthMotionDevicePx = 10.0
+    static let zeroStrengthMotionDevicePx = 30.0
+
+    /// 1 − smoothstep of the motion between the two limits, in steps of 1/16.
+    static func motionStrength(_ motionDevicePx: Double) -> Double {
+        let t = clamp((motionDevicePx - fullStrengthMotionDevicePx) / max(zeroStrengthMotionDevicePx - fullStrengthMotionDevicePx, 0.000001), 0, 1)
+        return clamp(((1 - t * t * (3 - 2 * t)) / (1.0 / 16)).rounded() * (1.0 / 16), 0, 1)
+    }
+
+    /// `slowestPixelMotionDevicePx`: per axis, the smaller move of the two edges when both go
+    /// the same way (0 otherwise), combined.
+    static func slowestPixelMotion(_ now: Rect2, _ before: Rect2) -> Double {
+        func axis(_ a: Double, _ b: Double) -> Double { a * b <= 0 ? 0 : min(abs(a), abs(b)) }
+        let x = axis(now.x - before.x, now.x + now.width - (before.x + before.width))
+        let y = axis(now.y - before.y, now.y + now.height - (before.y + before.height))
+        return hypot(x, y)
+    }
+
+    /// `screenDebandKnobsAt`: export and high-quality pauses only, the threshold eased out
+    /// while the screen moves (its slowest pixel motion × the motion blur amount).
+    static func recordingSettings(quality01: Double, motionBlurAmount: Double, screen now: Rect2, before: Rect2?, quality: RenderQuality) -> Settings {
+        guard quality == .export || quality == .pausedHigh else { return Settings(thresholdEightBitSteps: 0, radiusTexels: 16, iterations: 0) }
+        let knobs = recordingKnobs(quality01: quality01)
+        let strength = motionStrength(slowestPixelMotion(now, before ?? now) * motionBlurAmount)
+        return Settings(thresholdEightBitSteps: knobs.thresholdEightBitSteps * strength, radiusTexels: 16, iterations: knobs.iterations)
+    }
+
     private static let kernel = RenderKernels.general("deband")
 
     /// `image` debanded over its own extent.
