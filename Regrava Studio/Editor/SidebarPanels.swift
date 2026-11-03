@@ -760,6 +760,24 @@ private struct MaskOutsideNote: View {
     }
 }
 
+/// Disabled while the playhead already sits on the mask start; only this button redraws with
+/// the playhead.
+private struct MaskStartFocusButton: View {
+    @EnvironmentObject private var clock: PlaybackClock
+    var resolver: TimeResolver
+    var mask: MaskRange
+    var focus: () -> Void
+
+    var body: some View {
+        // Where focusing puts the playhead (seeks land on 60 fps frames).
+        let frame = 1000.0 / 60
+        let target = (resolver.sourceToPlayback(mask.startMs) / frame).rounded() * frame
+        RSButton(title: "Focus the timeline on the mask start", kind: .secondary, action: focus)
+            .disabled(abs(clock.currentTimeMs - target) < 0.001)
+            .tooltip("Start is source of the mask")
+    }
+}
+
 struct MaskInspector: View {
     @ObservedObject var editor: EditorModel
     var maskID: UUID
@@ -781,9 +799,9 @@ struct MaskInspector: View {
                             )
                             if mask.type == .sensitiveData {
                                 Callout(icon: "timeline.selection", message: "Make sure the mask covers the entire part of the timeline where sensitive data is present.")
-                                RSButton(title: "Focus the timeline on the mask start", kind: .secondary) { focus(mask, at: mask.startMs) }
-                                    .tooltip("Start is source of the mask")
-                            } else {
+                            }
+                            MaskStartFocusButton(resolver: editor.resolver, mask: mask) { focus(mask, at: mask.startMs) }
+                            if mask.type == .highlight {
                                 SliderField(
                                     name: "Highlight mask opacity",
                                     value: Binding(
