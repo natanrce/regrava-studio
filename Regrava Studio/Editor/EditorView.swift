@@ -378,7 +378,7 @@ private struct LayoutControls: View {
 
     private func step(_ direction: Int) {
         if direction < 0, let smaller { preferences.playbackPreviewMaxHeight = smaller }
-        if direction > 0, let larger { preferences.playbackPreviewMaxHeight = larger }
+        if direction > 0, let larger { preferences.playbackPreviewMaxHeight = larger; editor.warnAboutLargerPreview() }
     }
 }
 

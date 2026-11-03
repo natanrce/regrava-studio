@@ -184,6 +184,17 @@ final class EditorModel: ObservableObject {
         if id == nil || toast?.id == id { toast = nil }
     }
 
+    /// When the preview-size warning last showed, across every editor window.
+    private static var previewSizeWarningShownAt: Date?
+
+    /// A larger preview warns about playback performance, at most once every 5 minutes.
+    func warnAboutLargerPreview() {
+        let now = Date()
+        if let shown = Self.previewSizeWarningShownAt, now.timeIntervalSince(shown) < 5 * 60 { return }
+        Self.previewSizeWarningShownAt = now
+        showToast("Increasing the playback preview size may affect preview playback performance")
+    }
+
     private var cursors: CursorLibrary
     private let renderState: RenderState
     private var baseConfiguration: AVVideoComposition.Configuration?

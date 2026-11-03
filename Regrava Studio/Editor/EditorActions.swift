@@ -163,7 +163,7 @@ struct ActionCatalog {
             target(.editor, "goToFirstFrame", "Go to first frame", group: "Playback", icon: "backward.end", shortcut: ["Meta", "ArrowLeft"]) { e?.seek(to: 0) },
             target(.editor, "goToLastFrame", "Go to last frame", group: "Playback", icon: "forward.end", shortcut: ["Meta", "ArrowRight"]) { if let e { e.seek(to: e.durationMs) } },
             target(.editor, "increasePlaybackPreviewSize", "Increase preview size", group: "Playback", icon: "plus.magnifyingglass", canApply: nextPreviewSize(larger: true) != nil) {
-                if let size = nextPreviewSize(larger: true) { preferences.playbackPreviewMaxHeight = size }
+                if let size = nextPreviewSize(larger: true) { preferences.playbackPreviewMaxHeight = size; e?.warnAboutLargerPreview() }
             },
             target(.editor, "moveBackwards", "Move backwards", group: "Playback", icon: "arrow.turn.up.left", shortcut: ["ArrowLeft"]) {
                 guard let e else { return }
