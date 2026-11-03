@@ -122,7 +122,7 @@ private struct PresetRow: View {
         if !matches {
             edit.append(.command(.init(title: "Update to match currently edited project") {
                 store.sync(entry, with: editor.project, bundle: editor.bundleURL)
-                editor.toast = "Preset updated to match"
+                editor.showToast("Preset updated to match")
             }))
         }
         return [

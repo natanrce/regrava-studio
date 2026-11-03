@@ -34,7 +34,7 @@ extension EditorModel {
         case .nothing:
             return false
         case .wouldRemoveAll:
-            showToast("Can't delete the entire video")
+            showToast("Can't delete the entire video", durationMs: 2000)
             return false
         case .removed(let ms):
             keepingPlayhead { change { $0 = updated } }
@@ -50,7 +50,7 @@ extension EditorModel {
         guard let first = picked.compactMap(\.wordIndex).min(), let last = picked.compactMap(\.wordIndex).max() else { return }
         changeTranscript(TranscriptEditing.setHidden(words, from: first, to: last, hidden: true))
         let n = picked.count
-        showToast("Cut \(n) word\(n == 1 ? "" : "s") from the transcript — the video is unchanged, Restore brings \(n == 1 ? "it" : "them") back")
+        showToast("Cut \(n) word\(n == 1 ? "" : "s") from the transcript — the video is unchanged, Restore brings \(n == 1 ? "it" : "them") back", durationMs: 2500)
     }
 
     /// `restoreTarget`: back into the video and the captions.

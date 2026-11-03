@@ -64,22 +64,8 @@ struct EditorView: View {
         .overlay {
             CommandMenuHost(menu: editor.commandMenu)
         }
-        .overlay(alignment: .top) {
-            if let message = editor.toast {
-                Text(message)
-                    .font(Theme.Typo.copy)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 14)
-                    .background(Capsule().fill(Theme.Colors.background.opacity(0.92)))
-                    .overlay(Capsule().strokeBorder(Theme.Colors.systemBorder))
-                    .padding(.top, 72)
-                    .transition(.opacity)
-                    .task(id: message) {
-                        // Info toasts last 2 s; preview markers use 1 s.
-                        try? await Task.sleep(nanoseconds: UInt64(editor.toastDurationMs * 1_000_000))
-                        if editor.toast == message { editor.toast = nil }
-                    }
-            }
+        .overlay {
+            ToastHost(editor: editor)
         }
     }
 }

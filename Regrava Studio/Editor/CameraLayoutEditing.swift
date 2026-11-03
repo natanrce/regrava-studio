@@ -74,7 +74,7 @@ extension EditorModel {
     func addLayoutAtPlayhead(_ type: CameraLayoutType, overlayPosition01: Vec2? = nil) {
         isAddLayoutToolArmed = false
         guard let range = project.freeLayoutRange(startingAt: currentSourceTimeMs) else {
-            toast = "Not enough space in selected timeline position to add a new layout"
+            showToast("Not enough space in selected timeline position to add a new layout")
             return
         }
         insertLayout(CameraLayoutRange(startMs: range.start, endMs: range.end, type: type, overlayPosition01: overlayPosition01 ?? Vec2(1, 1)))

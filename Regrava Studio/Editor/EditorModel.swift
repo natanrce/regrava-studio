@@ -166,14 +166,22 @@ final class EditorModel: ObservableObject {
     /// "zooms" track is focused by default; nil = none.
     @Published var focusedTrack: String? = "zooms"
     @Published var errorMessage: String?
-    /// Short message shown over the editor (e.g. "Copied to clipboard").
-    @Published var toast: String?
-    /// How long the toast stays (2 s for info toasts, 1 s for the preview markers).
-    var toastDurationMs: Double = 2000
+    /// The one toast shown at the bottom of the editor; a new one replaces it.
+    @Published var toast: EditorToast?
 
-    func showToast(_ message: String, durationMs: Double = 2000) {
-        toastDurationMs = durationMs
-        toast = message
+    /// Shows a toast for `durationMs` (5 s unless a call says otherwise).
+    func showToast(_ message: String, title: String? = nil, kind: EditorToast.Kind = .info, durationMs: Double = EditorToast.defaultDurationMs) {
+        toast = EditorToast(kind: kind, title: title, message: message, durationMs: durationMs)
+    }
+
+    /// A failed action shows its error as an error toast.
+    func showError(_ error: Error) {
+        let message = error.localizedDescription
+        showToast(message.isEmpty ? "Unknown error" : message, kind: .error)
+    }
+
+    func dismissToast(_ id: UUID? = nil) {
+        if id == nil || toast?.id == id { toast = nil }
     }
 
     private var cursors: CursorLibrary
@@ -235,7 +243,7 @@ final class EditorModel: ObservableObject {
         syncMicrophoneRenders()
         updateHoverDetection()
         player.actionAtItemEnd = .pause
-        exports.onToast = { [weak self] in self?.showToast($0) }
+        exports.onToast = { [weak self] in self?.showToast($0, kind: .error) }
         registerMediaKeys()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -1226,7 +1234,7 @@ final class EditorModel: ObservableObject {
         let next = project.sortedMasks.first { $0.startMs > start }?.startMs ?? project.recording.durationMs
         let end = min(start + MaskRange.initialDurationMs, next)
         guard end - start >= MaskRange.minimumDurationMs else {
-            toast = "Not enough space in selected timeline position to add a new mask"
+            showToast("Not enough space in selected timeline position to add a new mask")
             return
         }
         var mask = MaskRange(startMs: start, endMs: end, bounds: bounds.map { [$0] } ?? project.defaultMaskBounds, type: type)
@@ -1327,7 +1335,7 @@ final class EditorModel: ObservableObject {
             for index in project.masks.indices { project.masks[index].highlightMaskOpacity = opacity }
         }
         for (old, new) in zip(before, project.masks) { LastEditedMaskStyle.capture(new, ifChangedFrom: old) }
-        toast = "Highlight mask opacity applied to all masks"
+        showToast("Highlight mask opacity applied to all masks")
     }
 
     /// Split-tool click: the length check uses the pointer's time, the cut the beam's, which snaps
@@ -1356,7 +1364,7 @@ final class EditorModel: ObservableObject {
     func splitSlice(atPlayback playbackMs: Double) {
         let source = project.resolver.playbackToSource(playbackMs)
         guard project.canSplitSlice(at: source) else {
-            toast = "The part you want to cut is too short"
+            showToast("The part you want to cut is too short", durationMs: 2000)
             return
         }
         change { $0.splitSlice(at: source) }
@@ -1667,7 +1675,7 @@ final class EditorModel: ObservableObject {
             isDirty = false
             writePreviewImage()
         } catch {
-            errorMessage = "Could not save: \(error.localizedDescription)"
+            showError(error)
         }
     }
 
@@ -1730,7 +1738,7 @@ final class EditorModel: ObservableObject {
         let forbidden = CharacterSet(charactersIn: "\\/*?\"<>|%¿:")
         let cleaned = rawName.components(separatedBy: forbidden).joined().trimmingCharacters(in: .whitespaces)
         if cleaned != rawName.trimmingCharacters(in: .whitespaces) {
-            Dialogs.info(title: "Filename contains forbidden characters", message: "They were removed from the project name.")
+            showToast("Filename contains forbidden characters", kind: .warning, durationMs: 2000)
         }
         let name = cleaned.isEmpty ? "Recording" : cleaned
         guard name != projectName else { return }
@@ -1827,7 +1835,7 @@ final class EditorModel: ObservableObject {
                     NSPasteboard.general.writeObjects([zip as NSURL])
                     self?.showToast("Copied project to clipboard")
                 } else {
-                    self?.showToast("Failed to copy project to clipboard")
+                    self?.showToast("Failed to copy project to clipboard", kind: .error)
                 }
             }
         }
