@@ -40,7 +40,16 @@ struct GeneralPanel: View {
                 if editor.project.canChangeScreenInset {
                     ToggleRow(title: "Inset", description: "Add inset around the screen.", isOn: Binding(
                         get: { style.inset.isOn },
-                        set: { on in editor.change { $0.style.inset = on ? .enabledDefault : InsetConfig(size: 0) } }
+                        set: { on in
+                            editor.change {
+                                if on {
+                                    let preferred = InsetPreference.stored
+                                    $0.style.inset = preferred.size > 0 ? preferred : .enabledDefault
+                                } else {
+                                    $0.style.inset.size = 0
+                                }
+                            }
+                        }
                     ))
                 }
                 if style.inset.isOn && editor.project.canChangeScreenInset {
@@ -70,6 +79,8 @@ struct GeneralPanel: View {
             // Privacy, the last section.
             SidebarSection(showsDivider: false) { PrivacySection(editor: editor) }
         }
+        .onAppear { InsetPreference.remember(style.inset) }
+        .onChange(of: style.inset) { _, inset in InsetPreference.remember(inset) }
     }
 
     @ViewBuilder
@@ -125,6 +136,21 @@ struct GeneralPanel: View {
             get: { style.background.gradient.hueDegrees },
             set: { newHue in editor.change { $0.style.background.gradient = $0.style.background.gradient.withHue(newHue) } }
         )
+    }
+}
+
+/// The last inset settings in use ("preferred-inset-settings"), restored when the inset is
+/// turned on again.
+enum InsetPreference {
+    private static let key = "preferred-inset-settings"
+
+    static var stored: InsetConfig {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(InsetConfig.self, from: $0) } ?? .enabledDefault
+    }
+
+    static func remember(_ inset: InsetConfig) {
+        guard inset.size > 0, let data = try? JSONEncoder().encode(inset) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 }
 
