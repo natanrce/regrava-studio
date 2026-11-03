@@ -711,21 +711,23 @@ struct SliceInspector: View {
                         }
                     }
                 }
-                SidebarSection {
-                    NamedField(name: "Cursor settings", description: "Change appearance of mouse cursor in this part of the recording.", togglable: true) {
-                        ToggleRow(title: "Hide cursor", isOn: Binding(
-                            get: { slice.hideCursor },
-                            set: { v in editor.updateSlice(sliceID) { $0.hideCursor = v } }
-                        ))
-                        if !slice.hideCursor {
-                            ToggleRow(
-                                title: "Disable smooth mouse movement",
-                                description: "This is useful, for example, when recording drop-down menus, where precise alignment is required.",
-                                isOn: Binding(
-                                    get: { slice.disableSmoothMouseMovement },
-                                    set: { v in editor.updateSlice(sliceID) { $0.disableSmoothMouseMovement = v } }
+                if recording.hasCursor {
+                    SidebarSection {
+                        NamedField(name: "Cursor settings", description: "Change appearance of mouse cursor in this part of the recording.", togglable: true) {
+                            ToggleRow(title: "Hide cursor", isOn: Binding(
+                                get: { slice.hideCursor },
+                                set: { v in editor.updateSlice(sliceID) { $0.hideCursor = v } }
+                            ))
+                            if !slice.hideCursor {
+                                ToggleRow(
+                                    title: "Disable smooth mouse movement",
+                                    description: "This is useful, for example, when recording drop-down menus, where precise alignment is required.",
+                                    isOn: Binding(
+                                        get: { slice.disableSmoothMouseMovement },
+                                        set: { v in editor.updateSlice(sliceID) { $0.disableSmoothMouseMovement = v } }
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }

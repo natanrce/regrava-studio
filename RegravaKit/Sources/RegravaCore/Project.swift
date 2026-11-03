@@ -228,6 +228,8 @@ public struct RecordingInfo: Codable, Hashable, Sendable {
 
     public var hasCamera: Bool { cameraFileName != nil }
     public var isExternalDeviceMode: Bool { mode == .externalDevice }
+    /// `hasCursor`: the mouse was tracked, which every recording but an iPhone or iPad one does.
+    public var hasCursor: Bool { !isExternalDeviceMode }
     public var hasExternalDeviceAudio: Bool { audioSources.contains(.externalDevice) }
 
     public var hasMicrophone: Bool { audioSources.contains(.microphone) }
