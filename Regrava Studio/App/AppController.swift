@@ -212,11 +212,12 @@ final class AppController {
 
     // MARK: Dock & shortcuts
 
-    /// Hidden Dock icon when "Hide Dock Icon" is on and nothing is open, or while recording with
-    /// "Hide Dock Icon" (while recording) on.
+    /// Hidden Dock icon when "Hide Dock Icon" is on and no project, Settings or onboarding is
+    /// open, or while recording with "Hide Dock Icon" (while recording) on.
     func applyDockIconPolicy() {
         let hideWhileRecording = recording.isRecording && preferences.hideAppDockIconWhileRecording
         let hideIdle = preferences.hideDockIcon && editors.isEmpty && widgets.isEmpty
+            && !SettingsWindowController.isOpen && !OnboardingWindowController.isShown
         NSApp.setActivationPolicy(hideWhileRecording || hideIdle ? .accessory : .regular)
     }
 

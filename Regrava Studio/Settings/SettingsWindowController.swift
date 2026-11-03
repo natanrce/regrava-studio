@@ -27,12 +27,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Whether the window is open; the Dock icon stays visible while it is.
+    private(set) static var isOpen = false
+
     func show(_ tab: SettingsTab = .general) {
         state.tab = tab
+        Self.isOpen = true
+        AppController.shared.applyDockIconPolicy()
         if window?.isVisible != true { window?.center() }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        Self.isOpen = false
+        DispatchQueue.main.async { AppController.shared.applyDockIconPolicy() }
     }
 }
 

@@ -141,12 +141,19 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     /// Closed with the close button: the permissions are no longer polled.
     func windowWillClose(_ notification: Notification) {
         model.stopPolling()
+        Self.isShown = false
+        DispatchQueue.main.async { AppController.shared.applyDockIconPolicy() }
     }
+
+    /// Whether onboarding is on screen; the Dock icon stays visible while it is.
+    private(set) static var isShown = false
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     func show() {
+        Self.isShown = true
+        AppController.shared.applyDockIconPolicy()
         model.startPolling()
         window?.center()
         showWindow(nil)
