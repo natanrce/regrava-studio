@@ -54,10 +54,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if Dialogs.confirm(title: "Finish recording?", message: "The recording will open in the editor.", confirm: "Finish", cancel: "Continue Recording") {
                 recording.requestFinish()
             }
-        } else if !flag {
-            recording.openPicker()
+        } else {
+            openPickerIfIdle()
         }
         return true
+    }
+
+    /// Switching to the app (⌘-Tab, clicking one of its windows) also brings the picker back.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !isRenderingSnapshots else { return }
+        openPickerIfIdle()
+    }
+
+    /// With no project open and nothing recording, activating the app opens the record picker.
+    private func openPickerIfIdle() {
+        let app = AppController.shared
+        guard !app.recording.isRecording, app.editors.isEmpty, app.widgets.isEmpty,
+              !app.recording.isPickerOpen, !OnboardingWindowController.isShown else { return }
+        app.recording.openPicker()
     }
 
     /// Dock menu. Projects opened from Finder or the Dock's recent documents.
