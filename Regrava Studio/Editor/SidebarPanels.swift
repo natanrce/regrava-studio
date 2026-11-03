@@ -265,6 +265,7 @@ struct CursorPanel: View {
     private var cursor: CursorConfig { editor.project.cursor }
 
     var body: some View {
+        let _ = CursorToggleMemory.note(cursor)
         VStack(alignment: .leading, spacing: 0) {
             HiddenCursorClipNote(editor: editor, resolver: editor.resolver)
             if cursor.hide {
@@ -282,7 +283,7 @@ struct CursorPanel: View {
                 SidebarSection {
                     ToggleRow(title: "Hide cursor if not moving", isOn: Binding(
                         get: { cursor.hideNotMovingAfterMs != nil },
-                        set: { on in editor.change { $0.cursor.hideNotMovingAfterMs = on ? 2000 : nil } }
+                        set: { on in editor.change { $0.cursor.hideNotMovingAfterMs = on ? CursorToggleMemory.hideNotMovingAfterMs : nil } }
                     ))
                     if let after = cursor.hideNotMovingAfterMs {
                         NestedPanel {
@@ -294,7 +295,7 @@ struct CursorPanel: View {
                     }
                     ToggleRow(title: "Loop cursor position", description: "Near the end of the video, cursor will move back to its initial position", isOn: Binding(
                         get: { cursor.loopPositionBeforeEndMs != nil },
-                        set: { on in editor.change { $0.cursor.loopPositionBeforeEndMs = on ? 1000 : nil } }
+                        set: { on in editor.change { $0.cursor.loopPositionBeforeEndMs = on ? CursorToggleMemory.loopPositionBeforeEndMs : nil } }
                     ))
                     if let loop = cursor.loopPositionBeforeEndMs {
                         NestedPanel {
@@ -399,6 +400,22 @@ struct CursorPanel: View {
     private var hideToggle: some View {
         ToggleRow(icon: "eye.slash", title: "Hide cursor", isOn: editor.binding(\.cursor.hide))
     }
+}
+
+/// The last durations used by the cursor toggles in this session, picked up from whatever
+/// project shows them; switching a toggle back on restores them.
+@MainActor
+enum CursorToggleMemory {
+    private static var lastHideNotMovingAfterMs = 2000.0
+    private static var lastLoopPositionBeforeEndMs = 1000.0
+
+    static func note(_ cursor: CursorConfig) {
+        if let ms = cursor.hideNotMovingAfterMs, ms != 0 { lastHideNotMovingAfterMs = ms }
+        if let ms = cursor.loopPositionBeforeEndMs, ms != 0 { lastLoopPositionBeforeEndMs = ms }
+    }
+
+    static var hideNotMovingAfterMs: Double { lastHideNotMovingAfterMs }
+    static var loopPositionBeforeEndMs: Double { lastLoopPositionBeforeEndMs }
 }
 
 /// Shown while the clip under the playhead hides the cursor; only this note redraws with the
