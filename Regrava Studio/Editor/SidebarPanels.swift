@@ -857,7 +857,13 @@ struct AudioPanel: View {
                                     )
                                 }
                             }
-                            if audio.muteMicrophone {
+                            // Muted with the webcam still shown: the video plays silent.
+                            if recording.hasCamera && !editor.project.camera.hide && audio.muteMicrophone {
+                                VStack(alignment: .leading, spacing: Theme.gap(2)) {
+                                    Callout(message: "Your selfie camera video is still visible, but it will be muted. Consider hiding it in camera settings.")
+                                    RSButton(title: "Hide camera", kind: .secondary) { editor.change { $0.camera.hide = true } }
+                                }
+                            } else if audio.muteMicrophone {
                                 Callout(icon: "speaker.slash.fill", message: "Microphone is muted.")
                             }
                         }
