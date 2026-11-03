@@ -182,4 +182,11 @@ public extension Project {
     /// `changeBorderRadius` / `changeInset`.
     var canChangeScreenBorderRadius: Bool { !(isUsingDeviceFrame || recording.isScreenContinuity || recording.isExternalDeviceMode && device.enableMockup) }
     var canChangeScreenInset: Bool { !isUsingDeviceFrame && !recording.isScreenContinuity && !recording.isExternalDeviceMode }
+
+    /// `showMouseCursor` / `useAutomaticZooms`: a recorded mouse, not on an iPhone or iPad.
+    var showsMouseCursor: Bool { !mouseEvents.isEmpty && !recording.isExternalDeviceMode }
+    var usesAutomaticZooms: Bool { !mouseEvents.isEmpty && !recording.isExternalDeviceMode }
+
+    /// `isCameraVisible`: a webcam recorded and not hidden.
+    var isCameraVisible: Bool { recording.hasCamera && !camera.hide }
 }

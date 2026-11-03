@@ -34,9 +34,9 @@ extension EditorModel {
     var railEntries: [SidebarRailEntry] {
         var entries = [
             SidebarRailEntry(root: .background, name: "General", icon: "inset.filled.square.dashed", key: "1"),
-            SidebarRailEntry(root: .cursor, name: "Cursor", icon: "cursorarrow", key: "2", disabledTooltip: project.mouseEvents.isEmpty ? "There is no mouse cursor recorded" : nil),
+            SidebarRailEntry(root: .cursor, name: "Cursor", icon: "cursorarrow", key: "2", disabledTooltip: project.showsMouseCursor ? nil : "There is no mouse cursor recorded"),
             SidebarRailEntry(root: .cameraLayout, name: "Camera Layout", icon: "inset.filled.rectangle.and.person.filled", key: "3", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
-            SidebarRailEntry(root: .cameraStyle, name: "Camera Style", icon: "person.fill.viewfinder", key: "4", disabledTooltip: project.recording.hasCamera ? nil : "No camera recorded"),
+            SidebarRailEntry(root: .cameraStyle, name: "Camera Style", icon: "person.fill.viewfinder", key: "4", disabledTooltip: project.isCameraVisible ? nil : project.recording.hasCamera ? "Camera is hidden (see Camera Layout)" : "No camera recorded"),
             SidebarRailEntry(root: .captions, name: "Captions", icon: "captions.bubble", key: "5", disabledTooltip: project.recording.hasMicrophone ? nil : "No microphone recorded"),
             SidebarRailEntry(root: .transcript, name: "Edit by transcript", icon: "text.quote", key: "6", disabledTooltip: project.recording.hasMicrophone ? nil : "No microphone recorded"),
             SidebarRailEntry(root: .audio, name: "Audio", icon: "speaker.wave.1", key: "7"),
