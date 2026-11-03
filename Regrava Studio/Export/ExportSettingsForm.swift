@@ -10,10 +10,11 @@ struct ExportSettingsForm: View {
     /// Stage aspect ratio used for the "<w>px × <h>px" label.
     var aspectRatio: Double?
 
-    private var settings: Binding<ExportSettings> {
+    /// Each control shows the resolved value and stores only the field it changes.
+    private func field<Value>(_ keyPath: WritableKeyPath<ExportSettings, Value>) -> Binding<Value> {
         Binding(
-            get: { store.current },
-            set: { store.current = $0.normalized(target: target) }
+            get: { store.current[keyPath: keyPath] },
+            set: { value in store.update { $0[keyPath: keyPath] = value } }
         )
     }
 
@@ -29,7 +30,7 @@ struct ExportSettingsForm: View {
                     )
                 }
                 NamedField(name: "Frame rate", icon: "camera.aperture") {
-                    FrameRateDropdown(options: s.format.fpsOptions, selection: settings.fps)
+                    FrameRateDropdown(options: s.format.fpsOptions, selection: field(\.fps))
                 }
             }
             row {
@@ -39,7 +40,7 @@ struct ExportSettingsForm: View {
                             options: s.format.resolutionOptions,
                             label: { ExportSettings.resolutionLabel($0) },
                             isDisabled: { !s.allowedResolutions.contains($0) },
-                            selection: settings.height
+                            selection: field(\.height)
                         )
                         if let aspectRatio {
                             let size = s.outputSize(aspectRatio: aspectRatio)
@@ -70,7 +71,7 @@ struct ExportSettingsForm: View {
                             options: s.format.qualityOptions,
                             label: { $0.label },
                             description: { Self.qualityDescription($0) },
-                            selection: settings.quality
+                            selection: field(\.quality)
                         )
                         Text("Quality setting does not impact export speed.")
                             .font(Theme.Typo.label)
@@ -83,7 +84,10 @@ struct ExportSettingsForm: View {
                             options: s.codecOptions(target: target),
                             label: { $0.label },
                             description: { Self.codecDescription($0) },
-                            selection: settings.codec
+                            selection: Binding(
+                                get: { store.current.normalized(target: target).codec },
+                                set: { value in store.update { $0.codec = value } }
+                            )
                         )
                     }
                 }
@@ -95,7 +99,7 @@ struct ExportSettingsForm: View {
                     label: { $0.label },
                     description: { Self.profileDescription($0) },
                     descriptionMinLines: 3,
-                    selection: settings.proresProfile
+                    selection: field(\.proresProfile)
                 )
             }
         case .gif:
@@ -103,12 +107,12 @@ struct ExportSettingsForm: View {
                 ToggleRow(
                     title: "High quality",
                     description: "Keeps more detail and fewer compression artifacts, for a larger file. Turn off for the best balance of file size and quality.",
-                    isOn: Binding(get: { s.quality == .studio }, set: { settings.wrappedValue.quality = $0 ? .studio : .socialMedia })
+                    isOn: Binding(get: { s.quality == .studio }, set: { value in store.update { $0.quality = value ? .studio : .socialMedia } })
                 )
                 ToggleRow(
                     title: "Disable loop",
                     description: "Exported GIF will only play once and then stop",
-                    isOn: settings.gifDisableLoop
+                    isOn: field(\.gifDisableLoop)
                 )
             }
         }

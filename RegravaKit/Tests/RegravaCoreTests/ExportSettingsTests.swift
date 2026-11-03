@@ -57,6 +57,27 @@ import Testing
         #expect(ExportSettings.outputSize(aspectRatio: 21.0 / 9, height: 1080) == Size2(width: 2520, height: 1080))
     }
 
+    @Test func storeKeepsChoicesHiddenByOthers() {
+        var store = ExportSettingsStore()
+        store.update { $0.height = 2160 }
+        store.update { $0.quality = .webHigh }
+        #expect(store.current.height == 1080)
+        #expect(store.stored.height == 2160)
+        store.update { $0.fps = 24 }
+        #expect(store.stored.height == 2160)
+        store.update { $0.quality = .studio }
+        #expect(store.current.height == 2160)
+        #expect(store.current.fps == 24)
+    }
+
+    @Test func storeKeepsCodecAcrossTargets() {
+        var store = ExportSettingsStore()
+        store.update { $0.codec = .both }
+        #expect(store.current.codec == .both)
+        #expect(store.current.normalized(target: .clipboard).codec == .h264)
+        #expect(store.current.normalized(target: .file).codec == .both)
+    }
+
     @Test func storeRemembersSettingsPerFormat() {
         var store = ExportSettingsStore()
         var gif = store.perFormat[.gif]!

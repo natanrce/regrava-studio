@@ -140,8 +140,10 @@ public struct ExportSettings: Codable, Hashable, Sendable {
         target == .file ? [.h264, .h265, .both] : [.h264, .h265]
     }
 
-    /// Snaps every field to a value valid for the format (nearest lower option, else highest).
-    public func normalized(target: ExportTarget? = nil) -> ExportSettings {
+    /// The values in effect for the stored ones: quality falls back to the format's first,
+    /// frame rate and height snap to the nearest lower option, else the highest. The codec is
+    /// kept as stored.
+    public var resolved: ExportSettings {
         var s = self
         func snap(_ value: Int, _ options: [Int]) -> Int {
             options.filter { $0 <= value }.max() ?? options.max() ?? value
@@ -149,6 +151,12 @@ public struct ExportSettings: Codable, Hashable, Sendable {
         s.fps = snap(fps, format.fpsOptions)
         if !format.qualityOptions.contains(s.quality) { s.quality = format.qualityOptions[0] }
         s.height = snap(height, s.allowedResolutions)
+        return s
+    }
+
+    /// `resolved`, with a codec the target offers.
+    public func normalized(target: ExportTarget? = nil) -> ExportSettings {
+        var s = resolved
         if !codecOptions(target: target).contains(s.codec) { s.codec = .h264 }
         return s
     }
@@ -221,12 +229,24 @@ public struct ExportSettingsStore: Codable, Hashable, Sendable {
         linkVisibility = .public
     }
 
+    /// The settings of the preferred format, resolved when read. The stored values stay as
+    /// chosen, so a choice another one hid (4K under a web quality) comes back with it.
     public var current: ExportSettings {
-        get { perFormat[preferredFormat] ?? .defaults(for: preferredFormat) }
+        get { stored.resolved }
         set {
             preferredFormat = newValue.format
-            perFormat[newValue.format] = newValue.normalized()
+            perFormat[newValue.format] = newValue
         }
+    }
+
+    /// The preferred format's settings as stored.
+    public var stored: ExportSettings { perFormat[preferredFormat] ?? .defaults(for: preferredFormat) }
+
+    /// Changes fields of the preferred format's stored settings, leaving the others as they are.
+    public mutating func update(_ change: (inout ExportSettings) -> Void) {
+        var settings = stored
+        change(&settings)
+        perFormat[preferredFormat] = settings
     }
 
     public mutating func select(format: ExportFormat) {
