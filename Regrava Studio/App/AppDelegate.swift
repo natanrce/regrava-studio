@@ -78,24 +78,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let app = AppController.shared
         let recording = app.recording
+        // Items are grouped in the order their group first appears, without icons; items that
+        // cannot apply are left out.
         let menu = MenuBuilder()
+        menu.group("")
+        menu.item(recording.isRecording ? "Stop recording" : "New recording...") {
+            recording.isRecording ? recording.requestFinish() : recording.openPicker()
+        }
         if recording.isRecording {
-            menu.item("Stop recording") { recording.requestFinish() }
             menu.item("Finish recording") { recording.requestFinish() }
             menu.item("Cancel recording") { recording.requestCancel() }
             menu.item("Restart recording") { recording.requestRestart() }
-            menu.group("settings")
         }
-        // Dock menu order.
+        menu.group("settings")
         menu.item("Show Regrava Studio in Dock", checked: !Preferences.shared.hideDockIcon) {
             Preferences.shared.hideDockIcon.toggle()
             app.applyDockIconPolicy()
         }
-        menu.item("Open last project", enabled: app.lastProjectURL != nil) { app.openLastProject() }
-        menu.item("Show settings") { SettingsWindowController.shared.show() }
-        if !recording.isRecording {
-            menu.item("New recording...") { recording.openPicker() }
+        if app.lastProjectURL != nil {
+            menu.group("open")
+            menu.item("Open last project") { app.openLastProject() }
         }
+        menu.group("quit")
+        menu.item("Show settings") { SettingsWindowController.shared.show() }
         return menu.menu
     }
 
