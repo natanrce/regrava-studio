@@ -186,17 +186,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let export = NSMenu(title: "Export")
         export.identifier = NSUserInterfaceItemIdentifier("export")
         export.delegate = self
-        add(to: export, "Open recent Clipboard exports") { ExportController.revealClipboardExports() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        export.addItem(.separator())
-        project(export, "Export...", key: "e", modifiers: [.command, .shift], icon: "square.and.arrow.up.fill", available: { !$0.exports.isExporting }) { $0.openExportPicker() }
-        export.addItem(.separator())
+        project(export, "Export...", key: "e", modifiers: [.command, .shift], icon: "square.and.arrow.up.fill", available: { !$0.exports.isExporting && !$0.exports.isPickerOpen }) { $0.openExportPicker() }
         project(export, "Quick export to clipboard", key: "c", modifiers: [.command, .option], icon: "video.bubble", available: { !$0.exports.isExporting }) { $0.quickExport(.clipboard) }
-        project(export, "Quick export to file...", key: "s", modifiers: [.command, .option], icon: "square.and.arrow.up.fill", available: { !$0.exports.isExporting }) { $0.quickExport(.file) }
+        // Not listed in the menu; its shortcut still runs it.
+        let quickToFile = project(export, "Quick export to file...", key: "s", modifiers: [.command, .option], icon: "square.and.arrow.up.fill", available: { !$0.exports.isExporting }) { $0.quickExport(.file) }
+        (quickToFile as? ClosureMenuItem)?.hidesWhenUnavailable = false
+        quickToFile.isHidden = true
+        quickToFile.allowsKeyEquivalentWhenHidden = true
         add(to: export, "Show previous clipboard exports") { ExportController.revealClipboardExports() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        export.addItem(.separator())
+        project(export, "Export current frame as image...", icon: "square.and.arrow.up") { $0.exportCurrentFrame() }
         export.addItem(.separator())
         project(export, "Extract raw recording files...", icon: "square.and.arrow.down") { $0.extractRawRecordingFiles() }
         export.addItem(.separator())
-        project(export, "Export current frame as image...", icon: "square.and.arrow.up") { $0.exportCurrentFrame() }
+        add(to: export, "Open recent Clipboard exports") { ExportController.revealClipboardExports() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
         addSubmenu(export, title: "Export", to: main)
 
         let window = NSMenu(title: "Window")
