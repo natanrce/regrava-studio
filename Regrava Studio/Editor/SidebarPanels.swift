@@ -309,7 +309,7 @@ struct CursorPanel: View {
                                         editor.seek(to: editor.durationMs - v)
                                     }
                                 ),
-                                range: 1000...4000, step: 100, preview: { seconds($0, decimals: 0) }, resetValue: 1000
+                                range: 1000...4000, step: 100, preview: { seconds($0) }, resetValue: 1000
                             )
                         }
                     }
@@ -367,7 +367,7 @@ struct CursorPanel: View {
                                         editor.seek(to: editor.durationMs - v)
                                     }
                                 ),
-                                range: 0...5000, step: 50, preview: { seconds($0, decimals: 0) }, resetValue: 0
+                                range: 0...5000, step: 50, preview: { seconds($0) }, resetValue: 0
                             )
                         }
                         ToggleRow(
@@ -379,7 +379,7 @@ struct CursorPanel: View {
                             )
                         )
                         if cursor.removeShakeThreshold != 0 {
-                            RSSlider(value: editor.binding(\.cursor.removeShakeThreshold), range: 100...2000, step: 20, preview: { String(Int($0)) }, resetValue: 500)
+                            SliderField(name: "Remove cursor shakes threshold", value: editor.binding(\.cursor.removeShakeThreshold), range: 100...2000, step: 20, preview: { String(Int($0.rounded())) }, resetValue: 500)
                         }
                         ToggleRow(
                             title: "Optimize cursor changes",
