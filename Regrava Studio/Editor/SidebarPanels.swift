@@ -31,10 +31,11 @@ struct GeneralPanel: View {
                 backgroundDetails
             }
             SidebarSection {
-                SliderField(name: "Padding", value: editor.binding(\.style.paddingRatio), range: 0...0.25, preview: { percent($0, decimals: 1) }, resetValue: 0.1)
-                // Hidden for device recordings (`changeBorderRadius` / `changeInset`).
-                if editor.project.canChangeScreenBorderRadius {
-                    SliderField(name: "Screen rounded corners", value: editor.binding(\.style.cornerRadius), range: 0...128, step: 1, preview: { String(format: "%.1f", $0) }, resetValue: 16)
+                SliderField(name: "Padding", value: editor.binding(\.style.paddingRatio), range: 0...0.25, step: 0.001, preview: { percent($0, decimals: 1) }, resetValue: 0.1)
+                SplitPaddingNote(editor: editor, resolver: editor.resolver)
+                // Only with padding; hidden for device recordings (`changeBorderRadius`).
+                if style.paddingRatio > 0 && editor.project.canChangeScreenBorderRadius {
+                    SliderField(name: "Screen rounded corners", value: editor.binding(\.style.cornerRadius), range: 0...128, step: 1, preview: { String(format: "%.1f", $0) }, resetValue: 16, suggestedValues: [0, 12, 16, 20, 26])
                 }
                 if editor.project.canChangeScreenInset {
                     ToggleRow(title: "Inset", description: "Add inset around the screen.", isOn: Binding(
@@ -124,6 +125,29 @@ struct GeneralPanel: View {
             get: { style.background.gradient.hueDegrees },
             set: { newHue in editor.change { $0.style.background.gradient = $0.style.background.gradient.withHue(newHue) } }
         )
+    }
+}
+
+/// Under Padding while the layout at the playhead (or the default one) is a split screen
+/// without padding; only this note redraws with the playhead.
+private struct SplitPaddingNote: View {
+    @ObservedObject var editor: EditorModel
+    @EnvironmentObject private var clock: PlaybackClock
+    var resolver: TimeResolver
+
+    var body: some View {
+        let project = editor.project
+        let range = project.enabledLayout(atSource: resolver.playbackToSource(clock.currentTimeMs))
+        if (range?.type ?? project.defaultLayout.type) == .splitScreen && !project.defaultLayout.splitScreen.enablePadding {
+            Callout(kind: .secondary, icon: nil, message: "Padding isn't applied because the current split-screen layout has padding turned off.", link: ("Edit layout", {
+                if let range, range.type == .splitScreen {
+                    // The range's inspector shows the split layout's settings.
+                    editor.setSidebarItem(.layout(range.id))
+                } else {
+                    editor.openSidebar(.cameraLayout)
+                }
+            }))
+        }
     }
 }
 

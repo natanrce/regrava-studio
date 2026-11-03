@@ -258,13 +258,34 @@ struct Callout: View {
     var icon: String? = "exclamationmark.triangle.fill"
     var title: String?
     var message: String
+    /// An underlined link after the message.
+    var link: (title: String, action: () -> Void)?
+
+    private static let linkURL = URL(string: "callout:link")!
+
+    private var text: AttributedString {
+        var text = AttributedString(message)
+        if let link {
+            var anchor = AttributedString(link.title)
+            anchor.link = Self.linkURL
+            anchor.underlineStyle = .single
+            anchor.foregroundColor = Theme.Colors.text.opacity(0.7)
+            text += AttributedString(" ") + anchor
+        }
+        return text
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.gap(1)) {
             if let icon { Image(systemName: icon).foregroundStyle(kind == .warning ? Theme.Colors.warning : Theme.Colors.tertiary) }
             VStack(alignment: .leading, spacing: 2) {
                 if let title { Text(title).font(Theme.Typo.copy.weight(.semibold)) }
-                Text(message).font(Theme.Typo.label).foregroundStyle(Theme.Colors.text.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
+                Text(text).font(Theme.Typo.label).foregroundStyle(Theme.Colors.text.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
+                    .environment(\.openURL, OpenURLAction { url in
+                        guard url == Self.linkURL, let link else { return .systemAction }
+                        link.action()
+                        return .handled
+                    })
             }
         }
         .padding(12)

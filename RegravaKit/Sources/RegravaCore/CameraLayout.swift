@@ -671,3 +671,11 @@ public struct LayoutTimeline: Sendable {
         return range.type == .screenOnly
     }
 }
+
+public extension Project {
+    /// The layout range at a recording time (ends included), unless it is disabled.
+    func enabledLayout(atSource sourceMs: Double) -> CameraLayoutRange? {
+        guard let range = cameraLayouts.first(where: { $0.startMs <= sourceMs && sourceMs <= $0.endMs }), !range.isDisabled else { return nil }
+        return range
+    }
+}

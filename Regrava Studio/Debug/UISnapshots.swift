@@ -154,7 +154,8 @@ enum UISnapshots {
         window.orderFrontRegardless()
         let states: [(String, () -> Void)] = [
             ("general", { controller.model.openSidebar(.background) }),
-            ("cursor", { controller.model.openSidebar(.cursor) }),
+            ("general-split", { controller.model.change { $0.defaultLayout.type = .splitScreen } }),
+            ("cursor", { controller.model.change { $0.defaultLayout.type = .cameraOverlay }; controller.model.openSidebar(.cursor) }),
             ("animations", { controller.model.openSidebar(.animation) }),
             ("audio", { controller.model.openSidebar(.audio) }),
             ("camera-layout", { controller.model.openSidebar(.cameraLayout) }),
@@ -225,6 +226,10 @@ enum UISnapshots {
         controller.model.change { $0.camera.hideDuringSilenceMs = 5000 }
         write(CameraLayoutPanel(editor: controller.model).padding(24).background(Theme.Colors.backgroundAccent), width: 360, height: nil, to: directory.appendingPathComponent("panel-camera-layout.png"))
         controller.model.change { $0.camera.hideDuringSilenceMs = nil }
+        let saved = controller.model.project
+        controller.model.change { $0.defaultLayout.type = .splitScreen; $0.cameraLayouts = []; $0.recording.mode = .display; $0.style.inset = .enabledDefault }
+        write(GeneralPanel(editor: controller.model).environmentObject(controller.model.clock).padding(24).background(Theme.Colors.backgroundAccent), width: 360, height: nil, to: directory.appendingPathComponent("panel-general-split.png"))
+        controller.model.change { $0 = saved }
         let crop = CameraCropModel(editor: controller.model)
         crop.state.setCrop(Rect2(x: 500, y: 150, width: 800, height: 700))
         write(CameraCropView(model: crop, close: {}).background(Theme.Colors.background), width: 960, height: 720, to: directory.appendingPathComponent("camera-crop.png"))
