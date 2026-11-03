@@ -258,6 +258,7 @@ final class EditorModel: ObservableObject {
         player.actionAtItemEnd = .pause
         exports.onToast = { [weak self] in self?.showToast($0, kind: .error) }
         exports.tasks = tasks
+        exports.onWillStart = { [weak self] in self?.cancelSpeechModelRenders() }
         registerMediaKeys()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -324,6 +325,11 @@ final class EditorModel: ObservableObject {
                 if !(error is CancellationError) { self.microphoneRenderProgress[next] = nil }
             }
         }
+    }
+
+    /// Starting an export stops the microphone renders that run a speech model.
+    func cancelSpeechModelRenders() {
+        for (preset, task) in microphoneRenderTasks where preset.needsSpeechModels { task.cancel() }
     }
 
     /// Re-clicking the chosen non-Standard mode pauses or resumes its render.

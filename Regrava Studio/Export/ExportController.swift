@@ -22,6 +22,9 @@ final class ExportController: ObservableObject {
     /// The project's background tasks: listed under the progress, and the time-left estimate
     /// waits while they run.
     weak var tasks: BackgroundTasks?
+    /// Run just before an export starts (stops speech-model processing).
+    var onWillStart: (() -> Void)?
+
     /// Exports of every window, in start order; only the first one encodes, the others wait.
     private static var queue: [ObjectIdentifier] = []
 
@@ -76,6 +79,7 @@ final class ExportController: ObservableObject {
         }
 
         isPickerOpen = false
+        onWillStart?()
         let id = ObjectIdentifier(self)
         Self.queue.append(id)
         job = Job(projectName: projectName, outputPath: outputURL.path, phase: Self.queue.first == id ? .exporting : .waiting)
