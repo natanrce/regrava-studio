@@ -135,7 +135,8 @@ private struct GeneralSettings: View {
                 )
                 ToggleRow(
                     title: "Hide Dock Icon",
-                    description: "Will hide the Dock icon when there are no opened projects and no recordings in progress. You can still access Regrava Studio from the menu bar icon.",
+                    richDescription: Text("Will hide the Dock icon when there are no opened projects and no recordings in progress. You can still access Regrava Studio from the menu bar ")
+                        + Text(Image(systemName: "record.circle")) + Text(" icon."),
                     isOn: $preferences.hideDockIcon
                 )
             }),
@@ -182,7 +183,8 @@ private struct RecordingSettings: View {
             )
             NamedField(
                 name: "Maximum camera resolution",
-                description: "Max resolution at which your webcam will be recorded (if your webcam supports it).\n\nHigher resolutions improve video quality but may impact performance during recording."
+                description: "Max resolution at which your webcam will be recorded (if your webcam supports it).\n\nHigher resolutions improve video quality but may impact performance during recording.",
+                horizontal: true
             ) {
                 SegmentedPicker(
                     options: [720, 1080, 2160],
@@ -264,17 +266,17 @@ private struct ShortcutsSettings: View {
         var action: ShortcutAction
         var title: String
         var icon: String
-        var description: String?
+        var description: Text?
     }
 
     private let recordingGroups: [[Row]] = [
         [
             Row(action: .recordStartStop, title: "Start new Recording / Finish recording", icon: "record.circle",
-                description: "This shortcut will open new recording picker from anywhere in the system and it will also stop current recording. Make sure it is not conflicting with other global shortcuts."),
+                description: Text("This shortcut will open new recording picker from anywhere in the system and it will also stop current recording. Make sure it is not conflicting with other global shortcuts.")),
             Row(action: .pauseResume, title: "Resume/Pause recording in progress", icon: "playpause"),
             Row(action: .restartRecording, title: "Restart recording in progress", icon: "arrow.counterclockwise"),
             Row(action: .addRecordingMarker, title: "Create recording flag", icon: "flag",
-                description: "Press this shortcut while recording to create a recording flag. Later, you will see moments marked with flags on the video timeline."),
+                description: Text("Press this shortcut while recording to create a recording flag. Later, you will see moments marked with flags as ") + Text(Image(systemName: "flag")) + Text(" on the video timeline.")),
         ],
         [
             Row(action: .recordDisplay, title: "Record entire display", icon: "dock.rectangle"),
@@ -287,7 +289,7 @@ private struct ShortcutsSettings: View {
         ],
         [
             Row(action: .toggleRecordingWidget, title: "Show/Hide recording controls", icon: "rectangle.dashed.badge.record",
-                description: "While recording is in progress, will show widget allowing you to finish, cancel or restart recording."),
+                description: Text("While recording is in progress, will show widget allowing you to finish, cancel or restart recording.")),
         ],
     ]
 
@@ -311,6 +313,7 @@ private struct ShortcutsSettings: View {
                 icon: { $0 == "recording" ? "record.circle" : "play.circle" },
                 selection: $section
             )
+            .fixedSize()
             .frame(maxWidth: .infinity)
             let groups = section == "recording" ? recordingGroups : editingGroups
             VStack(alignment: .leading, spacing: Theme.gap(3)) {
@@ -324,7 +327,7 @@ private struct ShortcutsSettings: View {
                                         Text(row.title).font(Theme.Typo.copy)
                                     }
                                     if let description = row.description {
-                                        Text(description)
+                                        description
                                             .font(Theme.Typo.label)
                                             .foregroundStyle(Theme.Colors.tertiary)
                                             .fixedSize(horizontal: false, vertical: true)

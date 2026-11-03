@@ -186,6 +186,8 @@ struct ToggleRow: View {
     var icon: String?
     var title: String
     var description: String?
+    /// A description with inline symbols, shown instead of `description`.
+    var richDescription: Text? = nil
     /// Shows a two-option segmented control with these labels instead of the switch.
     var labels: (off: String, on: String)?
     @Binding var isOn: Bool
@@ -197,8 +199,8 @@ struct ToggleRow: View {
                     if let icon { Image(systemName: icon).font(.system(size: 14)) }
                     Text(title).font(Theme.Typo.copy)
                 }
-                if let description {
-                    Text(description)
+                if let text = richDescription ?? description.map({ Text($0) }) {
+                    text
                         .font(Theme.Typo.label)
                         .foregroundStyle(Theme.Colors.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
