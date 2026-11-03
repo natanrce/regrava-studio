@@ -588,15 +588,18 @@ struct ZoomInspector: View {
                 SidebarSection {
                     NamedField(name: "Zoom position") {
                         VStack(alignment: .leading, spacing: Theme.gap(1)) {
-                            SegmentedPicker(
-                                options: ZoomMode.allCases,
-                                label: { $0 == .auto ? "Auto" : "Manual" },
-                                icon: { $0 == .auto ? "wand.and.sparkles" : "scope" },
-                                description: { $0 == .auto ? "Zoomed camera will automatically try to keep the mouse cursor visible." : "Drag the dot to choose what to zoom in on.\n⌘-drag to turn off snapping." },
-                                descriptionMinLines: 2,
-                                isWide: true,
-                                selection: editor.zoomBinding(zoomID, \.mode)
-                            )
+                            // Auto needs a recorded mouse (not on iPhone or iPad).
+                            if editor.project.usesAutomaticZooms {
+                                SegmentedPicker(
+                                    options: ZoomMode.allCases,
+                                    label: { $0 == .auto ? "Auto" : "Manual" },
+                                    icon: { $0 == .auto ? "wand.and.sparkles" : "scope" },
+                                    description: { $0 == .auto ? "Zoomed camera will automatically try to keep the mouse cursor visible." : "Drag the dot to choose what to zoom in on.\n⌘-drag to turn off snapping." },
+                                    descriptionMinLines: 2,
+                                    isWide: true,
+                                    selection: editor.zoomBinding(zoomID, \.mode)
+                                )
+                            }
                             if zoom.mode == .manual {
                                 DotPicker(point: editor.zoomBinding(zoomID, \.manualTarget), aspectRatio: editor.project.croppedVideoSize.aspectRatio) {
                                     if let still { Image(nsImage: still).resizable() } else { Theme.Colors.lighterBg }
