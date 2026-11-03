@@ -351,9 +351,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 recording.isRecording ? recording.requestFinish() : recording.openPicker()
             }
             builder.group("recording")
-            builder.item("Record display", icon: "dock.rectangle", enabled: !recording.isRecording, shortcut: shortcuts[.recordDisplay] ?? nil) { recording.openPicker(preselect: .display) }
-            builder.item("Record window", icon: "macwindow", enabled: !recording.isRecording, shortcut: shortcuts[.recordWindow] ?? nil) { recording.openPicker(preselect: .window) }
-            builder.item("Record area", icon: "square.dashed", enabled: !recording.isRecording, shortcut: shortcuts[.recordArea] ?? nil) { recording.openPicker(preselect: .area) }
+            builder.item("Record display", icon: "dock.rectangle", shortcut: shortcuts[.recordDisplay] ?? nil) { recording.openPicker(preselect: .display) }
+            builder.item("Record window", icon: "macwindow", shortcut: shortcuts[.recordWindow] ?? nil) { recording.openPicker(preselect: .window) }
+            builder.item("Record area", icon: "square.dashed", shortcut: shortcuts[.recordArea] ?? nil) { recording.openPicker(preselect: .area) }
             builder.group("after")
             builder.header("After Recording")
             for action in [AfterRecordingAction.createProject, .exportAndCopyToClipboard, .exportAndSaveToFile] {
