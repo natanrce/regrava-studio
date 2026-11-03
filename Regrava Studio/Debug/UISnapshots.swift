@@ -206,6 +206,9 @@ enum UISnapshots {
             ("layout-tool", { controller.model.sidebarItem = nil; controller.model.armOrAddLayout(.cameraOverlay) }),
             ("slice", { controller.model.isAddLayoutToolArmed = false
                  if let clip = controller.model.project.slices.dropFirst().first { controller.model.openSlice(clip.id) } }),
+            ("mask-tool", { controller.model.sidebarItem = nil; controller.model.isAddMaskToolArmed = true }),
+            ("toast", { controller.model.isAddMaskToolArmed = false
+                 controller.model.showToast("Something went wrong when initializing export (test)", kind: .error) }),
         ]
         for (name, apply) in states {
             controller.model.isCommandMenuOpen = false
