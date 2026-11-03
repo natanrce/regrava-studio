@@ -116,19 +116,31 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     // MARK: Shortcuts
 
     private func installKeyMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             guard let self, let window = self.window, event.window === window else { return event }
-            if window.firstResponder is NSTextView { return event }
             if event.type == .flagsChanged {
-                // Holding ⌥ activates the split tool temporarily.
-                let option = event.modifierFlags.contains(.option)
-                if option != self.optionHeld {
-                    self.optionHeld = option
-                    self.model.isSplitToolActive = option
-                }
+                self.handleAltHold(event)
                 return event
             }
+            // Holding ⌥ alone turns the split tool on; any other key press or release turns it off.
+            if self.optionHeld {
+                self.optionHeld = false
+                self.model.isSplitToolActive = false
+            }
+            guard event.type == .keyDown else { return event }
+            if window.firstResponder is NSTextView { return event }
             return self.handle(event) ? nil : event
+        }
+    }
+
+    private func handleAltHold(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if optionHeld {
+            optionHeld = false
+            model.isSplitToolActive = false
+        } else if flags == [.option], event.keyCode == 58 || event.keyCode == 61 {
+            optionHeld = true
+            model.isSplitToolActive = true
         }
     }
 
