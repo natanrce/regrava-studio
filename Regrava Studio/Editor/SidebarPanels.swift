@@ -266,6 +266,7 @@ struct CursorPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HiddenCursorClipNote(editor: editor, resolver: editor.resolver)
             if cursor.hide {
                 hideToggle
             } else {
@@ -397,6 +398,25 @@ struct CursorPanel: View {
 
     private var hideToggle: some View {
         ToggleRow(icon: "eye.slash", title: "Hide cursor", isOn: editor.binding(\.cursor.hide))
+    }
+}
+
+/// Shown while the clip under the playhead hides the cursor; only this note redraws with the
+/// playhead.
+private struct HiddenCursorClipNote: View {
+    @ObservedObject var editor: EditorModel
+    @EnvironmentObject private var clock: PlaybackClock
+    var resolver: TimeResolver
+
+    var body: some View {
+        let project = editor.project
+        if let index = project.sliceIndex(atSource: resolver.playbackToSource(clock.currentTimeMs)), project.slices[index].hideCursor {
+            let id = project.slices[index].id
+            SidebarSection {
+                Callout(icon: nil, message: "Cursor is hidden in this part of the recording, so you will not see changes you make to it.")
+                RSButton(title: "Open clip settings", kind: .secondary) { editor.setSidebarItem(.slice(id)) }
+            }
+        }
     }
 }
 
