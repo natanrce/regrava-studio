@@ -67,6 +67,7 @@ struct EditorView: View {
         .overlay {
             ToastHost(editor: editor)
         }
+        .editorFileDrops(editor)
     }
 }
 
