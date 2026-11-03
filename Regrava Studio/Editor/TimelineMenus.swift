@@ -284,7 +284,7 @@ extension EditorModel {
     }
 
     /// The zoom level becomes the default for new zooms after 1 s without changes.
-    private func rememberDefaultZoomLevel(_ level: Double) {
+    func rememberDefaultZoomLevel(_ level: Double) {
         defaultZoomLevelTask?.cancel()
         defaultZoomLevelTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)

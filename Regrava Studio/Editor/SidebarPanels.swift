@@ -611,7 +611,13 @@ struct ZoomInspector: View {
                     SliderField(
                         name: "Zoom level",
                         description: "How close to zoom on the cursor during this zoom phase",
-                        value: editor.zoomBinding(zoomID, \.scale),
+                        value: Binding(
+                            get: { zoom.scale },
+                            set: { level in
+                                editor.updateZoom(zoomID) { $0.scale = level }
+                                editor.rememberDefaultZoomLevel(level)
+                            }
+                        ),
                         range: 1...4,
                         step: 0.01,
                         preview: { percent($0) },
