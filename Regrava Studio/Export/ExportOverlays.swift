@@ -164,7 +164,7 @@ private struct ExportStatusContent: View {
             VStack(spacing: Theme.gap(4)) {
                 VStack(spacing: Theme.gap(1)) {
                     HStack(spacing: 0) {
-                        Text(job.error != nil ? "Export failed" : "Exporting video")
+                        Text(job.error != nil ? "Export failed" : job.phase == .waiting ? "Waiting for another export to finish" : "Exporting video")
                         Text("\u{00a0}•\u{00a0}")
                         Text(ExportProgressText.percent(job.progress, decimals: decimals))
                         if let path = job.outputPath {

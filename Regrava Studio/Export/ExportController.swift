@@ -8,8 +8,11 @@ import SwiftUI
 @MainActor
 final class ExportController: ObservableObject {
     struct Job {
+        enum Phase { case waiting, exporting }
+
         var projectName: String
         var outputPath: String?
+        var phase: Phase = .exporting
         var progress: Double = 0
         var startedAt = Date()
         var error: String?
@@ -19,6 +22,8 @@ final class ExportController: ObservableObject {
     /// The project's background tasks: listed under the progress, and the time-left estimate
     /// waits while they run.
     weak var tasks: BackgroundTasks?
+    /// Exports of every window, in start order; only the first one encodes, the others wait.
+    private static var queue: [ObjectIdentifier] = []
 
     @Published var isPickerOpen = false
     @Published private(set) var job: Job?
@@ -71,11 +76,16 @@ final class ExportController: ObservableObject {
         }
 
         isPickerOpen = false
-        job = Job(projectName: projectName, outputPath: outputURL.path)
+        let id = ObjectIdentifier(self)
+        Self.queue.append(id)
+        job = Job(projectName: projectName, outputPath: outputURL.path, phase: Self.queue.first == id ? .exporting : .waiting)
         dockProgress.show(0)
         // The controller is main-actor isolated; holding it strongly for the export is fine.
         task = Task {
+            defer { Self.queue.removeAll { $0 == id } }
             do {
+                while Self.queue.first != id { try await Task.sleep(nanoseconds: 100_000_000) }
+                job?.phase = .exporting
                 let cursors = CursorLibrary.make(project: project, bundle: videoURL.deletingLastPathComponent())
                 let files = try await ProjectExporter.export(
                     project: project, videoURL: videoURL, settings: settings, target: target, to: outputURL, cursors: cursors
