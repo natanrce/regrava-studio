@@ -256,7 +256,7 @@ private struct PreviewSpace: View {
             let scale = min(available.width / canvas.width, maxHeight / canvas.height)
             let size = CGSize(width: canvas.width * scale, height: canvas.height * scale)
             VStack(spacing: Theme.gap(1)) {
-                LayoutControls(editor: editor, preferences: preferences, availableHeight: available.height)
+                LayoutControls(editor: editor, preferences: preferences)
                     .frame(width: max(size.width, 420))
                 ZStack {
                     PlayerSurface(player: editor.player)
@@ -308,9 +308,7 @@ struct PlayerSurface: NSViewRepresentable {
 private struct LayoutControls: View {
     @ObservedObject var editor: EditorModel
     @ObservedObject var preferences: Preferences
-    var availableHeight: CGFloat
 
-    private static let sizeSteps = [480, 720, 1080, 1440, 2160]
     private static let qualities: [(String, Double)] = [("Full", 1), ("Half", 0.5), ("Quarter", 0.25)]
 
     var body: some View {
@@ -372,14 +370,12 @@ private struct LayoutControls: View {
         OutputAspect.all.first { $0.ratio == editor.project.style.aspectRatio } ?? OutputAspect.all[0]
     }
 
-    private var smaller: Int? { Self.sizeSteps.last { $0 < preferences.playbackPreviewMaxHeight } }
-    private var larger: Int? {
-        Self.sizeSteps.first { $0 > preferences.playbackPreviewMaxHeight && CGFloat($0) / 2 <= availableHeight * 1.5 }
-    }
+    // The same rules as the "Increase / Decrease preview size" actions.
+    private var smaller: Int? { editor.nextPreviewSize(larger: false) }
+    private var larger: Int? { editor.nextPreviewSize(larger: true) }
 
     private func step(_ direction: Int) {
-        if direction < 0, let smaller { preferences.playbackPreviewMaxHeight = smaller }
-        if direction > 0, let larger { preferences.playbackPreviewMaxHeight = larger; editor.warnAboutLargerPreview() }
+        editor.stepPreviewSize(larger: direction > 0)
     }
 }
 

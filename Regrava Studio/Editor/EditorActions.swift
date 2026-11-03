@@ -128,21 +128,13 @@ struct ActionCatalog {
     static let previewSizes: [(label: String, height: Int)] = [("480p", 480), ("720p", 720), ("1080p", 1080), ("1440p", 1440), ("2160p", 2160)]
     static let previewResolutions: [(label: String, value: Double)] = [("Full", 1), ("Half", 0.5), ("Quarter", 0.25)]
 
-    /// The next preview size up or down that changes the shown preview by at least a point.
     private func nextPreviewSize(larger: Bool) -> Int? {
-        let current = preferences.playbackPreviewMaxHeight
-        let heights = Self.previewSizes.map(\.height)
-        let candidates = larger ? heights.filter { $0 > current } : Array(heights.filter { $0 < current }.reversed())
-        guard let editor, let space = editor.previewAvailableSpace else { return candidates.first }
-        let canvas = editor.project.canvasSize
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        func shownHeight(_ maxHeight: Int) -> CGFloat {
-            let height = min(space.height, CGFloat(maxHeight) / scale)
-            guard space.width > 0, height > 0 else { return 0 }
-            return canvas.height * min(space.width / canvas.width, height / canvas.height)
+        guard let editor else {
+            let current = preferences.playbackPreviewMaxHeight
+            let heights = Self.previewSizes.map(\.height)
+            return larger ? heights.first { $0 > current } : heights.last { $0 < current }
         }
-        let shown = shownHeight(current)
-        return candidates.first { abs(shownHeight($0) - shown) >= 1 }
+        return editor.nextPreviewSize(larger: larger)
     }
 
     private var editorActions: [EditorAction] {
@@ -151,7 +143,7 @@ struct ActionCatalog {
         let zooms = project?.zooms ?? []
         return [
             target(.editor, "decreasePlaybackPreviewSize", "Decrease preview size", group: "Playback", icon: "minus.magnifyingglass", canApply: nextPreviewSize(larger: false) != nil) {
-                if let size = nextPreviewSize(larger: false) { preferences.playbackPreviewMaxHeight = size }
+                e?.stepPreviewSize(larger: false)
             },
             target(.editor, "disableAllZoomRanges", "Disable all zoom ranges", group: "Zoom", icon: "slash.circle", canApply: zooms.contains { !$0.isDisabled }) {
                 e?.setAllZooms(disabled: true)
@@ -163,7 +155,7 @@ struct ActionCatalog {
             target(.editor, "goToFirstFrame", "Go to first frame", group: "Playback", icon: "backward.end", shortcut: ["Meta", "ArrowLeft"]) { e?.seek(to: 0) },
             target(.editor, "goToLastFrame", "Go to last frame", group: "Playback", icon: "forward.end", shortcut: ["Meta", "ArrowRight"]) { if let e { e.seek(to: e.durationMs) } },
             target(.editor, "increasePlaybackPreviewSize", "Increase preview size", group: "Playback", icon: "plus.magnifyingglass", canApply: nextPreviewSize(larger: true) != nil) {
-                if let size = nextPreviewSize(larger: true) { preferences.playbackPreviewMaxHeight = size; e?.warnAboutLargerPreview() }
+                e?.stepPreviewSize(larger: true)
             },
             target(.editor, "moveBackwards", "Move backwards", group: "Playback", icon: "arrow.turn.up.left", shortcut: ["ArrowLeft"]) {
                 guard let e else { return }
@@ -799,5 +791,31 @@ enum KeyChord {
         // Main-row characters only (the keypad has other key codes).
         guard !event.modifierFlags.contains(.numericPad) else { return false }
         return event.charactersIgnoringModifiers?.lowercased() == key.lowercased()
+    }
+}
+
+extension EditorModel {
+    /// The next preview size up or down that changes the shown preview by at least a point.
+    func nextPreviewSize(larger: Bool) -> Int? {
+        let current = Preferences.shared.playbackPreviewMaxHeight
+        let heights = ActionCatalog.previewSizes.map(\.height)
+        let candidates = larger ? heights.filter { $0 > current } : Array(heights.filter { $0 < current }.reversed())
+        guard let space = previewAvailableSpace else { return candidates.first }
+        let canvas = project.canvasSize
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        func shownHeight(_ maxHeight: Int) -> CGFloat {
+            let height = min(space.height, CGFloat(maxHeight) / scale)
+            guard space.width > 0, height > 0 else { return 0 }
+            return canvas.height * min(space.width / canvas.width, height / canvas.height)
+        }
+        let shown = shownHeight(current)
+        return candidates.first { abs(shownHeight($0) - shown) >= 1 }
+    }
+
+    /// "Increase preview size" / "Decrease preview size"; growing warns about performance.
+    func stepPreviewSize(larger: Bool) {
+        guard let size = nextPreviewSize(larger: larger) else { return }
+        Preferences.shared.playbackPreviewMaxHeight = size
+        if larger { warnAboutLargerPreview() }
     }
 }
