@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else if url.pathExtension == ProjectStore.fileExtension {
                 AppController.shared.recording.closePicker()
                 AppController.shared.openProject(at: url)
-            } else if url.pathExtension == PresetStore.packageExtension {
+            } else if [PresetStore.packageExtension, PresetStore.originalPackageExtension].contains(url.pathExtension) {
                 // Opening a preset package imports it.
                 PresetStore.shared.importPreset(at: url)
             }
