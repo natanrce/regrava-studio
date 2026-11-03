@@ -166,6 +166,8 @@ final class EditorModel: ObservableObject {
     /// "zooms" track is focused by default; nil = none.
     @Published var focusedTrack: String? = "zooms"
     @Published var errorMessage: String?
+    /// The running transcript audition ("Play" in the transcript bar).
+    var auditionTask: Task<Void, Never>?
     /// The one toast shown at the bottom of the editor; a new one replaces it.
     @Published var toast: EditorToast?
 

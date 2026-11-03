@@ -79,21 +79,43 @@ extension EditorModel {
         transcriptTokens.filter { $0.kind == .gap && isPresent($0) && TranscriptEditing.canTighten($0, in: project) }
     }
 
-    /// "Play": this part once, then back to its start (40 ms minimum).
+    /// "Play": this part once, then back to its start (40 ms minimum). It ends early when
+    /// playback stops; a new audition replaces the running one.
     func audition(_ target: [TranscriptToken]) {
         guard let first = target.first, let last = target.last else { return }
+        cancelAudition()
         let resolver = project.resolver
         let start = resolver.sourceToPlayback(first.sourceStartMs + 1)
         let end = resolver.sourceToPlayback(last.sourceEndMs)
-        guard end - start >= 40 else { return }
+        if isPlaying { pause() }
         seek(to: start)
-        if !isPlaying { togglePlay() }
-        let item = player.currentItem
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64((end - start) / max(self?.playbackRate ?? 1, 0.1) * 1_000_000))
-            guard let self, self.isPlaying, self.player.currentItem === item else { return }
-            self.pause()
-            self.seek(to: start)
+        guard end - start >= 40 else { return }
+        togglePlay()
+        auditionTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000 / 60)
+                guard !Task.isCancelled, let self else { return }
+                guard !self.isPlaying || self.clock.currentTimeMs >= end else { continue }
+                let wasPlaying = self.isPlaying
+                self.auditionTask = nil
+                if wasPlaying {
+                    self.pause()
+                    self.seek(to: start)
+                }
+                return
+            }
         }
+    }
+
+    func cancelAudition() {
+        auditionTask?.cancel()
+        auditionTask = nil
+    }
+
+    /// Ends a running audition and pauses there.
+    func stopAudition() {
+        guard auditionTask != nil else { return }
+        cancelAudition()
+        pause()
     }
 }

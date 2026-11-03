@@ -535,6 +535,7 @@ final class TranscriptNSTextView: NSTextView {
         let moved = downLocation.map { hypot($0.x - event.locationInWindow.x, $0.y - event.locationInWindow.y) } ?? 0
         if moved <= 4, let coordinator, let editor = coordinator.editor, let first = coordinator.targets().first {
             editor.endScrub()
+            editor.stopAudition()
             let source = first.sourceStartMs + 1
             if editor.project.resolver.isSourceTimePresent(source) { editor.seek(to: editor.project.resolver.sourceToPlayback(source)) }
         }
@@ -546,9 +547,11 @@ final class TranscriptNSTextView: NSTextView {
         switch (event.keyCode, flags) {
         case (51, [.command]): // ⌘⌫
             if let coordinator, let editor = coordinator.editor { editor.cutFromTranscript(coordinator.targets()) }
-        case (53, []): // Esc
+        case (53, []): // Esc: stops the audition, clears the selection and leaves the text.
+            coordinator?.editor?.stopAudition()
             setSelectedRange(NSRange(location: selectedRange().location, length: 0))
             coordinator?.closePopover()
+            window?.makeFirstResponder(nil)
         case (48, _): break // Tab
         case (6, [.command]): coordinator?.editor?.undo()
         case (6, [.command, .shift]): coordinator?.editor?.redo()
