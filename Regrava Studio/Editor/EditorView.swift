@@ -620,7 +620,7 @@ private struct MaskOverlays: View {
         )
     }
 
-    /// "Drag on the canvas to draw the mask"; a click places a 350×80 mask.
+    /// Drag to draw the new mask over the recording area; a click places a 350×80 mask.
     private func drawTool(_ area: CGRect) -> some View {
         ZStack(alignment: .topLeading) {
             Color.white.opacity(0.001)
@@ -647,20 +647,26 @@ private struct MaskOverlays: View {
                 )
             if let drawing {
                 Rectangle()
-                    .fill(Theme.Colors.primary.opacity(0.1))
-                    .overlay(Rectangle().strokeBorder(Theme.Colors.primary.opacity(0.9), lineWidth: 1.5))
+                    .fill(Theme.Colors.primary.opacity(0.12))
+                    .overlay(Rectangle().strokeBorder(Theme.Colors.primary.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, dash: [4.5, 4.5])))
                     .frame(width: drawing.width, height: drawing.height)
                     .offset(x: drawing.minX, y: drawing.minY)
                     .allowsHitTesting(false)
+            } else {
+                // Hint: top 16, pill, background at 0.75 with blur, label weight 500.
+                Text("Drag to select the area for the new " + (editor.addMaskType == .highlight ? "highlight mask" : "sensitive data mask"))
+                    .font(Theme.Typo.label.weight(.medium))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(Capsule().fill(Theme.Colors.background.opacity(0.75)))
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.top, 16)
+                    .frame(width: area.width, height: area.height, alignment: .top)
+                    .offset(x: area.minX, y: area.minY)
+                    .allowsHitTesting(false)
             }
-            Text("Drag on the canvas to draw the mask")
-                .font(Theme.Typo.label.weight(.medium))
-                .padding(.vertical, 6)
-                .padding(.horizontal, 12)
-                .background(RoundedRectangle(cornerRadius: 5).fill(Theme.Colors.background.opacity(0.8)))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.top, 12)
-                .allowsHitTesting(false)
         }
         .coordinateSpace(name: "mask-surface")
     }
