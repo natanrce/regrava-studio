@@ -28,21 +28,40 @@ final class GlobalHotKeys {
     func register(_ bindings: [(KeyShortcut, () -> Void)]) {
         references.forEach { UnregisterEventHotKey($0) }
         references.removeAll()
+        registered.removeAll()
         Self.handlers.removeAll()
         for (index, binding) in bindings.enumerated() {
             let shortcut = binding.0
-            var modifiers: UInt32 = 0
-            if shortcut.command { modifiers |= UInt32(cmdKey) }
-            if shortcut.control { modifiers |= UInt32(controlKey) }
-            if shortcut.option { modifiers |= UInt32(optionKey) }
-            if shortcut.shift { modifiers |= UInt32(shiftKey) }
             let id = EventHotKeyID(signature: OSType(0x5247_5354), id: UInt32(index + 1)) // "RGST"
             var reference: EventHotKeyRef?
-            if RegisterEventHotKey(UInt32(shortcut.keyCode), modifiers, id, GetApplicationEventTarget(), 0, &reference) == noErr, let reference {
+            if RegisterEventHotKey(UInt32(shortcut.keyCode), Self.modifiers(shortcut), id, GetApplicationEventTarget(), 0, &reference) == noErr, let reference {
                 references.append(reference)
+                registered.insert(shortcut)
                 Self.handlers[id.id] = binding.1
             }
         }
+    }
+
+    /// Shortcuts registered now.
+    private var registered: Set<KeyShortcut> = []
+
+    /// Whether the shortcut works system-wide: registered already, or free to register.
+    func canRegister(_ shortcut: KeyShortcut) -> Bool {
+        if registered.contains(shortcut) { return true }
+        var reference: EventHotKeyRef?
+        let id = EventHotKeyID(signature: OSType(0x5247_5354), id: 0)
+        guard RegisterEventHotKey(UInt32(shortcut.keyCode), Self.modifiers(shortcut), id, GetApplicationEventTarget(), 0, &reference) == noErr, let reference else { return false }
+        UnregisterEventHotKey(reference)
+        return true
+    }
+
+    private static func modifiers(_ shortcut: KeyShortcut) -> UInt32 {
+        var modifiers: UInt32 = 0
+        if shortcut.command { modifiers |= UInt32(cmdKey) }
+        if shortcut.control { modifiers |= UInt32(controlKey) }
+        if shortcut.option { modifiers |= UInt32(optionKey) }
+        if shortcut.shift { modifiers |= UInt32(shiftKey) }
+        return modifiers
     }
 }
 

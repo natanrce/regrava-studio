@@ -331,15 +331,21 @@ private struct ShortcutsSettings: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                ShortcutRecorder(
-                                    shortcut: Binding(
-                                        get: { preferences.shortcuts[row.action] ?? nil },
-                                        set: { preferences.shortcuts[row.action] = $0 }
-                                    ),
+                                let shortcut = Binding<KeyShortcut?>(
+                                    get: { preferences.shortcuts[row.action] ?? nil },
+                                    set: { preferences.shortcuts[row.action] = $0 }
+                                )
+                                let recorder = ShortcutRecorder(
+                                    shortcut: shortcut,
                                     defaultShortcut: row.action.defaultShortcut,
                                     clearable: row.action.isGlobal,
                                     allowKeysOnly: !row.action.isGlobal
                                 )
+                                if row.action.isGlobal {
+                                    GlobalShortcutRecorder(shortcut: shortcut.wrappedValue) { recorder }
+                                } else {
+                                    recorder
+                                }
                             }
                         }
                     }
@@ -378,6 +384,34 @@ private struct FolderRow: View {
                 panel.prompt = "Select folder"
                 if panel.runModal() == .OK, let url = panel.url { onChange(url.path) }
             }
+        }
+    }
+}
+
+/// A system-wide shortcut's chip, with "Not able to register" under it when another app
+/// holds the shortcut.
+private struct GlobalShortcutRecorder<Recorder: View>: View {
+    var shortcut: KeyShortcut?
+    @ViewBuilder var recorder: () -> Recorder
+    @State private var canRegister: Bool?
+
+    var body: some View {
+        VStack(spacing: Theme.gap(0.5)) {
+            recorder()
+            if canRegister == false {
+                Text("Not able to register")
+                    .font(Theme.Typo.label)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Theme.Colors.warning)
+            }
+        }
+        .task(id: shortcut) {
+            guard let shortcut else {
+                canRegister = true
+                return
+            }
+            canRegister = nil
+            canRegister = GlobalHotKeys.shared.canRegister(shortcut)
         }
     }
 }
