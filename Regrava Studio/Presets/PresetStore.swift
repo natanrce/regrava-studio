@@ -146,7 +146,8 @@ final class PresetStore: ObservableObject {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: url, to: target)
             reload()
-            AppController.shared.focusedEditor?.model.showToast("Preset imported")
+            // Shown in the last active project window, not only a focused one.
+            AppController.shared.keyEditor?.model.showToast("Preset imported")
         } catch {
             Dialogs.error(error.localizedDescription)
         }
