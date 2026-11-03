@@ -118,25 +118,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let file = NSMenu(title: "File")
         file.identifier = NSUserInterfaceItemIdentifier("file")
         file.delegate = self
-        recoverItem = conditional(file, "Recover unfinished recordings", icon: "arrow.up.circle", available: { !RecordingRecovery.shared.unfinished.isEmpty }) {
-            Task { await RecordingRecovery.shared.recoverAll() }
-        }
-        add(to: file, "Show previous projects") { AppController.shared.showPreviousProjects() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        add(to: file, "Open project...", key: "o") { AppController.shared.openProjectPanel() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        conditional(file, "Open last project", key: "z", modifiers: [.command, .option], icon: "arrow.counterclockwise", available: { AppController.shared.lastProjectURL != nil }) { AppController.shared.openLastProject() }
-        file.addItem(.separator())
-        add(to: file, "Create project from video...") { VideoImport.pickAndCreate() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        file.addItem(.separator())
-        add(to: file, "Import preset...") { PresetStore.shared.importPreset() }.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
-        file.addItem(.separator())
         let recent = NSMenuItem(title: "Open recent", action: nil, keyEquivalent: "")
         recent.submenu = NSMenu(title: "Open recent")
         file.addItem(recent)
         recentItem = recent
         file.addItem(.separator())
+        recoverItem = conditional(file, "Recover unfinished recordings", icon: "arrow.up.circle", available: { !RecordingRecovery.shared.unfinished.isEmpty }) {
+            Task { await RecordingRecovery.shared.recoverAll() }
+        }
+        add(to: file, "Open project...", key: "o") { AppController.shared.openProjectPanel() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        conditional(file, "Open last project", key: "z", modifiers: [.command, .option], icon: "arrow.counterclockwise", available: { AppController.shared.lastProjectURL != nil }) { AppController.shared.openLastProject() }
+        add(to: file, "Show previous projects") { AppController.shared.showPreviousProjects() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        file.addItem(.separator())
         project(file, "Save", key: "s", icon: "square.and.arrow.down") { $0.saveFromMenu() }
         project(file, "Save as...", key: "s", modifiers: [.command, .shift], icon: "square.and.arrow.down") { $0.saveAs() }
         project(file, "Show project in Finder", key: "o", modifiers: [.command, .shift], icon: "folder") { NSWorkspace.shared.activateFileViewerSelecting([$0.bundleURL]) }
+        file.addItem(.separator())
+        add(to: file, "Create project from video...") { VideoImport.pickAndCreate() }.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        file.addItem(.separator())
+        add(to: file, "Import preset...") { PresetStore.shared.importPreset() }.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: nil)
         file.addItem(.separator())
         project(file, "Remove project", icon: "trash") { model in
             guard model.deleteProject() else { return }
@@ -327,6 +327,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let builder = MenuBuilder()
         switch menu.identifier?.rawValue {
         case "record":
+            builder.group("recording-new")
+            builder.item(recording.isRecording ? "Stop recording" : "New recording...", icon: "record.circle", shortcut: shortcuts[.recordStartStop] ?? nil) {
+                recording.isRecording ? recording.requestFinish() : recording.openPicker()
+            }
             builder.group("recording")
             builder.item("Record display", icon: "dock.rectangle", enabled: !recording.isRecording, shortcut: shortcuts[.recordDisplay] ?? nil) { recording.openPicker(preselect: .display) }
             builder.item("Record window", icon: "macwindow", enabled: !recording.isRecording, shortcut: shortcuts[.recordWindow] ?? nil) { recording.openPicker(preselect: .window) }
@@ -338,10 +342,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             builder.group("settings-zooms")
             builder.item("Automatically create zooms", checked: preferences.createAutomaticZooms) { preferences.createAutomaticZooms.toggle() }
-            builder.group("recording-new")
-            builder.item(recording.isRecording ? "Stop recording" : "New recording...", icon: "record.circle", shortcut: shortcuts[.recordStartStop] ?? nil) {
-                recording.isRecording ? recording.requestFinish() : recording.openPicker()
-            }
         case "file":
             // Also run before key equivalents are matched; the disk is read only on open.
             updateVisibility(menu)
