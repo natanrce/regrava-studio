@@ -13,7 +13,12 @@ final class ExportController: ObservableObject {
         var progress: Double = 0
         var startedAt = Date()
         var error: String?
+        var estimator = ExportTimeEstimator(createdAtMs: Date().timeIntervalSince1970 * 1000)
     }
+
+    /// The project's background tasks: listed under the progress, and the time-left estimate
+    /// waits while they run.
+    weak var tasks: BackgroundTasks?
 
     @Published var isPickerOpen = false
     @Published private(set) var job: Job?
@@ -106,7 +111,10 @@ final class ExportController: ObservableObject {
     private func update(progress: Double) {
         guard let current = job?.progress else { return }
         // The finest step shown is 0.01%; smaller changes are not published.
-        if current == 0 || progress - current >= 0.0001 || progress >= 1 || progress < current { job?.progress = progress }
+        if current == 0 || progress - current >= 0.0001 || progress >= 1 || progress < current {
+            job?.progress = progress
+            job?.estimator.reportProgress(progress, atMs: Date().timeIntervalSince1970 * 1000, isPaused: isEstimatePaused)
+        }
         dockProgress.show(progress)
         // " NN%" beside the menu bar item while exporting.
         let percent = Int((progress * 100).rounded(.down))
@@ -115,6 +123,9 @@ final class ExportController: ObservableObject {
             AppController.shared.statusItem?.setTitle(" \(percent)%")
         }
     }
+
+    /// While project tasks run, the export's pace says nothing about the time left.
+    var isEstimatePaused: Bool { !(tasks?.tasks.isEmpty ?? true) }
 
     /// The percent last shown beside the menu bar item.
     private var statusPercent: Int?

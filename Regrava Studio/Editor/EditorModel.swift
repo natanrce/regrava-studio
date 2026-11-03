@@ -257,6 +257,7 @@ final class EditorModel: ObservableObject {
         updateHoverDetection()
         player.actionAtItemEnd = .pause
         exports.onToast = { [weak self] in self?.showToast($0, kind: .error) }
+        exports.tasks = tasks
         registerMediaKeys()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {

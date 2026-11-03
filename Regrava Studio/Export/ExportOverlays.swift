@@ -138,37 +138,62 @@ struct ExportStatusOverlay: View {
 
     var body: some View {
         if let job = exports.job {
-            TimelineView(.periodic(from: job.startedAt, by: 0.5)) { context in
-                content(job: job, now: context.date)
+            // The clock ticks every second.
+            TimelineView(.periodic(from: job.startedAt, by: 1)) { context in
+                ExportStatusContent(exports: exports, tasks: exports.tasks ?? Self.noTasks, job: job, now: context.date)
             }
         }
     }
 
-    private func content(job: ExportController.Job, now: Date) -> some View {
-        let elapsed = now.timeIntervalSince(job.startedAt)
+    private static let noTasks = BackgroundTasks()
+}
+
+private struct ExportStatusContent: View {
+    @ObservedObject var exports: ExportController
+    @ObservedObject var tasks: BackgroundTasks
+    var job: ExportController.Job
+    var now: Date
+
+    var body: some View {
+        let nowMs = now.timeIntervalSince1970 * 1000
+        let elapsedMs = job.estimator.elapsedMs(nowMs: nowMs)
+        let timeLeftMs = job.estimator.timeLeftMs(nowMs: nowMs, isPaused: !tasks.tasks.isEmpty)
+        let decimals = ExportProgressText.percentDecimals(totalMs: elapsedMs + (timeLeftMs ?? 0))
         return ZStack {
             Theme.Colors.background.ignoresSafeArea()
             VStack(spacing: Theme.gap(4)) {
                 VStack(spacing: Theme.gap(1)) {
-                    HStack(spacing: 6) {
-                        Text("\(job.error != nil ? "Export failed" : "Exporting video") • \(Self.percent(job.progress, elapsed: elapsed))")
-                            .font(Theme.Typo.title)
-                            .monospacedDigit()
+                    HStack(spacing: 0) {
+                        Text(job.error != nil ? "Export failed" : "Exporting video")
+                        Text("\u{00a0}•\u{00a0}")
+                        Text(ExportProgressText.percent(job.progress, decimals: decimals))
                         if let path = job.outputPath {
                             Image(systemName: "info.circle")
                                 .font(.system(size: 16))
                                 .opacity(0.5)
+                                .padding(.leading, 4)
                                 .tooltip("\(job.projectName).\(ProjectStore.fileExtension) → \(path)")
                         }
                     }
+                    .font(Theme.Typo.title)
+                    .monospacedDigit()
+                    .lineLimit(1)
                     .padding(.bottom, 4)
                     ProgressView(value: job.progress)
                         .progressViewStyle(.linear)
                         .tint(Theme.Colors.primary)
-                    Text(Self.status(progress: job.progress, elapsed: elapsed))
+                    Text(Self.status(progress: job.progress, elapsedMs: elapsedMs, timeLeftMs: timeLeftMs))
                         .font(Theme.Typo.copy)
                         .monospacedDigit()
+                        .lineLimit(1)
                         .opacity(Theme.secondaryOpacity)
+                    if !tasks.shown.isEmpty {
+                        VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                            ForEach(tasks.shown, id: \.key) { BackgroundTaskRow(task: $0) }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 12)
+                    }
                 }
                 .frame(maxWidth: 320)
                 RSButton(title: "Stop export", kind: .secondary, size: .big) { exports.requestStop() }
@@ -178,22 +203,9 @@ struct ExportStatusOverlay: View {
         .transition(.opacity)
     }
 
-    /// 0 decimals; 1 after 5 minutes; 2 after 30 minutes.
-    static func percent(_ progress: Double, elapsed: TimeInterval) -> String {
-        let decimals = elapsed > 1800 ? 2 : elapsed > 300 ? 1 : 0
-        return String(format: "%.\(decimals)f%%", progress * 100)
-    }
-
-    static func status(progress: Double, elapsed: TimeInterval) -> String {
+    static func status(progress: Double, elapsedMs: Double, timeLeftMs: Double?) -> String {
         guard progress > 0 else { return "Preparing export..." }
-        let elapsedText = mmss(elapsed)
-        guard elapsed >= 1 else { return "\(elapsedText) • Estimating time left..." }
-        let left = elapsed / progress * (1 - progress)
-        return "\(elapsedText) • \(mmss(left)) left"
-    }
-
-    static func mmss(_ seconds: TimeInterval) -> String {
-        let s = Int(seconds.rounded(.up))
-        return String(format: "%02d:%02d", s / 60, s % 60)
+        let left = timeLeftMs.map { "\(ExportProgressText.duration(ms: $0)) left" } ?? "Estimating time left..."
+        return "\(ExportProgressText.duration(ms: elapsedMs)) • \(left)"
     }
 }

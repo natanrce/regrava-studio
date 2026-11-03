@@ -109,7 +109,7 @@ struct BackgroundTasksIndicator: View {
 }
 
 /// One task: a spinner, the name, and its progress as a 56 px bar and a percentage.
-private struct BackgroundTaskRow: View {
+struct BackgroundTaskRow: View {
     var task: BackgroundTasks.Task
 
     var body: some View {
