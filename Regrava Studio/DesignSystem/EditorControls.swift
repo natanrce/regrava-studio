@@ -50,6 +50,9 @@ struct RSSlider: View {
     var resetValue: Double?
     var suggestedValues: [Double] = []
     var inverted = false
+    /// Non-linear travel: the knob's share t of the track maps to t^ratio of the range
+    /// (a negative ratio eases from the other end); 1 is linear.
+    var easingRatio: Double = 1
     /// `primary` (default) or `secondary` (#888) colours.
     var isSecondary = false
     var onEditingChanged: (Bool) -> Void = { _ in }
@@ -58,14 +61,25 @@ struct RSSlider: View {
     @State private var dragging = false
 
     private func fraction(_ v: Double) -> Double {
-        let f = (v - range.lowerBound) / max(range.upperBound - range.lowerBound, .ulpOfOne)
+        let share = clamp((v - range.lowerBound) / max(range.upperBound - range.lowerBound, .ulpOfOne), 0, 1)
+        let f = Self.uneased(share, easingRatio)
         return inverted ? 1 - f : f
     }
 
     private func value(at fraction: Double) -> Double {
-        let f = inverted ? 1 - fraction : fraction
-        let raw = range.lowerBound + clamp(f, 0, 1) * (range.upperBound - range.lowerBound)
+        let f = Self.eased(clamp(inverted ? 1 - fraction : fraction, 0, 1), easingRatio)
+        let raw = range.lowerBound + f * (range.upperBound - range.lowerBound)
         return clamp((raw / step).rounded() * step, range.lowerBound, range.upperBound)
+    }
+
+    /// Knob share → value share.
+    static func eased(_ t: Double, _ ratio: Double) -> Double {
+        ratio >= 0 ? pow(t, ratio) : 1 - pow(1 - t, -ratio)
+    }
+
+    /// Value share → knob share (the inverse of `eased`).
+    static func uneased(_ t: Double, _ ratio: Double) -> Double {
+        ratio >= 0 ? pow(t, 1 / ratio) : 1 - pow(1 - t, -1 / ratio)
     }
 
     var body: some View {

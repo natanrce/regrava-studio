@@ -444,9 +444,14 @@ private struct PlaybackBar: View {
         .padding(.bottom, editor.layoutType.showsTimeline ? 0 : 12)
     }
 
-    static func zoomTooltip(_ ms: Double) -> String {
-        let s = ms / 1000
-        return s < 60 ? "Timeline zoom — \(Int(s.rounded())) seconds visible" : "Timeline zoom — \(Int((s / 60).rounded())) minutes visible"
+    /// Shown under the zoom slider's knob: whole minutes above a minute, else whole seconds.
+    static func zoomPreview(_ ms: Double) -> String {
+        if ms > 60_000 {
+            let minutes = Int((ms / 60_000).rounded(.down))
+            return "Timeline zoom — \(minutes) \(minutes == 1 ? "minute" : "minutes") visible"
+        }
+        let seconds = Int((ms / 1000).rounded(.down))
+        return "Timeline zoom — \(seconds) \(seconds == 1 ? "second" : "seconds") visible"
     }
 }
 
@@ -459,12 +464,12 @@ private struct TimelineZoomSlider: View {
         RSSlider(
             value: Binding(get: { viewport.visibleDurationMs }, set: { editor.setVisibleDuration($0, anchorMs: editor.currentTimeMs) }),
             range: editor.minVisibleDurationMs...editor.maxVisibleDurationMs,
-            step: 1,
+            preview: PlaybackBar.zoomPreview,
             inverted: true,
+            easingRatio: 3,
             isSecondary: true
         )
         .frame(minWidth: 72, maxWidth: 140)
-        .tooltip(PlaybackBar.zoomTooltip(viewport.visibleDurationMs))
     }
 }
 
