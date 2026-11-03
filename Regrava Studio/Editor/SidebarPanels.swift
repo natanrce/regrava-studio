@@ -79,7 +79,7 @@ struct GeneralPanel: View {
                 HStack {
                     ColorWellField(color: editor.binding(\.style.background.color))
                     RSIconButton(icon: "wand.and.sparkles", size: .small, tooltip: "Randomize background color") {
-                        editor.change { $0.style.background.color = Self.randomColor() }
+                        editor.change { $0.style.background.color = BackgroundPalette.colors(1)[0] }
                     }
                 }
             }
@@ -89,10 +89,7 @@ struct GeneralPanel: View {
                     ColorWellField(color: editor.binding(\.style.background.gradientFrom))
                     ColorWellField(color: editor.binding(\.style.background.gradientTo))
                     RSIconButton(icon: "wand.and.sparkles", size: .small, tooltip: "Randomize gradient colors") {
-                        editor.change {
-                            $0.style.background.gradientFrom = Self.randomColor()
-                            $0.style.background.gradientTo = Self.randomColor()
-                        }
+                        editor.change { $0.style.background.gradient = BackgroundPalette.randomGradient() }
                     }
                 }
             }
@@ -121,31 +118,12 @@ struct GeneralPanel: View {
         }
     }
 
-    /// Hue of the first stop; changing it rotates both stops by the same amount.
+    /// OKLCH hue of the first stop; changing it rotates every stop by the same amount.
     private var hueBinding: Binding<Double> {
         Binding(
-            get: { Double(NSColor(Color(rgba: style.background.gradientFrom)).usingColorSpace(.sRGB)?.hueComponent ?? 0) * 360 },
-            set: { newHue in
-                let current = Double(NSColor(Color(rgba: style.background.gradientFrom)).usingColorSpace(.sRGB)?.hueComponent ?? 0) * 360
-                let delta = newHue - current
-                editor.change {
-                    $0.style.background.gradientStops = $0.style.background.gradientStops.map { Self.rotateHue($0, by: delta) }
-                }
-            }
+            get: { style.background.gradient.hueDegrees },
+            set: { newHue in editor.change { $0.style.background.gradient = $0.style.background.gradient.withHue(newHue) } }
         )
-    }
-
-    static func rotateHue(_ color: RGBA, by degrees: Double) -> RGBA {
-        guard let c = NSColor(Color(rgba: color)).usingColorSpace(.sRGB) else { return color }
-        var hue = Double(c.hueComponent) + degrees / 360
-        hue -= floor(hue)
-        let rotated = NSColor(hue: hue, saturation: c.saturationComponent, brightness: c.brightnessComponent, alpha: 1).usingColorSpace(.sRGB)!
-        return RGBA(Double(rotated.redComponent), Double(rotated.greenComponent), Double(rotated.blueComponent))
-    }
-
-    static func randomColor() -> RGBA {
-        let c = NSColor(hue: .random(in: 0...1), saturation: .random(in: 0.5...0.85), brightness: .random(in: 0.6...0.95), alpha: 1).usingColorSpace(.sRGB)!
-        return RGBA(Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent))
     }
 }
 
