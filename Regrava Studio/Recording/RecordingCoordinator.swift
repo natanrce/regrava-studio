@@ -367,10 +367,6 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
-    func toggleDisplay(_ display: DisplayInfo) {
-        selection = selection == .display(display) ? nil : .display(display)
-    }
-
     func toggleWindow(_ window: WindowInfo) {
         selection = selection == .window(window) ? nil : .window(window)
     }
@@ -423,8 +419,17 @@ final class RecordingCoordinator: ObservableObject {
 
     // MARK: Start
 
-    /// Start button (overlay) or Enter.
-    func startPressed() {
+    /// Start button (overlay) or Enter; a card's button records its own display or window.
+    func startPressed(target: RecordSelection? = nil) {
+        if let target {
+            switch target {
+            case .display: sourceType = .display
+            case .window: sourceType = .window
+            case .area: sourceType = .area
+            case .device: sourceType = .device
+            }
+            selection = target
+        }
         guard selection != nil, selectionError == nil, !isRecording else { return }
         Task {
             if microphoneID != nil, !(await Permissions.ensureAccess(for: .audio)) {

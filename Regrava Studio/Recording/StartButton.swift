@@ -5,13 +5,17 @@ import SwiftUI
 /// after-recording choice.
 struct StartRecordingButton: View {
     @ObservedObject var coordinator: RecordingCoordinator
+    /// What the button records; nil records the current selection.
+    var target: RecordSelection?
+    /// Whether the button takes Enter (a hovered display, a hovered or picked window).
+    var isActive = true
     @ObservedObject var preferences = Preferences.shared
     private let anchor = AnchorHolder()
 
     var body: some View {
         VStack(spacing: Theme.gap(1)) {
             HStack(spacing: 0) {
-                Button { coordinator.startPressed() } label: {
+                Button { coordinator.startPressed(target: target) } label: {
                     HStack(spacing: Theme.gap(1)) {
                         Image(systemName: "record.circle").font(.system(size: 18))
                         Text(preferences.actionAfterRecording.startButtonTitle)

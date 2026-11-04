@@ -146,13 +146,15 @@ private struct DisplayPickerOverlay: View {
             coverColor()
             sourceHighlight.opacity(isSelected || hovered ? 0.25 : 0)
                 .animation(.easeOut(duration: 0.15), value: isSelected || hovered)
-            SourceCard(title: display.label, meta: "\(display.pixelWidth)×\(display.pixelHeight) • \(display.refreshRate)FPS") {
-                if isSelected { StartRecordingButton(coordinator: coordinator).transition(.opacity.combined(with: .offset(y: 4))) }
+            // Every display card shows its Start button; hovering makes it the one Enter starts.
+            SourceCard(title: display.label, meta: "\(Int(display.frame.width))×\(Int(display.frame.height)) • \(display.refreshRate)FPS") {
+                StartRecordingButton(coordinator: coordinator, target: .display(display), isActive: hovered)
             }
         }
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
-        .onTapGesture { coordinator.toggleDisplay(display) }
+        // Clicking the picked display keeps it picked.
+        .onTapGesture { if !isSelected { coordinator.selection = .display(display) } }
     }
 }
 
@@ -238,7 +240,7 @@ private struct WindowHighlight: View {
                             .frame(width: 96, height: 96)
                     }
                     SourceCard(title: window.appName.replacingOccurrences(of: ".app", with: ""), meta: "\(Int(window.frame.width)) × \(Int(window.frame.height))") {
-                        if isSelected { StartRecordingButton(coordinator: coordinator) }
+                        StartRecordingButton(coordinator: coordinator, target: .window(window), isActive: active)
                     }
                 }
                 VStack {
