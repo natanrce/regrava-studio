@@ -219,8 +219,9 @@ private struct WindowHighlight: View {
 
     private var isSelected: Bool { coordinator.selection == .window(window) }
     private var local: CGRect { window.frame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY) }
+    /// "Ignore this window" is offered for a window exactly the display's size.
     private var isDisplaySized: Bool {
-        abs(window.frame.width - display.frame.width) < 2 && window.frame.height >= display.frame.height - 40
+        PickerRules.isFullscreen(window: window.frame, display: display.frame)
     }
 
     var body: some View {
