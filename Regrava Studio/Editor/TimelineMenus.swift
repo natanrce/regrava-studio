@@ -49,16 +49,19 @@ extension EditorModel {
         if recording.hasMicrophone {
             volumes.append(.slider(title: "Microphone volume", value: slice.volume, range: 0...1, valueLabel: Self.percent) { [weak self] v in
                 self?.updateSlice(slice.id) { $0.volume = v }
+                self?.previewAudioChange(slices: [slice.id])
             })
         }
         if recording.hasSystemAudio {
             volumes.append(.slider(title: "System audio volume", value: slice.systemAudioVolume, range: 0...1, valueLabel: Self.percent) { [weak self] v in
                 self?.updateSlice(slice.id) { $0.systemAudioVolume = v }
+                self?.previewAudioChange(slices: [slice.id])
             })
         }
         if recording.hasExternalDeviceAudio {
             volumes.append(.slider(title: "External device audio volume", value: slice.externalDeviceAudioVolume, range: 0...1, valueLabel: Self.percent) { [weak self] v in
                 self?.updateSlice(slice.id) { $0.externalDeviceAudioVolume = v }
+                self?.previewAudioChange(slices: [slice.id])
             })
         }
 
