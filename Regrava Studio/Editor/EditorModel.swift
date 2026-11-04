@@ -153,6 +153,8 @@ final class EditorModel: ObservableObject {
     let tasks = BackgroundTasks()
     /// Audio waveforms drawn in the clips.
     let waveforms = TimelineWaveforms()
+    /// Plays a volume change while paused.
+    let audioChangePreview = AudioChangePreview()
     /// Visible timeline duration (zoom level of the timeline).
     var visibleDurationMs: Double {
         get { viewport.visibleDurationMs }
@@ -1950,6 +1952,7 @@ final class EditorModel: ObservableObject {
         }
         scrubPreview?.close()
         scrubPreview = nil
+        audioChangePreview.stop()
         // A pending transcript edit is written right away.
         if transcriptSaveTask != nil, let transcript {
             transcriptSaveTask?.cancel()

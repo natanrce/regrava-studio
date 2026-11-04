@@ -687,7 +687,10 @@ struct SliceInspector: View {
                             SliderField(
                                 name: "Microphone volume",
                                 icon: "microphone",
-                                value: Binding(get: { slice.volume }, set: { v in editor.updateSlice(sliceID) { $0.volume = v } }),
+                                value: Binding(get: { slice.volume }, set: { v in
+                                    editor.updateSlice(sliceID) { $0.volume = v }
+                                    editor.previewAudioChange(slices: [sliceID])
+                                }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -697,7 +700,10 @@ struct SliceInspector: View {
                             SliderField(
                                 name: "System audio volume",
                                 icon: "hifispeaker",
-                                value: Binding(get: { slice.systemAudioVolume }, set: { v in editor.updateSlice(sliceID) { $0.systemAudioVolume = v } }),
+                                value: Binding(get: { slice.systemAudioVolume }, set: { v in
+                                    editor.updateSlice(sliceID) { $0.systemAudioVolume = v }
+                                    editor.previewAudioChange(slices: [sliceID])
+                                }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
@@ -707,7 +713,10 @@ struct SliceInspector: View {
                             SliderField(
                                 name: "External device audio volume",
                                 icon: "iphone.gen1.radiowaves.left.and.right",
-                                value: Binding(get: { slice.externalDeviceAudioVolume }, set: { v in editor.updateSlice(sliceID) { $0.externalDeviceAudioVolume = v } }),
+                                value: Binding(get: { slice.externalDeviceAudioVolume }, set: { v in
+                                    editor.updateSlice(sliceID) { $0.externalDeviceAudioVolume = v }
+                                    editor.previewAudioChange(slices: [sliceID])
+                                }),
                                 range: 0...1,
                                 step: 0.01,
                                 preview: { "\(Int(($0 * 100).rounded()))%" }
