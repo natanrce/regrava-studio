@@ -130,9 +130,9 @@ final class MenuBuilder {
         hosted(MenuSegmentedRow(title: title, options: options, selected: selected, onSelect: onSelect))
     }
 
-    /// Audio level meter row (`type: "level"`).
-    func level(_ monitor: MicrophoneLevelMonitor) {
-        hosted(MenuLevelRow(monitor: monitor))
+    /// Audio level meter row (`type: "level"`) of one microphone.
+    func level(_ levels: MicrophoneLevels, deviceID: String) {
+        hosted(MenuLevelRow(levels: levels, deviceID: deviceID))
     }
 
     private func hosted<V: View>(_ view: V) {
@@ -271,10 +271,11 @@ private struct MenuSegmentedRow: View {
 }
 
 private struct MenuLevelRow: View {
-    @ObservedObject var monitor: MicrophoneLevelMonitor
+    @ObservedObject var levels: MicrophoneLevels
+    var deviceID: String
 
     var body: some View {
-        LevelBar(level: monitor.level, peak: monitor.peak)
+        LevelBar(level: levels.level(deviceID), peak: 0)
             .frame(height: 3)
             .padding(.horizontal, 14)
             .padding(.vertical, 5)

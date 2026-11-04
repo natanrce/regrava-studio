@@ -344,13 +344,16 @@ private struct MicrophoneButton: View {
                 return
             }
             coordinator.refreshDevices()
+            // Every microphone is monitored while the menu is open.
+            let levels = MicrophoneLevels(deviceIDs: coordinator.microphones.map(\.id))
+            defer { levels.stop() }
             let menu = MenuBuilder()
             menu.group("devices")
             for microphone in coordinator.microphones {
                 menu.item(microphone.name, badge: microphone.isDefault ? "Default" : nil, checked: microphone.id == coordinator.microphoneID) {
                     coordinator.microphoneID = microphone.id
                 }
-                if microphone.id == coordinator.microphoneID { menu.level(monitor) }
+                menu.level(levels, deviceID: microphone.id)
             }
             menu.item("Don't record microphone", checked: coordinator.microphoneID == nil) { coordinator.microphoneID = nil }
             menu.popUp(below: anchor)

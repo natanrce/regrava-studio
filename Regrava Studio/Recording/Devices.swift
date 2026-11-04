@@ -76,8 +76,8 @@ enum Permissions {
     }
 }
 
-/// Live microphone level for the picker's level bar and the menu's level rows
-/// (MicrophoneVolumePreview). Level is 0…1 mapped from dBFS.
+/// Live microphone level for the picker's level bar (MicrophoneVolumePreview). Level is 0…1
+/// mapped from dBFS.
 @MainActor
 final class MicrophoneLevelMonitor: NSObject, ObservableObject {
     @Published private(set) var level: Double = 0
@@ -135,10 +135,59 @@ final class MicrophoneLevelMonitor: NSObject, ObservableObject {
         if db > -100 { lastSignal = Date() }
         let silent = db <= -100 && Date().timeIntervalSince(lastSignal) > 7
         if silent != isSilent { isSilent = silent }
-        let normalized = max(0, min(1, (db + 60) / 60))
+        let normalized = MicrophoneLevels.normalized(db)
         if normalized != level { level = normalized }
         let nextPeak = max(normalized, peak * 0.92)
         if nextPeak != peak { peak = nextPeak }
+    }
+}
+
+/// Levels of several microphones at once, for the level row under each one in the microphone
+/// menu; each level is sent at most every 50 ms.
+@MainActor
+final class MicrophoneLevels: ObservableObject {
+    @Published private(set) var levels: [String: Double] = [:]
+    private var sessions: [AVCaptureSession] = []
+    private var delegates: [AudioLevelDelegate] = []
+
+    /// dBFS mapped from −60…−10 to 0…1, clamped.
+    nonisolated static func normalized(_ decibels: Double) -> Double {
+        max(0, min(1, (decibels + 60) / 50))
+    }
+
+    init(deviceIDs: [String]) {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
+        for id in deviceIDs {
+            guard let device = AVCaptureDevice(uniqueID: id), let input = try? AVCaptureDeviceInput(device: device) else { continue }
+            let session = AVCaptureSession()
+            let output = AVCaptureAudioDataOutput()
+            guard session.canAddInput(input), session.canAddOutput(output) else { continue }
+            session.addInput(input)
+            session.addOutput(output)
+            let delegate = AudioLevelDelegate()
+            var lastSent = Date.distantPast
+            delegate.onLevel = { [weak self] decibels in
+                let now = Date()
+                guard now.timeIntervalSince(lastSent) >= 0.05 else { return }
+                lastSent = now
+                let level = Self.normalized(Double(decibels))
+                Task { @MainActor in self?.levels[id] = level }
+            }
+            output.setSampleBufferDelegate(delegate, queue: delegate.queue)
+            sessions.append(session)
+            delegates.append(delegate)
+            DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
+        }
+    }
+
+    func level(_ id: String) -> Double { levels[id] ?? 0 }
+
+    func stop() {
+        for session in sessions {
+            DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
+        }
+        sessions = []
+        delegates = []
     }
 }
 
