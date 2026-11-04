@@ -22,7 +22,7 @@ struct CameraLayoutPanel: View {
                     NamedField(name: "Default layout") {
                         CameraLayoutTypePicker(
                             editor: editor,
-                            types: CameraLayoutTypePicker.availableTypes(isDefaultLayout: true),
+                            types: CameraLayoutTypePicker.availableTypes(isDefaultLayout: true, isCameraVisible: project.isCameraVisible),
                             selection: editor.binding(\.defaultLayout.type)
                         )
                     }
@@ -172,10 +172,11 @@ struct CameraLayoutTypePicker: View {
     @Binding var selection: CameraLayoutType
 
     /// The default layout offers overlay, split and cutout; ranges also offer fullscreen and
-    /// screen only. Apple Vision's person segmentation is available on every supported Mac, so
-    /// cutout is always offered.
-    static func availableTypes(isDefaultLayout: Bool) -> [CameraLayoutType] {
-        isDefaultLayout
+    /// screen only. With the camera not shown, only screen only. Apple Vision's person
+    /// segmentation is available on every supported Mac, so cutout is always offered.
+    static func availableTypes(isDefaultLayout: Bool, isCameraVisible: Bool) -> [CameraLayoutType] {
+        guard isCameraVisible else { return [.screenOnly] }
+        return isDefaultLayout
             ? [.cameraOverlay, .splitScreen, .cutoutCamera]
             : [.cameraOverlay, .splitScreen, .cutoutCamera, .fullscreenCamera, .screenOnly]
     }
@@ -551,7 +552,7 @@ struct LayoutInspector: View {
                             NamedField(name: "Layout type") {
                                 CameraLayoutTypePicker(
                                     editor: editor,
-                                    types: CameraLayoutTypePicker.availableTypes(isDefaultLayout: false),
+                                    types: CameraLayoutTypePicker.availableTypes(isDefaultLayout: false, isCameraVisible: editor.project.isCameraVisible),
                                     selection: Binding(get: { layout.type }, set: { v in editor.updateLayout(layoutID) { $0.type = v } })
                                 )
                             }
