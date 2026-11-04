@@ -12,17 +12,25 @@ struct PresetsPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.gap(2)) {
             if !store.hasAccess {
-                HStack(alignment: .top, spacing: Theme.gap(1)) {
+                // The problem shows above the list, which still renders.
+                HStack(alignment: .firstTextBaseline, spacing: Theme.gap(1)) {
                     Image(systemName: "info.circle")
-                    Text("There is a problem with access to presets location. Please check the troubleshooting guide.")
+                    Text(accessProblemText)
+                        .environment(\.openURL, OpenURLAction { url in
+                            NSWorkspace.shared.open(url)
+                            return .handled
+                        })
                 }
                 .font(Theme.Typo.label)
+                .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                .padding(EdgeInsets(top: 14, leading: 14, bottom: 8, trailing: 14))
             } else if store.presets.isEmpty {
                 Text("Presets will help you re-use the same project settings across projects")
                     .font(Theme.Typo.label)
                     .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
                     .padding(EdgeInsets(top: 14, leading: 14, bottom: 8, trailing: 14))
-            } else {
+            }
+            if !store.presets.isEmpty {
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(store.presets) { entry in
@@ -57,6 +65,14 @@ struct PresetsPopover: View {
             nameFocused = true
         }
         .onDisappear { editor.previewPreset(nil) }
+    }
+
+    /// "…Please check the troubleshooting guide.", the guide a link.
+    private var accessProblemText: AttributedString {
+        var link = AttributedString("troubleshooting guide.")
+        link.link = URL(string: "https://regrava.studio/guide/resolving-presets-access-issue")
+        link.foregroundColor = Theme.Colors.primaryActiveText
+        return AttributedString("There is a problem with access to presets location. \n Please check the ") + link
     }
 
     private func create() {
