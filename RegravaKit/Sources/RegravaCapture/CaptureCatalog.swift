@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 @preconcurrency import ScreenCaptureKit
 
@@ -22,6 +23,8 @@ public struct WindowInfo: Identifiable, Hashable, Sendable {
     /// Global frame in points, top-left origin.
     public var frame: CGRect
     public var processID: pid_t
+    /// Corner radius of the window, in points.
+    public var borderRadius: Double = 10
 }
 
 /// Capturable displays and windows.
@@ -63,10 +66,46 @@ public enum CaptureCatalog {
                 appPath: path,
                 bundleIdentifier: app.bundleIdentifier,
                 frame: window.frame,
-                processID: app.processID
+                processID: app.processID,
+                borderRadius: cornerRadius(id: window.windowID, processID: app.processID, title: window.title ?? "", frame: window.frame)
             )
         }
         return windows.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+    }
+
+    /// The live window, or nil when it is no longer capturable.
+    public static func window(id: CGWindowID) async -> WindowInfo? {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else { return nil }
+        return windows(in: content).first { $0.id == id }
+    }
+
+    private static let radiusCache = RadiusCache()
+
+    /// Radii already measured, by window, kept while the window keeps its frame.
+    private final class RadiusCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [CGWindowID: (frame: CGRect, radius: Double)] = [:]
+
+        func radius(_ id: CGWindowID, frame: CGRect) -> Double? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry = entries[id], entry.frame == frame else { return nil }
+            return entry.radius
+        }
+
+        func store(_ id: CGWindowID, frame: CGRect, radius: Double) {
+            lock.lock()
+            entries[id] = (frame, radius)
+            lock.unlock()
+        }
+    }
+
+    /// The window's corner radius from Accessibility, 10 when it has no Accessibility window.
+    static func cornerRadius(id: CGWindowID, processID: pid_t, title: String, frame: CGRect) -> Double {
+        if let cached = radiusCache.radius(id, frame: frame) { return cached }
+        let radius = AccessibilityWindow.matching(processID: processID, title: title, frame: frame)?.cornerRadius ?? 10
+        if AXIsProcessTrusted() { radiusCache.store(id, frame: frame, radius: radius) }
+        return radius
     }
 
     @MainActor
