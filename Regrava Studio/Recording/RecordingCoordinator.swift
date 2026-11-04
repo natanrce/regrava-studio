@@ -712,6 +712,42 @@ final class RecordingCoordinator: ObservableObject {
         clock.elapsed = 0
     }
 
+    // MARK: Device permissions
+
+    /// The camera and microphone in use by the open picker, as last checked.
+    private var checkedCameraID: String?
+    private var checkedMicrophoneID: String?
+
+    /// Whenever the picker's camera or microphone changes to one the app may not use, says so.
+    private func verifySelectedDevicePermissions() {
+        let camera = isPickerOpen ? cameras.first { $0.id == cameraID }?.id : nil
+        let microphone = isPickerOpen ? microphones.first { $0.id == microphoneID }?.id : nil
+        if camera != checkedCameraID {
+            checkedCameraID = camera
+            if camera != nil, MediaPermission.camera.isDenied {
+                DispatchQueue.main.async {
+                    Dialogs.messageBox(
+                        title: "Regrava Studio does not have permission to use your webcam",
+                        message: "You selected a webcam, but Regrava Studio does not have permission to use it. Please check your system privacy settings.",
+                        buttons: [("Open System Settings", { MediaPermission.camera.request() }), ("Cancel", {})]
+                    )
+                }
+            }
+        }
+        if microphone != checkedMicrophoneID {
+            checkedMicrophoneID = microphone
+            if microphone != nil, MediaPermission.microphone.isDenied {
+                DispatchQueue.main.async {
+                    Dialogs.messageBox(
+                        title: "Regrava Studio does not have permission to use your microphone",
+                        message: "You selected a microphone, but Regrava Studio does not have permission to use it. Please check your system privacy settings.",
+                        buttons: [("Open System Settings", { MediaPermission.microphone.request() }), ("Cancel", {})]
+                    )
+                }
+            }
+        }
+    }
+
     // MARK: Auxiliary windows
 
     private func syncWindows() {
@@ -755,6 +791,8 @@ final class RecordingCoordinator: ObservableObject {
         } else {
             boundsIndicator.hide()
         }
+
+        verifySelectedDevicePermissions()
 
         // Camera preview.
         if showCameraPreview, let cameraID, isPickerOpen || isRecording {

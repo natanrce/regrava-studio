@@ -277,12 +277,9 @@ private struct CameraButton: View {
         ) { EmptyView() }
     }
 
+    /// Opens without asking for the camera permission: choosing a camera checks it.
     private func showMenu(_ anchor: NSView?) {
         Task { @MainActor in
-            guard await Permissions.ensureAccess(for: .video) else {
-                Dialogs.info(title: "Camera permission required", message: "Please allow access to your camera in System Settings.")
-                return
-            }
             coordinator.refreshDevices()
             let menu = MenuBuilder()
             menu.group("devices")
