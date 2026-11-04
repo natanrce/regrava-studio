@@ -444,19 +444,38 @@ struct AnimationsPanel: View {
 
     /// UI reset value for both springs.
     private let resetSpring = SpringConfig.screen
+    @State private var replayTask: Task<Void, Never>?
+
+    /// A new spring plays the video from the start, so the change can be seen (50 ms debounce).
+    private func replay() {
+        replayTask?.cancel()
+        replayTask = Task {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
+            editor.pause()
+            editor.seek(to: 0)
+            editor.togglePlay()
+        }
+    }
 
     var body: some View {
         SidebarSection {
             SpringEditor(
                 name: "Screen animation style",
                 presets: SpringPreset.screen,
-                config: Binding(get: { editor.project.animation.screenSpring }, set: { v in editor.change { $0.animation.screenSpring = v ?? .screen } }),
+                config: Binding(get: { editor.project.animation.screenSpring }, set: { v in
+                    editor.change { $0.animation.screenSpring = v ?? .screen }
+                    replay()
+                }),
                 resetConfig: resetSpring
             )
             SpringEditor(
                 name: "Cursor animation style",
                 presets: SpringPreset.cursor,
-                config: Binding(get: { editor.project.animation.mouseSpring }, set: { v in editor.change { $0.animation.mouseSpring = v } }),
+                config: Binding(get: { editor.project.animation.mouseSpring }, set: { v in
+                    editor.change { $0.animation.mouseSpring = v }
+                    if v != nil { replay() }
+                }),
                 resetConfig: resetSpring
             )
         }
