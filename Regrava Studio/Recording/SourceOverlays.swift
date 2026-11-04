@@ -260,15 +260,29 @@ private struct WindowHighlight: View {
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
         .onTapGesture { coordinator.toggleWindow(window) }
-        .contextMenu {
-            Button("Adjust recording area...") { coordinator.adjustArea(to: window) }
-            Button("Bring to front") { NSRunningApplication(processIdentifier: window.processID)?.activate() }
-            Button("Ignore this window") { coordinator.ignoredWindowIDs.insert(window.id) }
-            if !coordinator.ignoredWindowIDs.isEmpty {
-                Button("Reset ignored windows") { coordinator.ignoredWindowIDs.removeAll() }
-            }
-        }
+        .rightClickMenu { contextMenu() }
         .offset(x: local.minX, y: local.minY)
+    }
+}
+
+extension WindowHighlight {
+    /// "Adjust recording area...", "Select window ▸", then Bring to front, Ignore and Reset.
+    fileprivate func contextMenu() -> MenuBuilder {
+        let coordinator = self.coordinator
+        let window = self.window
+        let menu = MenuBuilder()
+        menu.group("default")
+        menu.item("Adjust recording area...") { coordinator.adjustArea(to: window) }
+        menu.group("manual")
+        menu.submenu("Select window") { WindowSelectMenu.add(to: $0, coordinator: coordinator) }
+        menu.group("system")
+        menu.item("Bring to front") { WindowActions.bringToFront(window) }
+        menu.group("ignore")
+        menu.item("Ignore this window") { coordinator.ignoredWindowIDs.insert(window.id) }
+        if !coordinator.ignoredWindowIDs.isEmpty {
+            menu.item("Reset ignored windows") { coordinator.ignoredWindowIDs.removeAll() }
+        }
+        return menu
     }
 }
 

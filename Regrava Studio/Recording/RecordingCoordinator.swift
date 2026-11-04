@@ -388,6 +388,12 @@ final class RecordingCoordinator: ObservableObject {
         setArea(displayID: display.id, rect: local)
     }
 
+    /// A window chosen from "Select window".
+    func selectWindow(_ window: WindowInfo) {
+        sourceType = .window
+        selection = .window(window)
+    }
+
     /// "Record entire display" from the window picker.
     func recordEntireDisplay(_ display: DisplayInfo) {
         sourceType = .display

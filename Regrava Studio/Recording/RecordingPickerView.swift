@@ -39,7 +39,7 @@ struct RecordingPickerView: View {
         HStack(spacing: Theme.gap(1)) {
             HStack(spacing: Theme.gap(0)) {
                 ForEach(SourceType.allCases, id: \.self) { type in
-                    SourceButton(type: type, isActive: coordinator.sourceType == type) {
+                    SourceButton(type: type, isActive: coordinator.sourceType == type, contextMenu: contextMenu(for: type)) {
                         if type == .device {
                             DeviceSourceMenu.show(coordinator: coordinator)
                         } else {
@@ -57,6 +57,62 @@ struct RecordingPickerView: View {
             PanelDivider(verticalMargin: 10)
             RecentProjectsToggle(preferences: coordinator.preferences)
             RecordingOptionsButton(coordinator: coordinator)
+        }
+    }
+}
+
+extension RecordingPickerView {
+    /// Right click on Display lists the displays; on Window, the windows to pick from.
+    private func contextMenu(for type: SourceType) -> (() -> MenuBuilder?)? {
+        let coordinator = self.coordinator
+        switch type {
+        case .display:
+            return {
+                let menu = MenuBuilder()
+                for display in coordinator.displays {
+                    menu.item(display.label) { coordinator.recordEntireDisplay(display) }
+                }
+                return menu
+            }
+        case .window:
+            return {
+                let menu = MenuBuilder()
+                WindowSelectMenu.add(to: menu, coordinator: coordinator)
+                return menu
+            }
+        case .area, .device:
+            return nil
+        }
+    }
+}
+
+/// "Select window": one item per app, with a submenu of its windows when it has several;
+/// the window being picked is checked.
+@MainActor
+enum WindowSelectMenu {
+    static func add(to menu: MenuBuilder, coordinator: RecordingCoordinator) {
+        var groups: [(appPath: String?, windows: [WindowInfo])] = []
+        for window in coordinator.windows {
+            if let index = groups.firstIndex(where: { $0.appPath == window.appPath }) {
+                groups[index].windows.append(window)
+            } else {
+                groups.append((window.appPath, [window]))
+            }
+        }
+        var current: CGWindowID?
+        if coordinator.sourceType == .window, case .window(let window) = coordinator.selection { current = window.id }
+        for group in groups {
+            let first = group.windows[0]
+            let image = first.appPath.map { FileIcons.icon(forFile: $0) }
+            if group.windows.count == 1 {
+                menu.item(first.appName, image: image, checked: first.id == current) { coordinator.selectWindow(first) }
+            } else {
+                menu.submenu(first.appName, image: image, checked: group.windows.contains { $0.id == current }) { sub in
+                    for window in group.windows {
+                        sub.item(window.title, checked: window.id == current) { coordinator.selectWindow(window) }
+                    }
+                }
+            }
         }
     }
 }
@@ -100,6 +156,7 @@ struct PanelIconButton: View {
 private struct SourceButton: View {
     var type: SourceType
     var isActive: Bool
+    var contextMenu: (() -> MenuBuilder?)?
     var action: () -> Void
     @State private var hovered = false
 
@@ -119,6 +176,7 @@ private struct SourceButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .rightClickMenu { contextMenu?() }
     }
 }
 

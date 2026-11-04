@@ -102,11 +102,16 @@ final class MenuBuilder {
         menu.addItem(item)
     }
 
-    func submenu(_ title: String, icon: String? = nil, build: (MenuBuilder) -> Void) {
+    func submenu(_ title: String, icon: String? = nil, image: NSImage? = nil, checked: Bool = false, build: (MenuBuilder) -> Void) {
         let child = MenuBuilder()
         build(child)
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         if let icon { item.image = Self.symbol(icon) }
+        if let image {
+            image.size = NSSize(width: 16, height: 16)
+            item.image = image
+        }
+        item.state = checked ? .on : .off
         item.submenu = child.menu
         menu.addItem(item)
     }
@@ -290,6 +295,53 @@ struct LevelBar: View {
                 Capsule().fill(Color.white.opacity(0.1)).frame(width: width * (0.023 + 0.977 * peak))
                 Capsule().fill(Theme.Colors.tertiary).frame(width: width * (0.023 + 0.977 * level))
             }
+        }
+    }
+}
+
+// MARK: - Right click
+
+extension View {
+    /// Opens the menu `build` makes at the mouse on right click (and ⌃-click); nil opens nothing.
+    func rightClickMenu(_ build: @escaping () -> MenuBuilder?) -> some View {
+        overlay(RightClickMenuTrigger(build: build))
+    }
+
+    /// Runs `action` on right click (and ⌃-click), in place of a menu.
+    func onRightClick(_ action: @escaping () -> Void) -> some View {
+        overlay(RightClickMenuTrigger(build: { action(); return nil }))
+    }
+}
+
+private struct RightClickMenuTrigger: NSViewRepresentable {
+    var build: () -> MenuBuilder?
+
+    func makeNSView(context: Context) -> TriggerView { TriggerView() }
+
+    func updateNSView(_ view: TriggerView, context: Context) {
+        view.build = build
+    }
+
+    final class TriggerView: NSView {
+        var build: (() -> MenuBuilder?)?
+
+        /// Only right clicks land here; everything else goes to the SwiftUI content below.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent else { return nil }
+            let isContextClick = event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+            guard isContextClick else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func rightMouseDown(with event: NSEvent) { show() }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.modifierFlags.contains(.control) { show() } else { super.mouseDown(with: event) }
+        }
+
+        private func show() {
+            guard let menu = build?(), !menu.menu.items.isEmpty else { return }
+            menu.popUp(below: nil)
         }
     }
 }
