@@ -357,6 +357,16 @@ final class RecordingCoordinator: ObservableObject {
         }
     }
 
+    /// The picker's close button: cancels a countdown, else closes the picker (with a source
+    /// still chosen).
+    func closeButtonPressed() {
+        if case .countdown = phase {
+            cancelCountdown()
+        } else {
+            closePicker()
+        }
+    }
+
     func toggleDisplay(_ display: DisplayInfo) {
         selection = selection == .display(display) ? nil : .display(display)
     }

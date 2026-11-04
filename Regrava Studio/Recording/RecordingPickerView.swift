@@ -10,7 +10,7 @@ struct RecordingPickerView: View {
 
     var body: some View {
         HStack(spacing: Theme.gap(1)) {
-            PanelIconButton(icon: "xmark.circle.fill", size: 50, iconSize: 20) { coordinator.escape() }
+            PanelIconButton(icon: "xmark.circle.fill", size: 50, iconSize: 20) { coordinator.closeButtonPressed() }
             PanelDivider(verticalMargin: 10)
             // Only while there is something to recover.
             if !recovery.unfinished.isEmpty {
