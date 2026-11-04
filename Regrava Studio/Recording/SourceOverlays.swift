@@ -226,11 +226,12 @@ private struct WindowHighlight: View {
     var body: some View {
         let active = isSelected || hovered
         ZStack {
-            RoundedRectangle(cornerRadius: 11)
+            // The window's own corner radius.
+            RoundedRectangle(cornerRadius: window.borderRadius)
                 .fill(sourceHighlight.opacity(0.25))
                 .opacity(active ? 1 : 0)
                 .animation(.easeOut(duration: active ? 0.15 : 0.3), value: active)
-            RoundedRectangle(cornerRadius: 11)
+            RoundedRectangle(cornerRadius: window.borderRadius)
                 .strokeBorder(sourceHighlight.opacity(isSelected ? 0.5 : 0), lineWidth: 3)
             if active {
                 VStack(spacing: Theme.gap(2)) {
