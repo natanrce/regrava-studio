@@ -255,6 +255,8 @@ private struct DeviceButton<Accessory: View>: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .tooltip(tooltip ?? "")
+        // A right click opens the same menu, at the mouse.
+        .onRightClick { action(nil) }
     }
 }
 
