@@ -80,19 +80,19 @@ public enum ProjectExporter {
             try await writeGIF(project: project, videoURL: videoURL, settings: settings, outputSize: outputSize, state: state, to: outputURL, progress: progress)
             return [outputURL]
         case .prores:
-            try await writeMovie(project: project, videoURL: videoURL, settings: settings, codec: nil, outputSize: outputSize, state: state, to: outputURL, progress: progress)
+            try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(nil, outputURL)], outputSize: outputSize, state: state, progress: progress)
             return [outputURL]
         case .mp4:
             switch settings.codec {
             case .h264, .h265:
-                try await writeMovie(project: project, videoURL: videoURL, settings: settings, codec: settings.codec, outputSize: outputSize, state: state, to: outputURL, progress: progress)
+                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(settings.codec, outputURL)], outputSize: outputSize, state: state, progress: progress)
                 return [outputURL]
             case .both:
                 let hevcURL = outputURL.deletingPathExtension()
                     .appendingPathExtension("hevc")
                     .appendingPathExtension(outputURL.pathExtension)
-                try await writeMovie(project: project, videoURL: videoURL, settings: settings, codec: .h264, outputSize: outputSize, state: state, to: outputURL) { progress($0 * 0.5) }
-                try await writeMovie(project: project, videoURL: videoURL, settings: settings, codec: .h265, outputSize: outputSize, state: state, to: hevcURL) { progress(0.5 + $0 * 0.5) }
+                // One render feeds both encoders.
+                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(.h264, outputURL), (.h265, hevcURL)], outputSize: outputSize, state: state, progress: progress)
                 return [outputURL, hevcURL]
             }
         }
@@ -159,14 +159,15 @@ public enum ProjectExporter {
         ]
     }
 
-    private static func writeMovie(
+    /// Renders the project once and writes every frame into each output, each file with its own
+    /// codec. The progress is the share of the movie the slowest output has been given.
+    private static func writeMovies(
         project: Project,
         videoURL: URL,
         settings: ExportSettings,
-        codec: ExportCodec?,
+        outputs: [(codec: ExportCodec?, url: URL)],
         outputSize: Size2,
         state: RenderState,
-        to outputURL: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: videoURL.deletingLastPathComponent()))
@@ -207,50 +208,77 @@ public enum ProjectExporter {
             audioOutput = output
         }
 
-        try? FileManager.default.removeItem(at: outputURL)
-        let writer: AVAssetWriter
-        do {
-            writer = try AVAssetWriter(outputURL: outputURL, fileType: settings.format == .prores ? .mov : .mp4)
-        } catch {
-            throw ExportError.cannotWrite(error.localizedDescription)
-        }
-        // The index goes first, so the movie plays while it downloads.
-        writer.shouldOptimizeForNetworkUse = true
-        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoOutputSettings(settings: settings, codec: codec, size: outputSize))
-        videoInput.expectsMediaDataInRealTime = false
-        writer.add(videoInput)
+        var writers: [(writer: AVAssetWriter, video: AVAssetWriterInput, audio: AVAssetWriterInput?)] = []
+        for output in outputs {
+            try? FileManager.default.removeItem(at: output.url)
+            let writer: AVAssetWriter
+            do {
+                writer = try AVAssetWriter(outputURL: output.url, fileType: settings.format == .prores ? .mov : .mp4)
+            } catch {
+                throw ExportError.cannotWrite(error.localizedDescription)
+            }
+            // The index goes first, so the movie plays while it downloads.
+            writer.shouldOptimizeForNetworkUse = true
+            let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoOutputSettings(settings: settings, codec: output.codec, size: outputSize))
+            videoInput.expectsMediaDataInRealTime = false
+            writer.add(videoInput)
 
-        var audioInput: AVAssetWriterInput?
-        if audioOutput != nil {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioOutputSettings(format: settings.format))
-            input.expectsMediaDataInRealTime = false
-            writer.add(input)
-            audioInput = input
+            var audioInput: AVAssetWriterInput?
+            if audioOutput != nil {
+                let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioOutputSettings(format: settings.format))
+                input.expectsMediaDataInRealTime = false
+                writer.add(input)
+                audioInput = input
+            }
+            writers.append((writer, videoInput, audioInput))
         }
 
-        nonisolated(unsafe) let startedReader = reader, startedWriter = writer
+        nonisolated(unsafe) let startedReader = reader
+        nonisolated(unsafe) let startedWriters = writers.map(\.writer)
         try await BlockingWork.run("export start") { _ in
             guard startedReader.startReading() else { throw ExportError.cannotRead(startedReader.error?.localizedDescription ?? "unknown error") }
-            guard startedWriter.startWriting() else { throw ExportError.cannotWrite(startedWriter.error?.localizedDescription ?? "unknown error") }
-            startedWriter.startSession(atSourceTime: .zero)
+            for writer in startedWriters {
+                guard writer.startWriting() else { throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown error") }
+                writer.startSession(atSourceTime: .zero)
+            }
         }
 
         let totalSeconds = max(duration.seconds, 0.001)
         let cancelled = CancellationFlag()
+        let given = ExportOutputProgress(outputs: writers.count) { progress(min($0 / totalSeconds, 0.999)) }
+        // AVFoundation's reader objects are only read from inside the fan-outs.
+        nonisolated(unsafe) let sharedReader = reader
+        nonisolated(unsafe) let sharedVideoOutput: AVAssetReaderOutput = videoOutput
+        let limiter = FrameRateLimiter(fps: settings.fps)
+        let frames = ExportSampleFanOut(consumers: writers.count) {
+            while !cancelled.isSet, sharedReader.status == .reading, let buffer = sharedVideoOutput.copyNextSampleBuffer() {
+                if limiter.keep(CMSampleBufferGetPresentationTimeStamp(buffer).seconds) { return buffer }
+            }
+            return nil
+        }
+        var sounds: ExportSampleFanOut?
+        if let audioOutput {
+            nonisolated(unsafe) let sharedAudioOutput: AVAssetReaderOutput = audioOutput
+            sounds = ExportSampleFanOut(consumers: writers.count) {
+                guard !cancelled.isSet, sharedReader.status == .reading else { return nil }
+                return sharedAudioOutput.copyNextSampleBuffer()
+            }
+        }
 
         await withTaskCancellationHandler {
             await withTaskGroup(of: Void.self) { group in
-                let limiter = FrameRateLimiter(fps: settings.fps)
-                group.addTask {
-                    await pump(input: videoInput, output: videoOutput, reader: reader, cancelled: cancelled, label: "video") { buffer in
-                        let time = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
-                        progress(min(time / totalSeconds, 0.999))
-                        return limiter.keep(time)
-                    }
-                }
-                if let audioInput, let audioOutput {
+                for (index, writer) in writers.enumerated() {
+                    nonisolated(unsafe) let videoInput = writer.video
                     group.addTask {
-                        await pump(input: audioInput, output: audioOutput, reader: reader, cancelled: cancelled, label: "audio") { _ in true }
+                        await pump(input: videoInput, samples: frames, consumer: index, label: "video") { buffer in
+                            given.record(CMSampleBufferGetPresentationTimeStamp(buffer).seconds, output: index)
+                        }
+                    }
+                    if let audioInput = writer.audio, let sounds {
+                        nonisolated(unsafe) let audioInput = audioInput
+                        group.addTask {
+                            await pump(input: audioInput, samples: sounds, consumer: index, label: "audio") { _ in }
+                        }
                     }
                 }
             }
@@ -260,55 +288,47 @@ public enum ProjectExporter {
 
         if cancelled.isSet || Task.isCancelled {
             reader.cancelReading()
-            writer.cancelWriting()
-            try? FileManager.default.removeItem(at: outputURL)
+            for (writer, output) in zip(writers, outputs) {
+                writer.writer.cancelWriting()
+                try? FileManager.default.removeItem(at: output.url)
+            }
             throw ExportError.cancelled
         }
         if reader.status == .failed {
-            writer.cancelWriting()
+            for writer in writers { writer.writer.cancelWriting() }
             throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error")
         }
-        await writer.finishWriting()
-        if writer.status != .completed {
-            throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown error")
+        for writer in writers {
+            await writer.writer.finishWriting()
+        }
+        if let failed = writers.first(where: { $0.writer.status != .completed }) {
+            throw ExportError.cannotWrite(failed.writer.error?.localizedDescription ?? "unknown error")
         }
         progress(1)
     }
 
-    /// Feeds samples from a reader output to a writer input until done or cancelled.
+    /// Feeds one input its samples until they end, the input refuses one, or the export stops.
     private static func pump(
         input: AVAssetWriterInput,
-        output: AVAssetReaderOutput,
-        reader: AVAssetReader,
-        cancelled: CancellationFlag,
+        samples: ExportSampleFanOut,
+        consumer: Int,
         label: String,
-        shouldAppend: @escaping @Sendable (CMSampleBuffer) -> Bool
+        appended: @escaping @Sendable (CMSampleBuffer) -> Void
     ) async {
-        let queue = DispatchQueue(label: "regrava.export.\(label)")
+        let queue = DispatchQueue(label: "regrava.export.\(label).\(consumer)")
         let once = CancellationFlag()
-        // AVFoundation's reader and writer objects are used only on `queue` here.
+        // The writer input is used only on `queue` here.
         nonisolated(unsafe) let input = input
-        nonisolated(unsafe) let output = output
-        nonisolated(unsafe) let reader = reader
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             input.requestMediaDataWhenReady(on: queue) {
                 while input.isReadyForMoreMediaData {
-                    if cancelled.isSet || reader.status != .reading {
+                    guard let buffer = samples.next(for: consumer), input.append(buffer) else {
+                        samples.leave(consumer)
                         input.markAsFinished()
                         if once.setIfUnset() { continuation.resume() }
                         return
                     }
-                    guard let buffer = output.copyNextSampleBuffer() else {
-                        input.markAsFinished()
-                        if once.setIfUnset() { continuation.resume() }
-                        return
-                    }
-                    guard shouldAppend(buffer) else { continue }
-                    if !input.append(buffer) {
-                        input.markAsFinished()
-                        if once.setIfUnset() { continuation.resume() }
-                        return
-                    }
+                    appended(buffer)
                 }
             }
         }
@@ -433,6 +453,31 @@ final class FrameRateLimiter: @unchecked Sendable {
     static func select(times: [Double], fps: Int, duration: Double) -> [Double] {
         let limiter = FrameRateLimiter(fps: fps)
         return times.filter { $0 < duration - 0.0005 && limiter.keep($0) }
+    }
+}
+
+/// The time of the last frame each output has been given; the export is as far as the slowest.
+final class ExportOutputProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var times: [Double?]
+    private let report: @Sendable (Double) -> Void
+
+    /// `report` gets the slowest output's time, in order, once every output has been given a frame.
+    init(outputs: Int, report: @escaping @Sendable (Double) -> Void) {
+        times = Array(repeating: nil, count: outputs)
+        self.report = report
+    }
+
+    func record(_ time: Double, output: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        times[output] = time
+        var slowest = Double.infinity
+        for time in times {
+            guard let time else { return }
+            slowest = min(slowest, time)
+        }
+        report(slowest)
     }
 }
 

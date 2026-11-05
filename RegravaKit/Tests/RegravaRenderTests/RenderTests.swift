@@ -38,6 +38,14 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
     #expect(writer.status == .completed)
 }
 
+/// Progress values reported from any thread, in order.
+private final class ProgressLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [Double] = []
+    func append(_ value: Double) { lock.lock(); stored.append(value); lock.unlock() }
+    var values: [Double] { lock.lock(); defer { lock.unlock() }; return stored }
+}
+
 struct RenderTests {
     func sampleProject(duration: Double) -> Project {
         var project = Project(
@@ -377,10 +385,31 @@ struct RenderTests {
             let output = dir.appendingPathComponent("export.mp4")
             var settings = ExportSettings.defaults(for: .mp4)
             settings.codec = .both
-            let files = try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, target: .file, to: output, cursors: nil)
+            let reported = ProgressLog()
+            let files = try await ProjectExporter.export(project: sampleProject(duration: 2000), videoURL: source, settings: settings, target: .file, to: output, cursors: nil) {
+                reported.append($0)
+            }
             #expect(files.count == 2)
             #expect(try await videoInfo(files[0]).codec == kCMVideoCodecType_H264)
             #expect(try await videoInfo(files[1]).codec == kCMVideoCodecType_HEVC)
+            // One render feeds both files: the progress runs once from 0 to 1.
+            let values = reported.values
+            #expect(values.last == 1)
+            #expect(zip(values, values.dropFirst()).allSatisfy { $0 <= $1 })
+            #expect(values.dropLast().allSatisfy { $0 < 1 })
+            var frameCounts: [Int] = []
+            for file in files {
+                let asset = AVURLAsset(url: file)
+                let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+                let reader = try AVAssetReader(asset: asset)
+                let trackOutput = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+                reader.add(trackOutput)
+                #expect(reader.startReading())
+                var frames = 0
+                while let buffer = trackOutput.copyNextSampleBuffer() { frames += CMSampleBufferGetNumSamples(buffer) }
+                frameCounts.append(frames)
+            }
+            #expect(frameCounts[0] > 0 && frameCounts[0] == frameCounts[1])
         }
     }
 
