@@ -242,6 +242,53 @@ struct RenderTests {
         }
     }
 
+    /// Every frame of a movie decoded to BGRA, as bytes per frame.
+    private func decodedFrames(_ url: URL) async throws -> [Data] {
+        let asset = AVURLAsset(url: url)
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        reader.add(output)
+        #expect(reader.startReading())
+        var frames: [Data] = []
+        while let sample = output.copyNextSampleBuffer() {
+            guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            let rowBytes = CVPixelBufferGetBytesPerRow(buffer), width = CVPixelBufferGetWidth(buffer) * 4
+            let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
+            var frame = Data(capacity: width * CVPixelBufferGetHeight(buffer))
+            for row in 0..<CVPixelBufferGetHeight(buffer) { frame.append(base + row * rowBytes, count: width) }
+            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+            frames.append(frame)
+        }
+        #expect(reader.status == .completed)
+        return frames
+    }
+
+    /// Rendering the next frame while the encoders take the last writes the frames a frame-by-
+    /// frame export writes, and the same frames every time (ProRes, compared decoded).
+    @Test func exportWritesTheSameFramesEveryTimeWithOrWithoutReadAhead() async throws {
+        try await withTestVideo { source, dir in
+            var project = sampleProject(duration: 2000)
+            project.splitSlice(at: 1000)
+            project.updateSlice(project.slices[0].id, sourceEndMs: 600)
+            let settings = ExportSettings(format: .prores, fps: 30, quality: .studio, height: 720, proresProfile: .p4444)
+            var runs: [[Data]] = []
+            for readsAhead in [true, true, false] {
+                let output = dir.appendingPathComponent("run-\(runs.count).mov")
+                try await ProjectExporter.export(project: project, videoURL: source, settings: settings, to: output, cursors: nil, readsAhead: readsAhead)
+                runs.append(try await decodedFrames(output))
+            }
+            #expect(runs[0].count > 30)
+            #expect(Set(runs[0]).count > runs[0].count / 2)
+            for run in runs.dropFirst() {
+                #expect(run.count == runs[0].count)
+                let differing = zip(run, runs[0]).enumerated().filter { $0.element.0 != $0.element.1 }.map(\.offset)
+                #expect(differing.isEmpty, "frames \(differing) differ")
+            }
+        }
+    }
+
     @Test func gifExportFollowsClips() async throws {
         try await withTestVideo { source, dir in
             let output = dir.appendingPathComponent("clips.gif")

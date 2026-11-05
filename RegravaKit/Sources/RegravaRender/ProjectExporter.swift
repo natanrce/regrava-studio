@@ -65,6 +65,21 @@ public enum ProjectExporter {
         cursors: CursorLibrary? = CursorLibrary.arrowOnly(),
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> [URL] {
+        try await export(project: project, videoURL: videoURL, settings: rawSettings, target: target, to: outputURL, cursors: cursors, readsAhead: true, progress: progress)
+    }
+
+    /// `readsAhead`: whether the next frame renders while the encoders take the last (off, each
+    /// frame renders when an encoder asks for it). Both write the same frames.
+    static func export(
+        project: Project,
+        videoURL: URL,
+        settings rawSettings: ExportSettings,
+        target: ExportTarget = .file,
+        to outputURL: URL,
+        cursors: CursorLibrary?,
+        readsAhead: Bool,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> [URL] {
         let settings = rawSettings.normalized(target: target)
         let outputSize = settings.outputSize(aspectRatio: project.stageAspectRatio)
         // Export frames wait until face data covers them ("tracking face").
@@ -80,19 +95,19 @@ public enum ProjectExporter {
             try await writeGIF(project: project, videoURL: videoURL, settings: settings, outputSize: outputSize, state: state, to: outputURL, progress: progress)
             return [outputURL]
         case .prores:
-            try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(nil, outputURL)], outputSize: outputSize, state: state, progress: progress)
+            try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(nil, outputURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, progress: progress)
             return [outputURL]
         case .mp4:
             switch settings.codec {
             case .h264, .h265:
-                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(settings.codec, outputURL)], outputSize: outputSize, state: state, progress: progress)
+                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(settings.codec, outputURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, progress: progress)
                 return [outputURL]
             case .both:
                 let hevcURL = outputURL.deletingPathExtension()
                     .appendingPathExtension("hevc")
                     .appendingPathExtension(outputURL.pathExtension)
                 // One render feeds both encoders.
-                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(.h264, outputURL), (.h265, hevcURL)], outputSize: outputSize, state: state, progress: progress)
+                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(.h264, outputURL), (.h265, hevcURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, progress: progress)
                 return [outputURL, hevcURL]
             }
         }
@@ -172,6 +187,7 @@ public enum ProjectExporter {
         outputs: [(codec: ExportCodec?, url: URL)],
         outputSize: Size2,
         state: RenderState,
+        readsAhead: Bool,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: videoURL.deletingLastPathComponent()))
@@ -256,7 +272,7 @@ public enum ProjectExporter {
         nonisolated(unsafe) let sharedReader = reader
         nonisolated(unsafe) let sharedVideoOutput: AVAssetReaderOutput = videoOutput
         let limiter = FrameRateLimiter(fps: settings.fps)
-        let frames = ExportSampleFanOut(consumers: writers.count, maxHeld: framesAhead, readAhead: true, label: "export frames") {
+        let frames = ExportSampleFanOut(consumers: writers.count, maxHeld: framesAhead, readAhead: readsAhead, label: "export frames") {
             while !cancelled.isSet, sharedReader.status == .reading, let buffer = sharedVideoOutput.copyNextSampleBuffer() {
                 if limiter.keep(CMSampleBufferGetPresentationTimeStamp(buffer).seconds) { return buffer }
             }
