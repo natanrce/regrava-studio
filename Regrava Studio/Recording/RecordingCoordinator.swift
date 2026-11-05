@@ -384,6 +384,20 @@ final class RecordingCoordinator: ObservableObject {
         setArea(displayID: display.id, rect: local)
     }
 
+    /// Escape in the source overlays closes this first (the window's custom size fields).
+    var overlayEscapeOverride: (() -> Void)?
+
+    /// After a window was resized: the list, and the picked window, take its new bounds.
+    func windowResized(_ window: WindowInfo) {
+        Task {
+            await refreshSources()
+            if case .window(let picked) = selection, picked.id == window.id,
+               let updated = windows.first(where: { $0.id == window.id }) {
+                selection = .window(updated)
+            }
+        }
+    }
+
     /// A window chosen from "Select window".
     func selectWindow(_ window: WindowInfo) {
         sourceType = .window

@@ -148,6 +148,8 @@ final class Preferences: ObservableObject {
     @Published var recordingEngine: String
     /// Saved area dimensions ("Saved" menu of the area picker).
     @Published var recordingAreaCropPresets: [AreaSize]
+    /// Saved window sizes (the window picker's "Resize" menu).
+    @Published var recordingWindowSizePresets: [AreaSize]
     /// Last area selection, restored when "Area" is chosen (`lastPickedArea`).
     @Published var lastPickedArea: PickedArea?
     /// Devices chosen in the record picker (`recordingSourceInput`).
@@ -211,6 +213,7 @@ final class Preferences: ObservableObject {
         enableSmoothWaveform = bool("enableSmoothWaveform", true)
         recordingEngine = store.string(forKey: "recordingUseScreenCaptureKit") ?? "auto"
         recordingAreaCropPresets = decode("recordingAreaCropPresets") ?? []
+        recordingWindowSizePresets = decode("recordingWindowSizePresets") ?? []
         lastPickedArea = decode("lastPickedArea")
         recordingCameraID = store.string(forKey: "recordingCameraID")
         recordingMicrophoneID = store.string(forKey: "recordingMicrophoneID")
@@ -273,6 +276,7 @@ final class Preferences: ObservableObject {
         set("enableSmoothWaveform", enableSmoothWaveform)
         set("recordingUseScreenCaptureKit", recordingEngine)
         encode("recordingAreaCropPresets", recordingAreaCropPresets)
+        encode("recordingWindowSizePresets", recordingWindowSizePresets)
         encode("lastPickedArea", lastPickedArea)
         set("recordingCameraID", recordingCameraID)
         set("recordingMicrophoneID", recordingMicrophoneID)
@@ -317,6 +321,7 @@ final class Preferences: ObservableObject {
         enableSmoothWaveform = true
         recordingEngine = "auto"
         recordingAreaCropPresets = []
+        recordingWindowSizePresets = []
         lastPickedArea = nil
         recordingCameraID = nil
         recordingMicrophoneID = nil

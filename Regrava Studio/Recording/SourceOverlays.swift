@@ -49,7 +49,11 @@ final class SourceOverlayController {
                 return true
             }
         case 53:
-            coordinator.escape()
+            if let override = coordinator.overlayEscapeOverride {
+                override()
+            } else {
+                coordinator.escape()
+            }
             return true
         case 123, 124, 125, 126:
             guard case let .area(id, rect) = coordinator.selection else { return false }
@@ -158,16 +162,24 @@ private struct DisplayPickerOverlay: View {
     }
 }
 
+extension SourceCard where Meta == EmptyView {
+    init(title: String, meta: String?, @ViewBuilder accessory: @escaping () -> Accessory) {
+        self.init(title: title, meta: meta, metaView: EmptyView(), accessory: accessory)
+    }
+}
+
 /// Centered title (hero 32) + meta (12) + accessory, max width 320, text shadow.
-private struct SourceCard<Accessory: View>: View {
+private struct SourceCard<Meta: View, Accessory: View>: View {
     var title: String
     var meta: String?
+    var metaView: Meta
     @ViewBuilder var accessory: () -> Accessory
 
     var body: some View {
         VStack(spacing: Theme.gap(2)) {
             Text(title).font(Theme.Typo.hero).multilineTextAlignment(.center)
             if let meta { Text(meta).font(Theme.Typo.label).opacity(0.8) }
+            metaView
             accessory()
         }
         .foregroundStyle(.white)
@@ -254,7 +266,7 @@ private struct WindowHighlight: View {
             if active {
                 VStack(spacing: Theme.gap(2)) {
                     if let path = window.appPath { AppIconView(path: path) }
-                    SourceCard(title: window.appName.replacingOccurrences(of: ".app", with: ""), meta: "\(Int(window.frame.width)) × \(Int(window.frame.height))") {
+                    SourceCard(title: window.appName.replacingOccurrences(of: ".app", with: ""), meta: nil, metaView: WindowResizeMeta(coordinator: coordinator, window: window, display: display)) {
                         StartRecordingButton(coordinator: coordinator, target: .window(window), isActive: active)
                     }
                 }
@@ -300,6 +312,139 @@ extension WindowHighlight {
             menu.item("Reset ignored windows") { coordinator.ignoredWindowIDs.removeAll() }
         }
         return menu
+    }
+}
+
+// MARK: - Window resize
+
+/// The window's "W × H" with a "Resize" button; "Custom..." edits the size in place (Enter or
+/// Confirm applies it, Escape closes it).
+private struct WindowResizeMeta: View {
+    @ObservedObject var coordinator: RecordingCoordinator
+    @ObservedObject var preferences = Preferences.shared
+    var window: WindowInfo
+    var display: DisplayInfo
+    @State private var isCustom = false
+    @State private var width = ""
+    @State private var height = ""
+
+    private var current: PickerSize { PickerSize(width: Int(window.frame.width), height: Int(window.frame.height)) }
+
+    var body: some View {
+        VStack(spacing: Theme.gap(1)) {
+            if isCustom {
+                HStack(spacing: Theme.gap(0)) {
+                    ResizeField(text: $width, autofocus: true) { apply(nil) }
+                    Text("×")
+                    ResizeField(text: $height, autofocus: false) { apply(nil) }
+                    ResizeChip(title: "Confirm", isPrimary: true) { apply(nil) }
+                }
+            } else {
+                HStack(spacing: Theme.gap(0)) {
+                    Text(current.label)
+                    ResizeChip(title: "Resize", isPrimary: false) { menu().popUp(below: nil) }
+                }
+            }
+        }
+        .font(Theme.Typo.label)
+        .onAppear { reset() }
+        .onChange(of: current) { _, _ in reset() }
+        .onChange(of: isCustom) { _, custom in
+            coordinator.overlayEscapeOverride = custom ? { isCustom = false } : nil
+        }
+        .onDisappear { if isCustom { coordinator.overlayEscapeOverride = nil } }
+    }
+
+    private func reset() {
+        width = String(current.width)
+        height = String(current.height)
+    }
+
+    /// Resizes the real window when the size changed.
+    private func apply(_ size: PickerSize?) {
+        let target = size ?? PickerSize(width: Int(width) ?? current.width, height: Int(height) ?? current.height)
+        guard target != current else { return }
+        if WindowActions.resize(window, to: CGSize(width: target.width, height: target.height)) {
+            isCustom = false
+            coordinator.windowResized(window)
+        }
+    }
+
+    /// 16:9 sizes, then 4:3, 9:16, 16:10 and Square, the saved sizes, and Custom.
+    private func menu() -> MenuBuilder {
+        let displaySize = display.frame.size
+        let current = self.current
+        let saved = preferences.recordingWindowSizePresets.map { PickerSize(width: $0.width, height: $0.height) }
+        let menu = MenuBuilder()
+        func add(_ size: PickerSize, to builder: MenuBuilder) {
+            builder.item(size.label, enabled: WindowSizePresets.isEnabled(size, current: current, display: displaySize)) { apply(size) }
+        }
+        menu.group("16:9")
+        WindowSizePresets.sixteenByNine.forEach { add($0, to: menu) }
+        menu.group("presets")
+        for (title, sizes) in [("4:3", WindowSizePresets.fourByThree), ("9:16", WindowSizePresets.nineBySixteen), ("16:10", WindowSizePresets.sixteenByTen), ("Square", WindowSizePresets.square)] {
+            menu.submenu(title) { sub in sizes.forEach { add($0, to: sub) } }
+        }
+        menu.group("saved")
+        if saved.isEmpty {
+            menu.disabled("No saved sizes")
+        } else {
+            saved.forEach { add($0, to: menu) }
+        }
+        if WindowSizePresets.canSave(current, saved: saved) {
+            menu.item("Save current size") {
+                Preferences.shared.recordingWindowSizePresets.append(AreaSize(width: current.width, height: current.height))
+            }
+        }
+        if !saved.isEmpty {
+            menu.group("delete")
+            menu.submenu("Delete saved sizes") { sub in
+                for size in saved {
+                    sub.item("Delete \(size.label)", destructive: true) {
+                        Preferences.shared.recordingWindowSizePresets.removeAll { $0 == AreaSize(width: size.width, height: size.height) }
+                    }
+                }
+            }
+        }
+        menu.group("custom")
+        menu.item("Custom...") { isCustom = true }
+        return menu
+    }
+}
+
+/// 22 pt chip, radius 6, padding 2×8; text@0.2, or the highlight color when primary.
+private struct ResizeChip: View {
+    var title: String
+    var isPrimary: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(RoundedRectangle(cornerRadius: 6).fill(isPrimary ? sourceHighlight : Color.white.opacity(0.2)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 44×22 number field, radius 6, text@0.2.
+private struct ResizeField: View {
+    @Binding var text: String
+    var autofocus: Bool
+    var onSubmit: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text)
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.center)
+            .frame(width: 44, height: 22)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.2)))
+            .focused($focused)
+            .onSubmit(onSubmit)
+            .onAppear { if autofocus { focused = true } }
     }
 }
 
