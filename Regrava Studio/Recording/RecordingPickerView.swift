@@ -1,7 +1,9 @@
 import AVFoundation
 import AppKit
 import RegravaCapture
+import RegravaCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Record picker row.
 struct RecordingPickerView: View {
@@ -33,6 +35,28 @@ struct RecordingPickerView: View {
         .frame(height: 64)
         .foregroundStyle(Theme.Colors.text)
         .onExitCommand { coordinator.escape() }
+        .overlay { if isDropTargeted { DropProjectCover() } }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: dropProjects)
+    }
+
+    @State private var isDropTargeted = false
+
+    /// Dropped projects open; a drop with any other file is ignored.
+    private func dropProjects(_ providers: [NSItemProvider]) -> Bool {
+        Task { @MainActor in
+            var urls: [URL] = []
+            for provider in providers {
+                guard let url = try? await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) as? Data,
+                      let fileURL = URL(dataRepresentation: url, relativeTo: nil) else { return }
+                urls.append(fileURL)
+            }
+            guard !urls.isEmpty, urls.allSatisfy({ $0.pathExtension == ProjectStore.fileExtension }) else { return }
+            for url in urls {
+                coordinator.closePicker()
+                AppController.shared.openProject(at: url)
+            }
+        }
+        return true
     }
 
     private var inputRow: some View {
@@ -114,6 +138,20 @@ enum WindowSelectMenu {
                 }
             }
         }
+    }
+}
+
+/// Full black cover while a project is dragged over the picker.
+private struct DropProjectCover: View {
+    var body: some View {
+        HStack(spacing: Theme.gap(1)) {
+            Image(systemName: "arrow.down.document.fill").font(.system(size: 16))
+            Text("Drop to open project").font(Theme.Typo.copy)
+        }
+        .foregroundStyle(Theme.Colors.text)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .transition(.opacity.animation(.easeOut(duration: 0.15)))
     }
 }
 
