@@ -60,14 +60,11 @@ final class SourceOverlayController {
             let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
             let dx: CGFloat = event.keyCode == 123 ? -step : event.keyCode == 124 ? step : 0
             let dy: CGFloat = event.keyCode == 126 ? -step : event.keyCode == 125 ? step : 0
-            var updated = rect
-            if event.modifierFlags.contains(.command) {
-                updated.size.width = max(updated.width + dx, 1)
-                updated.size.height = max(updated.height + dy, 1)
-            } else {
-                updated = updated.offsetBy(dx: dx, dy: dy)
+            // A move or resize that would leave the display is ignored.
+            let resize = event.modifierFlags.contains(.command)
+            if let updated = PickerRules.arrowChange(rect, dx: dx, dy: dy, resize: resize, display: CGDisplayBounds(id).size) {
+                coordinator.setArea(displayID: id, rect: updated)
             }
-            coordinator.setArea(displayID: id, rect: AreaPickerState.clamp(updated, to: CGDisplayBounds(id).size))
             return true
         default:
             break
