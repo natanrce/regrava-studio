@@ -191,10 +191,17 @@ private struct WindowPickerOverlay: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            // With a window picked a click lets it go; otherwise it offers the whole display.
             coverColor()
                 .contentShape(Rectangle())
-                .onTapGesture { coordinator.selection = nil }
-                .contextMenu { Button("Record entire display") { coordinator.recordEntireDisplay(display) } }
+                .onTapGesture {
+                    if case .window = coordinator.selection {
+                        coordinator.selection = nil
+                    } else {
+                        displayMenu().popUp(below: nil)
+                    }
+                }
+                .rightClickMenu { displayMenu() }
             // Back-most first so the front-most window wins hit testing.
             ForEach(windows.reversed()) { window in
                 WindowHighlight(coordinator: coordinator, window: window, display: display)
@@ -208,6 +215,16 @@ private struct WindowPickerOverlay: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+}
+
+extension WindowPickerOverlay {
+    fileprivate func displayMenu() -> MenuBuilder {
+        let coordinator = self.coordinator
+        let display = self.display
+        let menu = MenuBuilder()
+        menu.item("Record entire display") { coordinator.recordEntireDisplay(display) }
+        return menu
     }
 }
 
