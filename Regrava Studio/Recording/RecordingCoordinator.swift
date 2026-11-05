@@ -231,9 +231,7 @@ final class RecordingCoordinator: ObservableObject {
         }
         refreshDevices()
         RecordingRecovery.shared.refresh()
-        // Forget devices that are gone.
-        if let id = cameraID, !cameras.contains(where: { $0.id == id }) { cameraID = nil }
-        if let id = microphoneID, !microphones.contains(where: { $0.id == id }) { microphoneID = nil }
+        // A chosen camera or microphone that is gone stays chosen: Start asks about it.
         isPickerOpen = true
         let sources = reloadSources()
         if pickerPanel == nil {
@@ -444,29 +442,20 @@ final class RecordingCoordinator: ObservableObject {
             }
             selection = target
         }
-        guard selection != nil, selectionError == nil, !isRecording else { return }
+        guard let selection, selectionError == nil, !isRecording else { return }
         Task {
-            if microphoneID != nil, !(await Permissions.ensureAccess(for: .audio)) {
-                Dialogs.info(
-                    title: "Regrava Studio does not have permission to use your microphone",
-                    message: "Please check your system privacy settings."
-                )
+            // Missing access is asked for first; Start is then pressed again.
+            if microphoneID != nil, !MediaPermission.microphone.isAuthorized {
+                MediaPermission.microphone.request()
                 return
             }
-            if cameraID != nil, !(await Permissions.ensureAccess(for: .video)) {
-                Dialogs.info(
-                    title: "Regrava Studio does not have permission to use your camera",
-                    message: "Please check your system privacy settings."
-                )
+            if cameraID != nil, !MediaPermission.camera.isAuthorized {
+                MediaPermission.camera.request()
                 return
             }
-            if cameraID != nil, microphoneID == nil, !Dialogs.confirm(
-                title: "Record muted camera?",
-                message: "Seems you have selected a camera but no microphone. Do you want to continue recording with muted camera?",
-                confirm: "Record muted camera"
-            ) {
-                return
-            }
+            guard let resolved = await resolveStart(selection) else { return }
+            self.selection = resolved.selection
+            startDevices = resolved.devices
             if let duration = preferences.recordingCountdownDuration, duration > 0 {
                 overlays.hide()
                 phase = .countdown(total: duration, startedAt: Date())
@@ -478,6 +467,92 @@ final class RecordingCoordinator: ObservableObject {
                 await begin()
             }
         }
+    }
+
+    /// The camera and microphone the recording uses: the chosen ones that are connected.
+    private var startDevices: (cameraID: String?, microphoneID: String?) = (nil, nil)
+
+    /// Asked once until the device is chosen again.
+    private static let previousCameraNotConnectedKey = "showInfoAboutPreviousCameraNotConnected"
+    private static let previousMicrophoneNotConnectedKey = "showInfoAboutPreviousMicrophoneNotConnected"
+
+    private func flag(_ key: String) -> Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+
+    /// The checks before a recording starts, in order; nil when one stops it.
+    private func resolveStart(_ selection: RecordSelection) async -> (selection: RecordSelection, devices: (cameraID: String?, microphoneID: String?))? {
+        refreshDevices()
+        let microphone = microphoneID.flatMap { id in microphones.first { $0.id == id } }
+        let camera = cameraID.flatMap { id in cameras.first { $0.id == id } }
+        func permissionDialog(_ title: String, _ permission: MediaPermission) {
+            Dialogs.messageBox(
+                title: title,
+                message: "Please check your system privacy settings.",
+                buttons: [("Open System Settings", { permission.request() }), ("Close", {})]
+            )
+        }
+        if MediaPermission.screen.isDenied {
+            permissionDialog("Regrava Studio does not have permission to record your screen", .screen)
+            return nil
+        }
+        if let microphone, MicrophoneLid.mayHaveLidClosed(microphoneID: microphone.id) {
+            Dialogs.info(
+                title: "Microphone you selected is covered by laptop lid",
+                message: "Please open the lid so the microphone can capture audio or select another microphone."
+            )
+            return nil
+        }
+        if microphone != nil {
+            UserDefaults.standard.set(true, forKey: Self.previousMicrophoneNotConnectedKey)
+            if MediaPermission.microphone.isDenied {
+                permissionDialog("Regrava Studio does not have permission to use your microphone", .microphone)
+                return nil
+            }
+        }
+        if camera != nil {
+            UserDefaults.standard.set(true, forKey: Self.previousCameraNotConnectedKey)
+            if MediaPermission.camera.isDenied {
+                permissionDialog("Regrava Studio does not have permission to use your camera", .camera)
+                return nil
+            }
+        }
+        if camera != nil, microphone == nil, !Dialogs.confirm(
+            title: "Record muted camera?",
+            message: "Seems you have selected a camera but no microphone. Do you want to continue recording with muted camera?",
+            confirm: "Record muted camera"
+        ) {
+            return nil
+        }
+        if cameraID != nil, camera == nil, flag(Self.previousCameraNotConnectedKey) {
+            guard Dialogs.confirm(
+                title: "Camera you have previously selected seems to not be connected anymore",
+                message: "Do you want to continue recording without camera?",
+                confirm: "Record without camera"
+            ) else { return nil }
+            UserDefaults.standard.set(false, forKey: Self.previousCameraNotConnectedKey)
+        }
+        if microphoneID != nil, microphone == nil, flag(Self.previousMicrophoneNotConnectedKey) {
+            guard Dialogs.confirm(
+                title: "Microphone you have previously selected seems to not be connected anymore",
+                message: "Do you want to continue recording without microphone?",
+                confirm: "Record without microphone"
+            ) else { return nil }
+            UserDefaults.standard.set(false, forKey: Self.previousMicrophoneNotConnectedKey)
+        }
+        var selection = selection
+        if case .window(let picked) = selection {
+            // The window as it is now: gone, moved or resized since it was picked.
+            guard var live = await CaptureCatalog.window(id: picked.id) else {
+                Dialogs.info(
+                    title: "Window is not capturable anymore",
+                    message: "Window is not capturable anymore. Maybe it was closed. Please try again."
+                )
+                return nil
+            }
+            if live.frame == picked.frame { live = picked }
+            selection = .window(live)
+            WindowActions.bringToFront(live)
+        }
+        return (selection, (camera?.id, microphone?.id))
     }
 
     /// "Continue" in the get-ready indicator: start now.
@@ -522,14 +597,11 @@ final class RecordingCoordinator: ObservableObject {
             fps: 60,
             capturesSystemAudio: systemAudio,
             systemAudioProcessIDs: pids,
-            microphoneID: microphoneID,
+            microphoneID: startDevices.microphoneID,
             hidesDesktopIcons: preferences.hideDesktopContentWhileRecording,
-            cameraID: cameraID,
+            cameraID: startDevices.cameraID,
             cameraMaxHeight: preferences.maximumWebcamHeight
         )
-        if case .window(let window) = selection {
-            NSRunningApplication(processIdentifier: window.processID)?.activate()
-        }
         // Device recordings always carry the device's audio.
         let recordsSound = options.capturesSystemAudio || options.microphoneID != nil || selection.captureSource == nil
         lastRecordsSound = recordsSound
@@ -562,7 +634,7 @@ final class RecordingCoordinator: ObservableObject {
         let mode: String
         switch selection {
         case .display(let display): name = display.label; mode = "display"
-        case .window(let window): name = window.appName; mode = "window"
+        case .window(let window): name = window.appName.replacingOccurrences(of: ".app", with: ""); mode = "window"
         case .device: name = "External Device"; mode = "device"
         default: name = "Area"; mode = "display"
         }

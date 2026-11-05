@@ -27,7 +27,8 @@ enum DeviceCatalog {
             mediaType: .audio,
             position: .unspecified
         )
-        return sorted(session.devices, defaultID: AVCaptureDevice.default(for: .audio)?.uniqueID)
+        // Suspended microphones (behind a closed lid) are not offered.
+        return sorted(session.devices.filter { !$0.isSuspended }, defaultID: AVCaptureDevice.default(for: .audio)?.uniqueID)
     }
 
     private static func sorted(_ devices: [AVCaptureDevice], defaultID: String?) -> [CaptureDeviceInfo] {
