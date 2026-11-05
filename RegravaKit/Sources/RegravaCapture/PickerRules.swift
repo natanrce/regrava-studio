@@ -84,3 +84,63 @@ public enum WindowSizePresets {
         list.map { PickerSize(width: $0.0, height: $0.1) }
     }
 }
+
+/// The area picker's size and position rules, in display-local points.
+public enum AreaCrop {
+    /// Fields typed in the toolbar: a changed value replaces the area's, then the area is moved
+    /// back onto the display when it runs past its right or bottom edge, and shrunk to the
+    /// display when larger.
+    public static func fit(x: CGFloat? = nil, y: CGFloat? = nil, width: CGFloat? = nil, height: CGFloat? = nil, crop: CGRect, display: CGSize) -> CGRect {
+        var x = x ?? crop.minX
+        var y = y ?? crop.minY
+        var width = width ?? crop.width
+        var height = height ?? crop.height
+        if x + width >= display.width, width <= display.width { x = display.width - width }
+        if y + height >= display.height, height <= display.height { y = display.height - height }
+        if width > display.width { width = display.width; x = 0 }
+        if height > display.height { height = display.height; y = 0 }
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// A size change under a forced aspect ratio (width / height): the given side drives the
+    /// other (with no side given, the height drives the width), sides are raised to
+    /// `minimumSize`, the result is scaled down into the largest area of that ratio the display
+    /// holds, and the position is clamped onto the display.
+    public static func constrain(width: CGFloat? = nil, height: CGFloat? = nil, crop: CGRect, aspectRatio: Double?, display: CGSize, minimumSize: CGFloat) -> CGRect {
+        var width = width.map { min($0, display.width) }
+        var height = height.map { min($0, display.height) }
+        let limit: CGSize
+        if let aspectRatio {
+            let wide = CGSize(width: display.height * aspectRatio, height: display.height)
+            let scale = max(wide.width / display.width, wide.height / display.height)
+            limit = scale <= 1 ? wide : CGSize(width: wide.width / scale, height: wide.height / scale)
+        } else {
+            limit = display
+        }
+        width = width.map { max($0, minimumSize) }
+        height = height.map { max($0, minimumSize) }
+        var size: CGSize
+        if let aspectRatio {
+            if let width {
+                size = CGSize(width: width, height: width / aspectRatio)
+            } else if let height {
+                size = CGSize(width: height * aspectRatio, height: height)
+            } else {
+                size = CGSize(width: crop.height * aspectRatio, height: crop.height)
+            }
+        } else {
+            size = CGSize(width: width ?? crop.width, height: height ?? crop.height)
+        }
+        let scale = max(size.width / limit.width, size.height / limit.height)
+        if scale > 1 { size = CGSize(width: size.width / scale, height: size.height / scale) }
+        let x = min(max(crop.minX, 0), display.width - size.width)
+        let y = min(max(crop.minY, 0), display.height - size.height)
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// A saved area can be used when it fits on the display where it was saved and is not
+    /// the current size.
+    public static func isSavedEnabled(_ saved: CGRect, current: CGSize, display: CGSize) -> Bool {
+        saved.minX + saved.width <= display.width && saved.minY + saved.height <= display.height && saved.size != current
+    }
+}

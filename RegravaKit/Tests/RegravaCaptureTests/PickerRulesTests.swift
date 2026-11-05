@@ -46,4 +46,36 @@ final class PickerRulesTests: XCTestCase {
         XCTAssertTrue(WindowSizePresets.canSave(PickerSize(width: 1000, height: 700), saved: []))
         XCTAssertFalse(WindowSizePresets.canSave(PickerSize(width: 1000, height: 700), saved: [PickerSize(width: 1000, height: 700)]))
     }
+
+    func testAreaFieldsAreFittedOntoTheDisplay() {
+        let size = display.size
+        let crop = CGRect(x: 1000, y: 500, width: 400, height: 300)
+        XCTAssertEqual(AreaCrop.fit(width: 600, crop: crop, display: size), CGRect(x: 912, y: 500, width: 600, height: 300))
+        XCTAssertEqual(AreaCrop.fit(height: 2000, crop: crop, display: size), CGRect(x: 1000, y: 0, width: 400, height: 982))
+        XCTAssertEqual(AreaCrop.fit(x: 20, crop: crop, display: size), CGRect(x: 20, y: 500, width: 400, height: 300))
+    }
+
+    func testAspectRatioChoiceKeepsTheHeight() {
+        let size = display.size
+        let crop = CGRect(x: 100, y: 100, width: 400, height: 300)
+        // 16:9 from a 300 tall area: 533.3 × 300.
+        let wide = AreaCrop.constrain(crop: crop, aspectRatio: 16.0 / 9, display: size, minimumSize: 200)
+        XCTAssertEqual(wide.width, 300 * 16 / 9, accuracy: 0.001)
+        XCTAssertEqual(wide.height, 300)
+        XCTAssertEqual(wide.origin, CGPoint(x: 100, y: 100))
+        // A tall area at 16:9 is limited to the widest 16:9 area of the display (1512 × 850.5).
+        let tall = AreaCrop.constrain(crop: CGRect(x: 0, y: 0, width: 300, height: 900), aspectRatio: 16.0 / 9, display: size, minimumSize: 200)
+        XCTAssertEqual(tall.width, 1512, accuracy: 0.001)
+        XCTAssertEqual(tall.height, 850.5, accuracy: 0.001)
+        // Typing a width under 1:1 sets the height, raised to the minimum.
+        let square = AreaCrop.constrain(width: 0.5, crop: crop, aspectRatio: 1, display: size, minimumSize: 1)
+        XCTAssertEqual(square.size, CGSize(width: 1, height: 1))
+    }
+
+    func testSavedAreaRules() {
+        let size = display.size
+        XCTAssertTrue(AreaCrop.isSavedEnabled(CGRect(x: 10, y: 10, width: 800, height: 600), current: CGSize(width: 400, height: 300), display: size))
+        XCTAssertFalse(AreaCrop.isSavedEnabled(CGRect(x: 1000, y: 10, width: 800, height: 600), current: CGSize(width: 400, height: 300), display: size))
+        XCTAssertFalse(AreaCrop.isSavedEnabled(CGRect(x: 10, y: 10, width: 400, height: 300), current: CGSize(width: 400, height: 300), display: size))
+    }
 }
