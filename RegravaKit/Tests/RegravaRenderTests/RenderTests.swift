@@ -418,6 +418,52 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
         }
     }
 
+    /// Studio quality encodes with the high mode, Social Media with balanced: same frames and timing,
+    /// different bytes.
+    @Test func gifQualityModesChangeTheEncoding() async throws {
+        try await withTestVideo { source, dir in
+            var sizes: [ExportQuality: Int] = [:]
+            for quality in [ExportQuality.studio, .socialMedia] {
+                let output = dir.appendingPathComponent("\(quality.rawValue).gif")
+                var settings = ExportSettings.defaults(for: .gif)
+                settings.quality = quality
+                settings.fps = 10
+                try await ProjectExporter.export(project: sampleProject(duration: 1000), videoURL: source, settings: settings, to: output, cursors: nil)
+                let data = try Data(contentsOf: output)
+                #expect(Array(data.prefix(6)) == Array("GIF89a".utf8))
+                // Global table flag with 256 entries; palettes hold at most 255 colours (255 is transparent).
+                #expect(data[10] == 0xF7)
+                #expect(data.range(of: Data("NETSCAPE2.0".utf8)) != nil)
+                #expect(!FileManager.default.fileExists(atPath: output.appendingPathExtension("partial").path))
+                let gif = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+                let count = CGImageSourceGetCount(gif)
+                #expect(count >= 1 && count <= 10)
+                var totalDelay = 0.0
+                for i in 0..<count {
+                    let props = CGImageSourceCopyPropertiesAtIndex(gif, i, nil) as? [CFString: Any]
+                    let gifProps = props?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+                    totalDelay += (gifProps?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? 0
+                }
+                #expect(abs(totalDelay - 1) < 0.001)
+                sizes[quality] = data.count
+            }
+            #expect(sizes[.studio] != sizes[.socialMedia])
+        }
+    }
+
+    @Test func gifWithoutLoopHasNoLoopExtension() async throws {
+        try await withTestVideo { source, dir in
+            let output = dir.appendingPathComponent("once.gif")
+            var settings = ExportSettings.defaults(for: .gif)
+            settings.fps = 10
+            settings.gifDisableLoop = true
+            try await ProjectExporter.export(project: sampleProject(duration: 500), videoURL: source, settings: settings, to: output, cursors: nil)
+            let data = try Data(contentsOf: output)
+            #expect(data.range(of: Data("NETSCAPE2.0".utf8)) == nil)
+            #expect(data.last == 0x3B)
+        }
+    }
+
     @Test func cancellationStopsExportAndRemovesFile() async throws {
         try await withTestVideo { source, dir in
             let output = dir.appendingPathComponent("export.mp4")
