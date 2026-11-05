@@ -4,8 +4,10 @@ import Foundation
 /// One stream of samples, read once, handed in order to several writer inputs: every output of
 /// an export gets the same rendered frames without rendering them again.
 ///
-/// A sample stays held until every input has taken it. The inputs that ask first read the next
-/// sample for everyone, at most `maxHeld` samples ahead of the slowest input.
+/// A sample stays held until every input has taken it, and at most `maxHeld` samples are held.
+/// Without read-ahead the input that asks first reads the next sample for everyone; with it, a
+/// thread of its own reads while there is room, so the next frame renders while the encoders
+/// take the last one.
 final class ExportSampleFanOut: @unchecked Sendable {
     private let condition = NSCondition()
     private let read: () -> CMSampleBuffer?
@@ -17,13 +19,40 @@ final class ExportSampleFanOut: @unchecked Sendable {
     private var cursors: [Int]
     private var isReading = false
     private var ended = false
+    private let readsAhead: Bool
 
-    /// `read` returns the next sample to hand out, or nil at the end of the stream.
-    init(consumers: Int, maxHeld: Int = 1, read: @escaping () -> CMSampleBuffer?) {
+    /// `read` returns the next sample to hand out, or nil at the end of the stream. With
+    /// `readAhead`, reading starts at once on its own thread.
+    init(consumers: Int, maxHeld: Int = 1, readAhead: Bool = false, label: String = "export read-ahead", read: @escaping () -> CMSampleBuffer?) {
         precondition(consumers > 0 && maxHeld > 0)
         self.read = read
         self.maxHeld = maxHeld
+        self.readsAhead = readAhead
         cursors = Array(repeating: 0, count: consumers)
+        if readAhead {
+            let thread = Thread { [self] in readAheadLoop() }
+            thread.name = label
+            thread.qualityOfService = Thread.current.qualityOfService
+            thread.start()
+        }
+    }
+
+    /// Reads while fewer than `maxHeld` samples are held, until the stream ends or every input
+    /// has left.
+    private func readAheadLoop() {
+        condition.lock()
+        defer { condition.unlock() }
+        while true {
+            while !ended, held.count >= maxHeld { condition.wait() }
+            if ended { return }
+            isReading = true
+            condition.unlock()
+            let sample = read()
+            condition.lock()
+            isReading = false
+            if let sample { held.append(sample) } else { ended = true }
+            condition.broadcast()
+        }
     }
 
     /// The next sample for `consumer`, or nil at the end. Blocks while the sample is still being
@@ -40,7 +69,7 @@ final class ExportSampleFanOut: @unchecked Sendable {
                 return sample
             }
             if ended { return nil }
-            if !isReading, held.count < maxHeld {
+            if !readsAhead, !isReading, held.count < maxHeld {
                 isReading = true
                 condition.unlock()
                 let sample = read()
@@ -65,6 +94,7 @@ final class ExportSampleFanOut: @unchecked Sendable {
     /// Drops the samples every input has taken and wakes whoever waits for room.
     private func release() {
         let slowest = cursors.min() ?? .max
+        if slowest == .max { ended = true }
         let taken = min(max(slowest - firstHeld, 0), held.count)
         if taken > 0 {
             held.removeFirst(taken)

@@ -85,6 +85,41 @@ struct ExportFanOutTests {
         #expect(source.reads == 2)
     }
 
+    /// Read-ahead renders the next frame while the inputs take the last, never more than
+    /// `maxHeld` ahead, and hands every input the same frames in order.
+    @Test func readAheadReadsTheNextSampleBeforeItIsAskedFor() async throws {
+        let source = Source(count: 100)
+        let fanOut = ExportSampleFanOut(consumers: 2, maxHeld: 1, readAhead: true, read: source.read)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(source.reads == 1)
+        #expect(fanOut.next(for: 0).map(Self.index) == 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(source.reads == 1)
+        #expect(fanOut.next(for: 1).map(Self.index) == 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(source.reads == 2)
+        let seen = await withTaskGroup(of: [Int].self) { group in
+            for consumer in 0..<2 {
+                group.addTask {
+                    var indices: [Int] = []
+                    while let buffer = fanOut.next(for: consumer) { indices.append(Self.index(buffer)) }
+                    return indices
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+        for indices in seen { #expect(indices == Array(1..<100)) }
+    }
+
+    @Test func readAheadStopsWhenEveryInputLeaves() async throws {
+        let source = Source(count: 1000)
+        let fanOut = ExportSampleFanOut(consumers: 1, maxHeld: 1, readAhead: true, read: source.read)
+        #expect(fanOut.next(for: 0).map(Self.index) == 0)
+        fanOut.leave(0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(source.reads <= 2)
+    }
+
     @Test func progressIsTheSlowestOutputOnceEachHasAFrame() {
         let reported = Reported()
         let progress = ExportOutputProgress(outputs: 2) { reported.values.append($0) }

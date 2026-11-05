@@ -100,6 +100,10 @@ public enum ProjectExporter {
 
     // MARK: Movie (MP4 / ProRes)
 
+    /// Frames rendered ahead of the encoders: the next one is drawn while the encoders take the
+    /// last.
+    static let framesAhead = 1
+
     /// BT.709 colour tags written on every exported video stream.
     static let colorProperties: [String: String] = [
         AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
@@ -250,7 +254,7 @@ public enum ProjectExporter {
         nonisolated(unsafe) let sharedReader = reader
         nonisolated(unsafe) let sharedVideoOutput: AVAssetReaderOutput = videoOutput
         let limiter = FrameRateLimiter(fps: settings.fps)
-        let frames = ExportSampleFanOut(consumers: writers.count) {
+        let frames = ExportSampleFanOut(consumers: writers.count, maxHeld: framesAhead, readAhead: true, label: "export frames") {
             while !cancelled.isSet, sharedReader.status == .reading, let buffer = sharedVideoOutput.copyNextSampleBuffer() {
                 if limiter.keep(CMSampleBufferGetPresentationTimeStamp(buffer).seconds) { return buffer }
             }
