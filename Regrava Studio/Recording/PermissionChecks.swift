@@ -59,3 +59,38 @@ enum MediaPermission {
         }
     }
 }
+
+/// Whether the app can record (Screen Recording and Accessibility), as last checked. It is
+/// checked when the picker opens and every 500 ms while it is false; whenever it turns false
+/// the picker and Settings close and onboarding is shown.
+@MainActor
+final class RecordPermissionWatcher {
+    static let shared = RecordPermissionWatcher()
+    private(set) var canRecord: Bool?
+    private var timer: Timer?
+
+    @discardableResult
+    func refresh() -> Bool {
+        let now = Permissions.canRecord
+        let previous = canRecord
+        canRecord = now
+        if now {
+            timer?.invalidate()
+            timer = nil
+        } else {
+            if timer == nil {
+                timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                    MainActor.assumeIsolated { _ = RecordPermissionWatcher.shared.refresh() }
+                }
+            }
+            if previous != false { lost() }
+        }
+        return now
+    }
+
+    private func lost() {
+        AppController.shared.recording.closePicker()
+        SettingsWindowController.shared.close()
+        OnboardingWindowController.shared.show()
+    }
+}

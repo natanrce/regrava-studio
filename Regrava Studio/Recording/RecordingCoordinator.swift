@@ -225,7 +225,8 @@ final class RecordingCoordinator: ObservableObject {
     /// Opens the record picker, optionally preselecting a source type (global shortcuts/menus).
     func openPicker(preselect: SourceType? = nil) {
         guard !isRecording else { return }
-        guard Permissions.canRecord else {
+        // Without the permissions, the watcher shows onboarding instead.
+        guard RecordPermissionWatcher.shared.refresh() else {
             OnboardingWindowController.shared.show()
             return
         }
