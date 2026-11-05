@@ -38,10 +38,7 @@ private func makeTestVideo(url: URL, width: Int, height: Int, frames: Int, fps: 
     #expect(writer.status == .completed)
 }
 
-/// One at a time: every export decodes with blocking AVAssetReader calls on the shared Swift
-/// concurrency threads. A dozen of them at once take every thread, and media reads that need one
-/// never finish, so the whole run stalls at 0% CPU.
-@Suite(.serialized) struct RenderTests {
+struct RenderTests {
     func sampleProject(duration: Double) -> Project {
         var project = Project(
             recording: RecordingInfo(videoSize: Size2(width: 640, height: 360), pointPixelScale: 1, durationMs: duration, fps: 30),
