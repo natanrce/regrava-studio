@@ -1847,10 +1847,12 @@ final class EditorModel: ObservableObject {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let zip = folder.appendingPathComponent("\(name).zip")
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-            process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", bundle.path, zip.path]
-            let ok = (try? process.run()) != nil && { process.waitUntilExit(); return process.terminationStatus == 0 }()
+            let ok = (try? await BlockingWork.run("project zip") { _ in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", bundle.path, zip.path]
+                return (try? process.run()) != nil && { process.waitUntilExit(); return process.terminationStatus == 0 }()
+            }) ?? false
             await MainActor.run { [weak self] in
                 if ok {
                     NSPasteboard.general.clearContents()
