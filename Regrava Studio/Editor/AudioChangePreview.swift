@@ -69,42 +69,44 @@ final class AudioChangePreview {
         let media = try await PlaybackComposition.media(asset: AVURLAsset(url: video), project: project, assetsDirectory: assets)
         let tracks = try await media.asset.loadTracks(withMediaType: .audio)
         guard !tracks.isEmpty else { return nil }
-        let reader = try AVAssetReader(asset: media.asset)
-        let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: AudioPreviewLoop.sampleRate,
-            AVNumberOfChannelsKey: 2,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsNonInterleaved: false,
-            AVLinearPCMIsBigEndianKey: false,
-        ])
-        output.audioMix = media.audioMix
-        reader.add(output)
-        let timescale = CMTimeScale(AudioPreviewLoop.sampleRate)
-        reader.timeRange = CMTimeRange(
-            start: CMTime(value: CMTimeValue(loop.startFrame), timescale: timescale),
-            duration: CMTime(value: CMTimeValue(loop.endFrame - loop.startFrame), timescale: timescale)
-        )
-        guard reader.startReading() else { return nil }
-        let capacity = AVAudioFrameCount(max(loop.endFrame - loop.startFrame, 1))
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
-        var interleaved: [Float] = []
-        while let sample = output.copyNextSampleBuffer() {
-            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
-            let length = CMBlockBufferGetDataLength(block)
-            var chunk = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
-            chunk.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
-            interleaved += chunk
+        return try await BlockingWork.run("audio change preview") { _ in
+            let reader = try AVAssetReader(asset: media.asset)
+            let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: AudioPreviewLoop.sampleRate,
+                AVNumberOfChannelsKey: 2,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsNonInterleaved: false,
+                AVLinearPCMIsBigEndianKey: false,
+            ])
+            output.audioMix = media.audioMix
+            reader.add(output)
+            let timescale = CMTimeScale(AudioPreviewLoop.sampleRate)
+            reader.timeRange = CMTimeRange(
+                start: CMTime(value: CMTimeValue(loop.startFrame), timescale: timescale),
+                duration: CMTime(value: CMTimeValue(loop.endFrame - loop.startFrame), timescale: timescale)
+            )
+            guard reader.startReading() else { return nil }
+            let capacity = AVAudioFrameCount(max(loop.endFrame - loop.startFrame, 1))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+            var interleaved: [Float] = []
+            while let sample = output.copyNextSampleBuffer() {
+                guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+                let length = CMBlockBufferGetDataLength(block)
+                var chunk = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+                chunk.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
+                interleaved += chunk
+            }
+            let frames = min(Int(capacity), interleaved.count / 2)
+            guard frames > 0, let left = buffer.floatChannelData?[0], let right = buffer.floatChannelData?[1] else { return nil }
+            for i in 0..<frames {
+                left[i] = interleaved[2 * i]
+                right[i] = interleaved[2 * i + 1]
+            }
+            buffer.frameLength = AVAudioFrameCount(frames)
+            return buffer
         }
-        let frames = min(Int(capacity), interleaved.count / 2)
-        guard frames > 0, let left = buffer.floatChannelData?[0], let right = buffer.floatChannelData?[1] else { return nil }
-        for i in 0..<frames {
-            left[i] = interleaved[2 * i]
-            right[i] = interleaved[2 * i + 1]
-        }
-        buffer.frameLength = AVAudioFrameCount(frames)
-        return buffer
     }
 
     /// Starts a voice on the stretch, taking over from the current one at its position.
