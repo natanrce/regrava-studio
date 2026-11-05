@@ -10,50 +10,53 @@ public enum SilenceAnalyzer {
         let asset = AVURLAsset(url: recording)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard audioTrackIndex < tracks.count else { return ([], 0) }
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(track: tracks[audioTrackIndex], outputSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsNonInterleaved: false,
-            AVLinearPCMIsBigEndianKey: false,
-        ])
-        reader.add(output)
-        guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadUnknown) }
-        var rms: [Double] = []
-        var sum = 0.0, count = 0, windowSamples = 0, frames = 0
-        var sampleRate = 0.0
-        while let buffer = output.copyNextSampleBuffer() {
-            try Task.checkCancellation()
-            guard let format = CMSampleBufferGetFormatDescription(buffer),
-                  let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
-                  let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
-            if sampleRate == 0 {
-                sampleRate = asbd.mSampleRate
-                windowSamples = max(Int((sampleRate * windowMs / 1000).rounded()), 1)
-            }
-            let channels = max(Int(asbd.mChannelsPerFrame), 1)
-            var length = 0
-            var pointer: UnsafeMutablePointer<Int8>?
-            CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &pointer)
-            guard let pointer else { continue }
-            let samples = pointer.withMemoryRebound(to: Float.self, capacity: length / 4) { UnsafeBufferPointer(start: $0, count: length / 4) }
-            var i = 0
-            while i < samples.count {
-                let v = Double(samples[i])
-                sum += v * v
-                count += 1
-                frames += 1
-                if count == windowSamples {
-                    rms.append((sum / Double(count)).squareRoot())
-                    sum = 0
-                    count = 0
+        let track = tracks[audioTrackIndex]
+        return try await BlockingWork.run("silence analysis") { cancellation in
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsNonInterleaved: false,
+                AVLinearPCMIsBigEndianKey: false,
+            ])
+            reader.add(output)
+            guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadUnknown) }
+            var rms: [Double] = []
+            var sum = 0.0, count = 0, windowSamples = 0, frames = 0
+            var sampleRate = 0.0
+            while let buffer = output.copyNextSampleBuffer() {
+                try cancellation.check()
+                guard let format = CMSampleBufferGetFormatDescription(buffer),
+                      let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+                      let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
+                if sampleRate == 0 {
+                    sampleRate = asbd.mSampleRate
+                    windowSamples = max(Int((sampleRate * windowMs / 1000).rounded()), 1)
                 }
-                i += channels
+                let channels = max(Int(asbd.mChannelsPerFrame), 1)
+                var length = 0
+                var pointer: UnsafeMutablePointer<Int8>?
+                CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &pointer)
+                guard let pointer else { continue }
+                let samples = pointer.withMemoryRebound(to: Float.self, capacity: length / 4) { UnsafeBufferPointer(start: $0, count: length / 4) }
+                var i = 0
+                while i < samples.count {
+                    let v = Double(samples[i])
+                    sum += v * v
+                    count += 1
+                    frames += 1
+                    if count == windowSamples {
+                        rms.append((sum / Double(count)).squareRoot())
+                        sum = 0
+                        count = 0
+                    }
+                    i += channels
+                }
             }
+            if count > 0 { rms.append((sum / Double(count)).squareRoot()) }
+            return (rms, sampleRate > 0 ? Double(frames) / sampleRate * 1000 : 0)
         }
-        if count > 0 { rms.append((sum / Double(count)).squareRoot()) }
-        return (rms, sampleRate > 0 ? Double(frames) / sampleRate * 1000 : 0)
     }
 
     /// The microphone's silences for "Hide during silence" (threshold 0.1, 50 ms windows).

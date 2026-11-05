@@ -127,58 +127,63 @@ public enum MicrophoneRenderer {
         let asset = AVURLAsset(url: url)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard tracks.indices.contains(trackIndex) else { throw RenderError.noMicrophone }
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(track: tracks[trackIndex], outputSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 2,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsNonInterleaved: false,
-            AVLinearPCMIsBigEndianKey: false,
-        ])
-        reader.add(output)
-        guard reader.startReading() else { throw RenderError.failed(reader.error?.localizedDescription ?? "Could not read the microphone.") }
-        var left: [Float] = [], right: [Float] = []
-        // One interleaved buffer reused across sample buffers, split with strided copies.
-        var data: [Float] = []
-        while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
-            let count = CMBlockBufferGetDataLength(block) / 4
-            if data.count < count { data = [Float](repeating: 0, count: count) }
-            data.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 4, destination: $0.baseAddress!) }
-            let frames = count / 2
-            guard frames > 0 else { continue }
-            let start = left.count
-            left.append(contentsOf: repeatElement(0, count: frames))
-            right.append(contentsOf: repeatElement(0, count: frames))
-            data.withUnsafeBufferPointer { interleaved in
-                left.withUnsafeMutableBufferPointer { cblas_scopy(Int32(frames), interleaved.baseAddress!, 2, $0.baseAddress! + start, 1) }
-                right.withUnsafeMutableBufferPointer { cblas_scopy(Int32(frames), interleaved.baseAddress! + 1, 2, $0.baseAddress! + start, 1) }
+        let track = tracks[trackIndex]
+        return try await BlockingWork.run("microphone read") { _ in
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 2,
+                AVLinearPCMBitDepthKey: 32,
+                AVLinearPCMIsFloatKey: true,
+                AVLinearPCMIsNonInterleaved: false,
+                AVLinearPCMIsBigEndianKey: false,
+            ])
+            reader.add(output)
+            guard reader.startReading() else { throw RenderError.failed(reader.error?.localizedDescription ?? "Could not read the microphone.") }
+            var left: [Float] = [], right: [Float] = []
+            // One interleaved buffer reused across sample buffers, split with strided copies.
+            var data: [Float] = []
+            while let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
+                let count = CMBlockBufferGetDataLength(block) / 4
+                if data.count < count { data = [Float](repeating: 0, count: count) }
+                data.withUnsafeMutableBytes { _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 4, destination: $0.baseAddress!) }
+                let frames = count / 2
+                guard frames > 0 else { continue }
+                let start = left.count
+                left.append(contentsOf: repeatElement(0, count: frames))
+                right.append(contentsOf: repeatElement(0, count: frames))
+                data.withUnsafeBufferPointer { interleaved in
+                    left.withUnsafeMutableBufferPointer { cblas_scopy(Int32(frames), interleaved.baseAddress!, 2, $0.baseAddress! + start, 1) }
+                    right.withUnsafeMutableBufferPointer { cblas_scopy(Int32(frames), interleaved.baseAddress! + 1, 2, $0.baseAddress! + start, 1) }
+                }
             }
+            if reader.status == .failed { throw RenderError.failed(reader.error?.localizedDescription ?? "Could not read the microphone.") }
+            return Stereo(left: left, right: right)
         }
-        if reader.status == .failed { throw RenderError.failed(reader.error?.localizedDescription ?? "Could not read the microphone.") }
-        return Stereo(left: left, right: right)
     }
 
     /// AAC 48 kHz stereo.
     static func write(_ audio: Stereo, to url: URL) async throws {
-        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
-        let file = try AVAudioFile(forWriting: url, settings: [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 2,
-            AVEncoderBitRateKey: 192_000,
-        ], commonFormat: .pcmFormatFloat32, interleaved: false)
-        let chunk = 65_536
-        var start = 0
-        while start < audio.count {
-            let n = min(chunk, audio.count - start)
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n)) else { break }
-            buffer.frameLength = AVAudioFrameCount(n)
-            audio.left.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress! + start, count: n) }
-            audio.right.withUnsafeBufferPointer { buffer.floatChannelData![1].update(from: $0.baseAddress! + start, count: n) }
-            try file.write(from: buffer)
-            start += n
+        try await BlockingWork.run("microphone write") { _ in
+            let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+            let file = try AVAudioFile(forWriting: url, settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 192_000,
+            ], commonFormat: .pcmFormatFloat32, interleaved: false)
+            let chunk = 65_536
+            var start = 0
+            while start < audio.count {
+                let n = min(chunk, audio.count - start)
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(n)) else { break }
+                buffer.frameLength = AVAudioFrameCount(n)
+                audio.left.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress! + start, count: n) }
+                audio.right.withUnsafeBufferPointer { buffer.floatChannelData![1].update(from: $0.baseAddress! + start, count: n) }
+                try file.write(from: buffer)
+                start += n
+            }
         }
     }
 }
