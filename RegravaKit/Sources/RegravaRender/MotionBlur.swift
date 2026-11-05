@@ -59,7 +59,10 @@ enum MotionBlur {
         return out.applyingFilter("CISRGBToneCurveToLinear").cropped(to: bounds)
     }
 
-    /// Averages `layer(t)` for t spread over the trail (0 = trail start, 1 = now), inside `bounds`.
+    /// Averages `layer(t)` for t spread over the trail (0 = trail start, 1 = now), inside `bounds`,
+    /// in a pass of its own. Left in the frame's pass, every sample would be one more input
+    /// there (read twice, for the colour and the weight), and Core Image can bind the wrong
+    /// texture to a pass with that many: the recording showed through the background.
     static func accumulate(samples: Int, bounds: CGRect, falloffRatio: Double = 0, layer: (Double) -> CIImage) -> CIImage? {
         guard samples > 1, let weighted = weightedKernel, let weightOnly = weightKernel, let divide = divideKernel else { return nil }
         let clear = CIImage(color: .clear).cropped(to: bounds)
@@ -75,7 +78,7 @@ enum MotionBlur {
             weightSum = weightSum.map { weight.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: $0]) } ?? weight
         }
         guard let colorSum, let weightSum else { return nil }
-        return divide.apply(extent: bounds, arguments: [colorSum, weightSum])
+        return divide.apply(extent: bounds, arguments: [colorSum, weightSum])?.insertingIntermediate()
     }
 }
 
