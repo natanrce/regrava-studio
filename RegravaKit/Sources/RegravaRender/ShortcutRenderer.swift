@@ -14,21 +14,24 @@ final class ShortcutRenderer: @unchecked Sendable {
     /// Output pixels per canvas pixel: keys are laid out on the canvas and drawn at the
     /// output size.
     private let outputScale: Double
+    /// Output pixels per canvas pixel across (placements only; sizes follow `outputScale`).
+    private let outputScaleX: Double
     private var cache: [String: CIImage] = [:]
     private let lock = NSLock()
 
-    init?(project: Project, canvas: Rect2, captionsShown: Bool, fps: Double, outputScale: Double = 1) {
+    init?(project: Project, canvas: Rect2, captionsShown: Bool, fps: Double, outputScale: Double = 1, outputScaleX: Double? = nil) {
         guard let track = ShortcutTrack(project: project, canvas: canvas, captionsShown: captionsShown, fps: fps) else { return nil }
         self.track = track
         canvasHeight = canvas.height
         unit = canvas.height / 1080 * outputScale
         self.outputScale = outputScale
+        self.outputScaleX = outputScaleX ?? outputScale
     }
 
     /// A canvas rect (top-left) in output pixels (y up).
     private func ciRect(_ r: Rect2) -> CGRect {
-        let k = outputScale
-        return CGRect(x: r.x * k, y: (canvasHeight - r.y - r.height) * k, width: r.width * k, height: r.height * k)
+        let kx = outputScaleX, ky = outputScale
+        return CGRect(x: r.x * kx, y: (canvasHeight - r.y - r.height) * ky, width: r.width * kx, height: r.height * ky)
     }
 
     // MARK: Artwork (256-unit key space)

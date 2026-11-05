@@ -26,12 +26,18 @@ public struct CanvasLayout: Hashable, Sendable {
     }
 
     /// The same layout on a canvas `k` times larger: everything in canvas pixels grows by `k`.
-    public func scaled(by k: Double) -> CanvasLayout {
-        CanvasLayout(canvas: Self.scaled(canvas, k), scale: scale * k, restScreen: Self.scaled(restScreen, k), videoSize: videoSize)
+    public func scaled(by k: Double) -> CanvasLayout { scaled(x: k, y: k) }
+
+    /// The same layout on a canvas `kx` times wider and `ky` times taller: placements grow by
+    /// each axis's factor, lengths (stage units to pixels) by the height's.
+    public func scaled(x kx: Double, y ky: Double) -> CanvasLayout {
+        CanvasLayout(canvas: Self.scaled(canvas, kx, ky), scale: scale * ky, restScreen: Self.scaled(restScreen, kx, ky), videoSize: videoSize)
     }
 
-    static func scaled(_ r: Rect2, _ k: Double) -> Rect2 {
-        Rect2(x: r.x * k, y: r.y * k, width: r.width * k, height: r.height * k)
+    static func scaled(_ r: Rect2, _ k: Double) -> Rect2 { scaled(r, k, k) }
+
+    static func scaled(_ r: Rect2, _ kx: Double, _ ky: Double) -> Rect2 {
+        Rect2(x: r.x * kx, y: r.y * ky, width: r.width * kx, height: r.height * ky)
     }
 
     /// Stage units to canvas pixels.
@@ -108,16 +114,20 @@ public struct CameraFrame: Hashable, Sendable {
 extension CameraFrame {
     /// The frame on a canvas `k` times larger: every canvas-pixel placement grows by `k`;
     /// video pixels, stage units and fractions stay as they are.
-    public func scaled(by k: Double) -> CameraFrame {
-        guard k != 1 else { return self }
-        func r(_ rect: Rect2) -> Rect2 { CanvasLayout.scaled(rect, k) }
+    public func scaled(by k: Double) -> CameraFrame { scaled(x: k, y: k) }
+
+    /// The frame on a canvas `kx` times wider and `ky` times taller: placements grow by each
+    /// axis's factor, widths by `kx` and lengths by the height's.
+    public func scaled(x kx: Double, y ky: Double) -> CameraFrame {
+        guard kx != 1 || ky != 1 else { return self }
+        func r(_ rect: Rect2) -> Rect2 { CanvasLayout.scaled(rect, kx, ky) }
         var f = self
         f.screenRect = r(screenRect)
         f.previousScreenRect = previousScreenRect.map(r)
         f.cameraRect = cameraRect.map(r)
         f.previousCameraRect = previousCameraRect.map(r)
-        f.cameraCornerRadius = cameraCornerRadius * k
-        f.screenReferenceWidth = screenReferenceWidth * k
+        f.cameraCornerRadius = cameraCornerRadius * ky
+        f.screenReferenceWidth = screenReferenceWidth * kx
         f.backgroundRect = backgroundRect.map(r)
         return f
     }

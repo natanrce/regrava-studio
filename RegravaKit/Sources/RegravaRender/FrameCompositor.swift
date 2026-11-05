@@ -8,11 +8,14 @@ import RegravaCore
 /// Inputs use top-left coordinates (like the rest of the project); Core Image uses
 /// bottom-left, so every rectangle is flipped through `ciRect`.
 public final class FrameCompositor: @unchecked Sendable {
-    /// The layout frames are drawn with: the canvas grown by `outputScale`.
+    /// The layout frames are drawn with: the canvas grown by `outputScaleX` across and
+    /// `outputScale` down.
     public let layout: CanvasLayout
-    /// Output pixels per canvas pixel. Frames are drawn at the output size, so every pass
-    /// runs on the pixels that are shown.
+    /// Output pixels per canvas pixel down the frame, which lengths (blur, radii, text) follow.
+    /// Frames are drawn at the output size, so every pass runs on the pixels that are shown.
     public let outputScale: Double
+    /// Output pixels per canvas pixel across the frame: the output width over the canvas's.
+    public let outputScaleX: Double
     private let style: StyleConfig
     private let cursorConfig: CursorConfig
     private let pointPixelScale: Double
@@ -42,15 +45,17 @@ public final class FrameCompositor: @unchecked Sendable {
     private let cameraGrade: (data: Data, size: Int)?
 
     /// `assetsDirectory` is the project folder (for background images).
-    /// `outputScale` draws the frame that many times larger than `layout`'s canvas; the frames
-    /// passed to `compose` stay in canvas pixels.
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1) {
+    /// `outputScale` draws the frame that many times taller than `layout`'s canvas and
+    /// `outputScaleX` (the same when nil) that many times wider; the frames passed to `compose`
+    /// stay in canvas pixels.
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1, outputScaleX: Double? = nil) {
         processing = project.processing
         self.sensitiveData = AutoMaskTimeline(detections: project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : [])
         resolver = project.resolver
         videoSize = project.recording.videoSize
         self.outputScale = outputScale
-        self.layout = layout.scaled(by: outputScale)
+        self.outputScaleX = outputScaleX ?? outputScale
+        self.layout = layout.scaled(x: self.outputScaleX, y: outputScale)
         style = project.style
         cursorConfig = project.cursor
         pointPixelScale = project.recording.pointPixelScale
@@ -59,8 +64,8 @@ public final class FrameCompositor: @unchecked Sendable {
         self.fps = fps
         camera = project.camera
         isCameraMatted = project.isCutoutLayoutUsed
-        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas, fps: fps, outputScale: outputScale)
-        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil, fps: fps, outputScale: outputScale)
+        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas, fps: fps, outputScale: outputScale, outputScaleX: self.outputScaleX)
+        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil, fps: fps, outputScale: outputScale, outputScaleX: self.outputScaleX)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         deviceFrame = project.activeDeviceFrame
         screenCrop01 = project.screenCrop01
@@ -107,9 +112,9 @@ public final class FrameCompositor: @unchecked Sendable {
     /// Trail strength of the screen and cursor while moving (0 = motion blur off).
     var motionBlurStrength: Double { MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false) }
 
-    /// `frame` in canvas pixels; the result covers the canvas grown by `outputScale`.
+    /// `frame` in canvas pixels; the result covers `layout`'s canvas.
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
-        let frame = canvasFrame.scaled(by: outputScale)
+        let frame = canvasFrame.scaled(x: outputScaleX, y: outputScale)
         let canvasRect = ciRect(layout.canvas)
         // The recording is debanded first (`screenDeband`), on the whole frame.
         let recording = Deband.apply(

@@ -19,6 +19,8 @@ final class CaptionRenderer: @unchecked Sendable {
     /// Output pixels per canvas pixel: captions are laid out on the canvas and drawn at the
     /// output size.
     private let outputScale: Double
+    /// Output pixels per canvas pixel across (placements only; sizes follow `outputScale`).
+    private let outputScaleX: Double
     private var cache: [String: CIImage] = [:]
     private let lock = NSLock()
     static let padding = 2.0
@@ -55,7 +57,7 @@ final class CaptionRenderer: @unchecked Sendable {
         return Size2(width: ceil(width) + 2 * padding, height: ceil(fontSize * 1.2) + 2 * padding)
     }
 
-    init?(project: Project, words: [TranscriptWord], canvas: Rect2, fps: Double, outputScale: Double = 1) {
+    init?(project: Project, words: [TranscriptWord], canvas: Rect2, fps: Double, outputScale: Double = 1, outputScaleX: Double? = nil) {
         let config = project.captions
         guard config.enableTranscript else { return nil }
         let visible = CaptionWords.visible(words, resolver: project.resolver, showSoundLabels: config.showSoundLabels)
@@ -74,12 +76,13 @@ final class CaptionRenderer: @unchecked Sendable {
         unit = canvas.height / 1080 * outputScale
         canvasHeight = canvas.height
         self.outputScale = outputScale
+        self.outputScaleX = outputScaleX ?? outputScale
     }
 
     /// A canvas rect (top-left) in output pixels (y up).
     private func ciRect(_ r: Rect2) -> CGRect {
-        let k = outputScale
-        return CGRect(x: r.x * k, y: (canvasHeight - r.y - r.height) * k, width: r.width * k, height: r.height * k)
+        let kx = outputScaleX, ky = outputScale
+        return CGRect(x: r.x * kx, y: (canvasHeight - r.y - r.height) * ky, width: r.width * kx, height: r.height * ky)
     }
 
     /// The word's text box, drawn at the top baseline, in output pixels.

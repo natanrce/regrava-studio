@@ -63,7 +63,16 @@ struct OutputSizeRenderTests {
         #expect(half.backgroundBlurRadius == 7)
         #expect(half.cursorFadeBlurRadius == 3)
 
+        // Each axis by its own factor; lengths by the height's, widths by the width's.
+        let wide = frame.scaled(x: 2, y: 0.5)
+        #expect(wide.screenRect == Rect2(x: 20, y: 10, width: 600, height: 100))
+        #expect(wide.cameraCornerRadius == 6)
+        #expect(wide.screenReferenceWidth == 800)
+
         let layout = CanvasLayout(project: project())
+        let stretched = layout.scaled(x: 2, y: 0.5)
+        #expect(stretched.canvas == Rect2(x: 0, y: 0, width: layout.canvas.width * 2, height: layout.canvas.height / 2))
+        #expect(stretched.scale == layout.scale / 2)
         let small = layout.scaled(by: 0.5)
         #expect(small.canvas == Rect2(x: 0, y: 0, width: 960, height: 540))
         #expect(small.scale == layout.scale / 2)
@@ -112,5 +121,34 @@ struct OutputSizeRenderTests {
             #expect(mean < 2.5, "t=\(t) \(size): mean \(mean)")
             #expect(Double(far) / Double(a.count) < 0.03, "t=\(t) \(size): \(far) far")
         }
+    }
+
+    /// An even export size off the canvas's aspect (9:16 at 1080p: 606 × 1080, the canvas
+    /// 0.9997 as wide there) is drawn on exactly: each axis scales by its own ratio, nothing
+    /// is padded or resampled after the frame is drawn.
+    @Test func drawsAnEvenSizeExactly() {
+        var project = project()
+        project.style.aspectRatio = 9.0 / 16
+        let size = CGSize(width: 606, height: 1080)
+        #expect(ExportSettings.outputSize(aspectRatio: 9.0 / 16, height: 1080) == Size2(width: 606, height: 1080))
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: nil, outputSize: Size2(width: size.width, height: size.height))
+        let canvas = snapshot.track.layout.canvas
+        #expect(abs(canvas.width / canvas.height - 606.0 / 1080) > 1e-4)
+        let scales = snapshot.outputScales(for: size)
+        #expect(scales.x == 606 / canvas.width && scales.y == 1080 / canvas.height)
+        #expect(snapshot.compositor.outputScaleX == scales.x && snapshot.compositor.outputScale == scales.y)
+        #expect(snapshot.compositor.layout.canvas == Rect2(x: 0, y: 0, width: 606, height: 1080))
+        let frame = snapshot.track.frame(at: 1000)
+        let composed = snapshot.compositor.compose(source: source(), frame: frame, quality: .export)
+        // The drawn frame covers the output by itself.
+        #expect(composed.extent.contains(CGRect(origin: .zero, size: size)))
+        let drawn = snapshot.render(source: source(), frame: frame, quality: .export, size: size)
+        #expect(drawn.extent == CGRect(origin: .zero, size: size))
+        #expect(pixels(drawn, size) == pixels(composed.cropped(to: CGRect(origin: .zero, size: size)), size))
+        // The screen keeps its place on the output, each axis by its own ratio.
+        let rest = snapshot.track.frame(at: 0).scaled(x: scales.x, y: scales.y).screenRect
+        let restCanvas = snapshot.track.frame(at: 0).screenRect
+        #expect(abs(rest.x / 606 - restCanvas.x / canvas.width) < 1e-9)
+        #expect(abs(rest.y / 1080 - restCanvas.y / canvas.height) < 1e-9)
     }
 }

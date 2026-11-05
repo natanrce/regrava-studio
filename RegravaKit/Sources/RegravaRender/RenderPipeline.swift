@@ -15,31 +15,37 @@ public final class RenderState: @unchecked Sendable {
         public let composesAtOutputSize: Bool
         fileprivate let compositors: CompositorCache
 
-        /// Output pixels per canvas pixel when drawing `size`: the output width over the
-        /// canvas width, like a stage drawn at its displayed width.
+        /// Output pixels per canvas pixel down the frame when drawing `size`: the output height
+        /// over the canvas height. Lengths (blur, radii, text, trails) follow it.
         public func outputScale(for size: CGSize) -> Double {
-            composesAtOutputSize ? size.width / max(track.layout.canvas.width, 1) : 1
+            composesAtOutputSize ? size.height / max(track.layout.canvas.height, 1) : 1
         }
 
-        /// The compositor drawing at `scale`.
-        func compositor(scale: Double) -> FrameCompositor {
-            abs(scale - compositor.outputScale) < 1e-9 ? compositor : compositors.compositor(scale: scale)
+        /// Output pixels per canvas pixel across and down when drawing `size`: the stage is
+        /// laid out on the output exactly, each axis by its own ratio.
+        public func outputScales(for size: CGSize) -> (x: Double, y: Double) {
+            guard composesAtOutputSize else { return (1, 1) }
+            let canvas = track.layout.canvas
+            return (size.width / max(canvas.width, 1), size.height / max(canvas.height, 1))
+        }
+
+        /// The compositor drawing `scaleX` across and `scale` down (the same when nil).
+        func compositor(scale: Double, scaleX: Double? = nil) -> FrameCompositor {
+            let scaleX = scaleX ?? scale
+            if abs(scale - compositor.outputScale) < 1e-9, abs(scaleX - compositor.outputScaleX) < 1e-9 { return compositor }
+            return compositors.compositor(scale: scale, scaleX: scaleX)
         }
 
         /// `frame` (canvas pixels) drawn into `size` output pixels, cropped to them.
         public func render(source: CIImage, camera: CIImage? = nil, frame: CameraFrame, quality: RenderQuality, size: CGSize) -> CIImage {
             let canvas = track.layout.canvas
             let bounds = CGRect(origin: .zero, size: size)
-            let scale = outputScale(for: size)
-            var image = compositor(scale: scale).compose(source: source, camera: camera, frame: frame, quality: quality)
-            let width = canvas.width * scale, height = canvas.height * scale
-            let scaleX = size.width / max(width, 1), scaleY = size.height / max(height, 1)
-            if composesAtOutputSize, abs(width - size.width) < 1, abs(height - size.height) < 1 {
-                // Drawn at the output size but for rounding to whole pixels: the edge pixels
-                // fill the last partial row or column.
-                if width != size.width || height != size.height { image = image.clampedToExtent() }
-            } else if scaleX != 1 || scaleY != 1 {
-                image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+            let scales = outputScales(for: size)
+            var image = compositor(scale: scales.y, scaleX: scales.x).compose(source: source, camera: camera, frame: frame, quality: quality)
+            // Drawn at the output size, the frame covers it exactly. Composed at canvas size,
+            // it is scaled to the output.
+            if !composesAtOutputSize, canvas.width != size.width || canvas.height != size.height {
+                image = image.transformed(by: CGAffineTransform(scaleX: size.width / max(canvas.width, 1), y: size.height / max(canvas.height, 1)))
             }
             return image.cropped(to: bounds)
         }
@@ -48,22 +54,22 @@ public final class RenderState: @unchecked Sendable {
     /// Compositors for other output scales than the snapshot's, built on first use (a frame
     /// copied at another size than the preview's).
     fileprivate final class CompositorCache: @unchecked Sendable {
-        private let make: @Sendable (Double) -> FrameCompositor
+        private let make: @Sendable (Double, Double) -> FrameCompositor
         private let lock = NSLock()
-        private var built: [(scale: Double, compositor: FrameCompositor)] = []
+        private var built: [(scale: Double, scaleX: Double, compositor: FrameCompositor)] = []
 
-        init(make: @escaping @Sendable (Double) -> FrameCompositor) { self.make = make }
+        init(make: @escaping @Sendable (Double, Double) -> FrameCompositor) { self.make = make }
 
-        func compositor(scale: Double) -> FrameCompositor {
+        func compositor(scale: Double, scaleX: Double) -> FrameCompositor {
             lock.lock()
-            if let hit = built.first(where: { abs($0.scale - scale) < 1e-9 }) {
+            if let hit = built.first(where: { abs($0.scale - scale) < 1e-9 && abs($0.scaleX - scaleX) < 1e-9 }) {
                 lock.unlock()
                 return hit.compositor
             }
             lock.unlock()
-            let compositor = make(scale)
+            let compositor = make(scale, scaleX)
             lock.lock()
-            built.append((scale, compositor))
+            built.append((scale, scaleX, compositor))
             if built.count > 2 { built.removeFirst() }
             lock.unlock()
             return compositor
@@ -92,11 +98,12 @@ public final class RenderState: @unchecked Sendable {
         // Hide sensitive data / Hide faces: the detections the scan has so far (an export waits for the finished scan).
         let sensitiveData = project.processing.isAutoMasking ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.previewDetections ?? []) : []
         let layout = track.layout
-        let make: @Sendable (Double) -> FrameCompositor = { scale in
-            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale)
+        let make: @Sendable (Double, Double) -> FrameCompositor = { scale, scaleX in
+            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale, outputScaleX: scaleX)
         }
-        let scale = outputSize.map { $0.width.rounded() / max(layout.canvas.width, 1) } ?? 1
-        return Snapshot(track: track, compositor: make(scale), composesAtOutputSize: outputSize != nil, compositors: CompositorCache(make: make))
+        let scale = outputSize.map { $0.height.rounded() / max(layout.canvas.height, 1) } ?? 1
+        let scaleX = outputSize.map { $0.width.rounded() / max(layout.canvas.width, 1) } ?? 1
+        return Snapshot(track: track, compositor: make(scale, scaleX), composesAtOutputSize: outputSize != nil, compositors: CompositorCache(make: make))
     }
 
     public var current: Snapshot {
