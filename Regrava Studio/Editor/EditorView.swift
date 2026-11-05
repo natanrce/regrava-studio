@@ -246,15 +246,14 @@ struct AddToolsRail: View {
 private struct PreviewSpace: View {
     @ObservedObject var editor: EditorModel
     @ObservedObject var preferences = Preferences.shared
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         GeometryReader { geometry in
             let canvas = editor.project.canvasSize
-            let available = CGSize(width: geometry.size.width, height: max(geometry.size.height - 40, 50))
-            let _ = editor.previewAvailableSpace = available
-            let maxHeight = min(available.height, CGFloat(preferences.playbackPreviewMaxHeight) / (NSScreen.main?.backingScaleFactor ?? 2))
-            let scale = min(available.width / canvas.width, maxHeight / canvas.height)
-            let size = CGSize(width: canvas.width * scale, height: canvas.height * scale)
+            let available = CGSize(width: floor(geometry.size.width), height: max(floor(geometry.size.height) - 40, 50))
+            let size = EditorModel.previewDisplaySize(canvas: canvas, available: available, maxHeight: EditorModel.previewMaxHeight(backingScale: displayScale))
+            let scale = size.width / max(canvas.width, 1)
             VStack(spacing: Theme.gap(1)) {
                 LayoutControls(editor: editor, preferences: preferences)
                     .frame(width: max(size.width, 420))
@@ -283,6 +282,9 @@ private struct PreviewSpace: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { editor.updatePreviewSpace(available, backingScale: displayScale) }
+            .onChange(of: available) { editor.updatePreviewSpace(available, backingScale: displayScale) }
+            .onChange(of: displayScale) { editor.updatePreviewSpace(available, backingScale: displayScale) }
         }
     }
 }

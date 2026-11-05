@@ -231,7 +231,6 @@ public final class ScrubPreview: @unchecked Sendable {
     private let camera: VideoScrubber?
     private let cameraOffsetMs: Double
     private let resolver: TimeResolver
-    private let canvas: Size2
     private let output: CGSize
     private let renderQueue = DispatchQueue(label: "regrava.scrub-render", qos: .userInteractive)
     private let lock = NSLock()
@@ -244,13 +243,12 @@ public final class ScrubPreview: @unchecked Sendable {
     /// A composed frame for the preview (main thread).
     public var onImage: (@MainActor @Sendable (CVPixelBuffer) -> Void)?
 
-    public init(state: RenderState, screenURL: URL, cameraURL: URL?, cameraOffsetMs: Double, resolver: TimeResolver, canvas: Size2, output: Size2) {
+    public init(state: RenderState, screenURL: URL, cameraURL: URL?, cameraOffsetMs: Double, resolver: TimeResolver, output: Size2) {
         self.state = state
         screen = VideoScrubber(url: screenURL)
         camera = cameraURL.map { VideoScrubber(url: $0) }
         self.cameraOffsetMs = cameraOffsetMs
         self.resolver = resolver
-        self.canvas = canvas
         self.output = CGSize(width: output.width.rounded(), height: output.height.rounded())
         let render: @Sendable () -> Void = { [weak self] in self?.requestRender() }
         screen.onFrame = render
@@ -326,11 +324,9 @@ public final class ScrubPreview: @unchecked Sendable {
         lastRendered = key
         lock.unlock()
         guard let buffer = makeBuffer() else { return }
-        var image = state.render(source: CIImage(cvPixelBuffer: screenFrame.buffer), camera: cameraFrame.map { CIImage(cvPixelBuffer: $0.buffer) }, timeMs: playbackMs)
-        let scaleX = output.width / max(canvas.width, 1), scaleY = output.height / max(canvas.height, 1)
-        if scaleX != 1 || scaleY != 1 { image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY)) }
+        let image = state.render(source: CIImage(cvPixelBuffer: screenFrame.buffer), camera: cameraFrame.map { CIImage(cvPixelBuffer: $0.buffer) }, timeMs: playbackMs, size: output)
         let bounds = CGRect(origin: .zero, size: output)
-        CanvasCompositor.context.render(image.cropped(to: bounds), to: buffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
+        CanvasCompositor.context.render(image, to: buffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
         // Tagged, so the layer showing it matches the player's colours.
         CVBufferSetAttachment(buffer, kCVImageBufferCGColorSpaceKey, CanvasCompositor.sRGB, .shouldPropagate)
         if let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() {

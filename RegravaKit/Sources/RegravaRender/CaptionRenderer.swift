@@ -13,8 +13,12 @@ final class CaptionRenderer: @unchecked Sendable {
     private let color: CGColor
     private let background: CIColor
     private let outline: CIColor
+    /// Output pixels per stage unit.
     private let unit: Double
     private let canvasHeight: Double
+    /// Output pixels per canvas pixel: captions are laid out on the canvas and drawn at the
+    /// output size.
+    private let outputScale: Double
     private var cache: [String: CIImage] = [:]
     private let lock = NSLock()
     static let padding = 2.0
@@ -51,7 +55,7 @@ final class CaptionRenderer: @unchecked Sendable {
         return Size2(width: ceil(width) + 2 * padding, height: ceil(fontSize * 1.2) + 2 * padding)
     }
 
-    init?(project: Project, words: [TranscriptWord], canvas: Rect2, fps: Double) {
+    init?(project: Project, words: [TranscriptWord], canvas: Rect2, fps: Double, outputScale: Double = 1) {
         let config = project.captions
         guard config.enableTranscript else { return nil }
         let visible = CaptionWords.visible(words, resolver: project.resolver, showSoundLabels: config.showSoundLabels)
@@ -67,19 +71,26 @@ final class CaptionRenderer: @unchecked Sendable {
         let bg = RGBA(hexString: config.backgroundColor) ?? RGBA(0, 0, 0)
         background = CIColor(red: bg.r, green: bg.g, blue: bg.b)
         outline = CIColor(red: 1 - bg.r, green: 1 - bg.g, blue: 1 - bg.b, alpha: 0.1)
-        unit = canvas.height / 1080
+        unit = canvas.height / 1080 * outputScale
         canvasHeight = canvas.height
+        self.outputScale = outputScale
     }
 
-    private func ciRect(_ r: Rect2) -> CGRect { CGRect(x: r.x, y: canvasHeight - r.y - r.height, width: r.width, height: r.height) }
+    /// A canvas rect (top-left) in output pixels (y up).
+    private func ciRect(_ r: Rect2) -> CGRect {
+        let k = outputScale
+        return CGRect(x: r.x * k, y: (canvasHeight - r.y - r.height) * k, width: r.width * k, height: r.height * k)
+    }
 
-    /// The word's text box, drawn at the top baseline.
+    /// The word's text box, drawn at the top baseline, in output pixels.
     private func image(for text: String) -> CIImage {
         lock.lock()
         defer { lock.unlock() }
         if let cached = cache[text] { return cached }
         let size = Self.measure(text, font: font, fontSize: fontSize)
-        let scale = 2.0
+        // Twice the output resolution, laid out in canvas pixels.
+        let supersample = 2.0
+        let scale = supersample * outputScale
         let w = Int(ceil(size.width * scale)), h = Int(ceil(size.height * scale))
         guard let context = CGContext(data: nil, width: max(w, 1), height: max(h, 1), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return CIImage.empty() }
         context.scaleBy(x: scale, y: scale)
@@ -90,7 +101,7 @@ final class CaptionRenderer: @unchecked Sendable {
         let top = Self.padding + (fontSize * 1.2 - fontSize) / 2
         context.textPosition = CGPoint(x: Self.padding, y: size.height - top - ascent - (fontSize - ascent - descent) / 2)
         CTLineDraw(line, context)
-        let result = context.makeImage().map { CIImage(cgImage: $0).transformed(by: CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)) } ?? CIImage.empty()
+        let result = context.makeImage().map { CIImage(cgImage: $0).transformed(by: CGAffineTransform(scaleX: 1 / supersample, y: 1 / supersample)) } ?? CIImage.empty()
         cache[text] = result
         return result
     }
@@ -132,7 +143,8 @@ final class CaptionRenderer: @unchecked Sendable {
         let image = draw(rect)
         guard strength > 0, let previous else { return image }
         let start = rect.lerp(to: previous, strength)
-        let travel = rect.cornerTravel(to: start)
+        // In output pixels.
+        let travel = rect.cornerTravel(to: start) * outputScale
         guard travel >= 1 else { return image }
         let bounds = image.extent.union(draw(start).extent).integral
         return MotionBlur.accumulate(samples: MotionBlur.sampleCount(travel: travel, quality: quality), bounds: bounds) { t in

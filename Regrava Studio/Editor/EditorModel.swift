@@ -102,8 +102,10 @@ final class EditorModel: ObservableObject {
     var itemClipboard: ItemClipboard?
     /// The command menu's sessions (⌘K, or a shortcut's sub-actions).
     let commandMenu = CommandMenuController()
-    /// The space the preview may use (set by the preview), for the preview size steps.
-    var previewAvailableSpace: CGSize?
+    /// The space the preview may use under its layout controls, in points (set by the preview).
+    private(set) var previewAvailableSpace: CGSize?
+    /// Pixels per point of the screen showing the preview (set by the preview).
+    private(set) var previewBackingScale: CGFloat = NSScreen.main?.backingScaleFactor ?? 2
     /// Microphone renders under way, 0…1 (`media.audioRenderState` partial).
     @Published var microphoneRenderProgress: [MicrophoneAudioPreset: Double] = [:]
     /// Renders paused by re-clicking their option.
@@ -231,7 +233,10 @@ final class EditorModel: ObservableObject {
         self.project = project
         resolver = project.resolver
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
-        renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL)
+        renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL, outputSize: Self.previewOutputSize(
+            canvas: project.canvasSize, display: Self.previewDisplaySize(canvas: project.canvasSize, available: nil, maxHeight: Self.previewMaxHeight(backingScale: NSScreen.main?.backingScaleFactor ?? 2)),
+            backingScale: NSScreen.main?.backingScaleFactor ?? 2, resolution: Preferences.shared.playbackPreviewResolution
+        ))
         transcript = SessionTranscript.load(bundle: bundleURL)
         // The editor and its project are targets while the window is open.
         targetStack.focus(.editor)
@@ -516,11 +521,67 @@ final class EditorModel: ObservableObject {
         max(NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60, 30)
     }
 
+    /// The tallest the preview is shown, in points: the preview size setting.
+    static func previewMaxHeight(backingScale: CGFloat) -> CGFloat {
+        CGFloat(Preferences.shared.playbackPreviewMaxHeight) / backingScale
+    }
+
+    /// The preview's size in points: the stage fitted inside `available`, no taller than
+    /// `maxHeight` points. Before the preview reports its space, the main screen's.
+    static func previewDisplaySize(canvas: Size2, available: CGSize?, maxHeight: CGFloat) -> CGSize {
+        let space = available ?? NSScreen.main?.visibleFrame.size ?? CGSize(width: canvas.width, height: canvas.height)
+        let height = min(space.height, maxHeight)
+        guard space.width > 0, height > 0, canvas.width > 0, canvas.height > 0 else { return .zero }
+        let scale = min(space.width / canvas.width, height / canvas.height)
+        return CGSize(width: canvas.width * scale, height: canvas.height * scale)
+    }
+
+    /// Pixels the preview is drawn at: its displayed width × the backing scale × the preview
+    /// quality, the stage scaled uniformly from that width.
+    static func previewOutputSize(canvas: Size2, display: CGSize, backingScale: CGFloat, resolution: Double) -> Size2 {
+        let k = display.width / max(canvas.width, 1) * backingScale * resolution
+        return Size2(width: max((canvas.width * k).rounded(), 2), height: max((canvas.height * k).rounded(), 2))
+    }
+
+    var previewDisplaySize: CGSize {
+        Self.previewDisplaySize(canvas: project.canvasSize, available: previewAvailableSpace, maxHeight: Self.previewMaxHeight(backingScale: previewBackingScale))
+    }
+
     private var previewOutputSize: Size2 {
-        let canvas = project.canvasSize
-        let height = min(canvas.height, Double(preferences.playbackPreviewMaxHeight)) * preferences.playbackPreviewResolution
-        let width = (height * canvas.aspectRatio / 2).rounded() * 2
-        return Size2(width: width, height: (height / 2).rounded() * 2)
+        Self.previewOutputSize(canvas: project.canvasSize, display: previewDisplaySize, backingScale: previewBackingScale, resolution: preferences.playbackPreviewResolution)
+    }
+
+    /// The preview moved to a space or screen of another size; it is drawn again at its new
+    /// size once the current update is done.
+    func updatePreviewSpace(_ available: CGSize, backingScale: CGFloat) {
+        let before = previewOutputSize
+        previewAvailableSpace = available
+        previewBackingScale = backingScale
+        guard previewOutputSize != before, !isPreviewResizeScheduled else { return }
+        isPreviewResizeScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isPreviewResizeScheduled = false
+            self.applyPreviewOutputSize()
+        }
+    }
+
+    private var isPreviewResizeScheduled = false
+
+    /// The current composition drawn at `previewOutputSize`.
+    private func applyPreviewOutputSize() {
+        guard var configuration = baseConfiguration, let item = player.currentItem else { return }
+        let output = previewOutputSize
+        let size = CGSize(width: output.width, height: output.height)
+        guard configuration.renderSize != size else { return }
+        configuration.renderSize = size
+        baseConfiguration = configuration
+        item.videoComposition = AVVideoComposition(configuration: configuration)
+        prewarmRenderer()
+        scrubPreview?.close()
+        scrubPreview = nil
+        if isScrubbing { makeScrubPreview(); scrubPreview?.show(playbackMs: scrubTimeMs) }
+        else if !isPlaying { seek(to: currentTimeMs, moveHead: false) }
     }
 
     /// New composition (canvas or preview size changed); keeps the playhead. With
@@ -533,9 +594,9 @@ final class EditorModel: ObservableObject {
         itemReplacementPending = itemReplacementPending || replacingItem
         snapshotRequests += 1
         let request = snapshotRequests
-        let project = self.project, cursors = self.cursors, bundle = bundleURL
+        let project = self.project, cursors = self.cursors, bundle = bundleURL, output = previewOutputSize
         let snapshot = await Task.detached(priority: .userInitiated) {
-            RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle)
+            RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle, outputSize: output)
         }.value
         // A newer rebuild supersedes this one.
         guard generation == compositionGeneration else { return }
@@ -658,13 +719,14 @@ final class EditorModel: ObservableObject {
         let project = self.renderedProject
         let cursors = self.cursors
         let bundle = bundleURL
+        let output = previewOutputSize
         snapshotRequests += 1
         let request = snapshotRequests
         refreshTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 30_000_000)
             guard !Task.isCancelled else { return }
             let snapshot = await Task.detached(priority: .userInitiated) {
-                RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle)
+                RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle, outputSize: output)
             }.value
             guard !Task.isCancelled, let self, self.installSnapshot(snapshot, request: request) else { return }
             self.prewarmRenderer()
@@ -1007,7 +1069,7 @@ final class EditorModel: ObservableObject {
             .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         let preview = ScrubPreview(
             state: renderState, screenURL: videoURL, cameraURL: camera, cameraOffsetMs: project.camera.delayAdjustmentMs,
-            resolver: project.resolver, canvas: project.canvasSize, output: previewOutputSize
+            resolver: project.resolver, output: previewOutputSize
         )
         let display = scrubDisplay
         preview.onImage = { buffer in display.show(buffer) }

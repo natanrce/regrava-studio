@@ -8,7 +8,11 @@ import RegravaCore
 /// Inputs use top-left coordinates (like the rest of the project); Core Image uses
 /// bottom-left, so every rectangle is flipped through `ciRect`.
 public final class FrameCompositor: @unchecked Sendable {
+    /// The layout frames are drawn with: the canvas grown by `outputScale`.
     public let layout: CanvasLayout
+    /// Output pixels per canvas pixel. Frames are drawn at the output size, so every pass
+    /// runs on the pixels that are shown.
+    public let outputScale: Double
     private let style: StyleConfig
     private let cursorConfig: CursorConfig
     private let pointPixelScale: Double
@@ -38,12 +42,15 @@ public final class FrameCompositor: @unchecked Sendable {
     private let cameraGrade: (data: Data, size: Int)?
 
     /// `assetsDirectory` is the project folder (for background images).
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps) {
+    /// `outputScale` draws the frame that many times larger than `layout`'s canvas; the frames
+    /// passed to `compose` stay in canvas pixels.
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1) {
         processing = project.processing
         self.sensitiveData = AutoMaskTimeline(detections: project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : [])
         resolver = project.resolver
         videoSize = project.recording.videoSize
-        self.layout = layout
+        self.outputScale = outputScale
+        self.layout = layout.scaled(by: outputScale)
         style = project.style
         cursorConfig = project.cursor
         pointPixelScale = project.recording.pointPixelScale
@@ -52,12 +59,12 @@ public final class FrameCompositor: @unchecked Sendable {
         self.fps = fps
         camera = project.camera
         isCameraMatted = project.isCutoutLayoutUsed
-        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas, fps: fps)
-        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil, fps: fps)
+        captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas, fps: fps, outputScale: outputScale)
+        shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil, fps: fps, outputScale: outputScale)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
         deviceFrame = project.activeDeviceFrame
         screenCrop01 = project.screenCrop01
-        backdrop = Backdrop(project.style.background, layout: layout, assetsDirectory: assetsDirectory)
+        backdrop = Backdrop(project.style.background, layout: self.layout, assetsDirectory: assetsDirectory)
     }
 
     /// The background of `frame`: laid out over its rect and blurred (`backdrop.$sample`).
@@ -100,7 +107,9 @@ public final class FrameCompositor: @unchecked Sendable {
     /// Trail strength of the screen and cursor while moving (0 = motion blur off).
     var motionBlurStrength: Double { MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false) }
 
-    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
+    /// `frame` in canvas pixels; the result covers the canvas grown by `outputScale`.
+    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
+        let frame = canvasFrame.scaled(by: outputScale)
         let canvasRect = ciRect(layout.canvas)
         // The recording is debanded first (`screenDeband`), on the whole frame.
         let recording = Deband.apply(

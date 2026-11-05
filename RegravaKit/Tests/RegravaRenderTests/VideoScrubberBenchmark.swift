@@ -49,7 +49,7 @@ struct ScrubPreviewSmoke {
         guard let path = ProcessInfo.processInfo.environment["SCRUB_BENCH"] else { return }
         let project = Project(recording: RecordingInfo(videoSize: Size2(width: 2880, height: 1800), pointPixelScale: 2, durationMs: 250_000, fps: 60), mouseEvents: [])
         let state = RenderState(project: project)
-        let preview = ScrubPreview(state: state, screenURL: URL(fileURLWithPath: path), cameraURL: nil, cameraOffsetMs: 0, resolver: project.resolver, canvas: project.canvasSize, output: Size2(width: 1280, height: 800))
+        let preview = ScrubPreview(state: state, screenURL: URL(fileURLWithPath: path), cameraURL: nil, cameraOffsetMs: 0, resolver: project.resolver, output: Size2(width: 1280, height: 800))
         nonisolated(unsafe) var images = 0
         nonisolated(unsafe) var size = CGSize.zero
         preview.onImage = { buffer in images += 1; size = CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer)) }

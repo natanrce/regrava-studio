@@ -8,19 +8,80 @@ import Foundation
 public final class RenderState: @unchecked Sendable {
     public struct Snapshot: Sendable {
         public let track: CameraTrack
+        /// Draws at `outputScale` (1 when frames are composed at canvas size).
         public let compositor: FrameCompositor
+        /// Frames are drawn at the size they are shown, every pass on output pixels; otherwise
+        /// they are composed at canvas size and scaled to the output.
+        public let composesAtOutputSize: Bool
+        fileprivate let compositors: CompositorCache
+
+        /// Output pixels per canvas pixel when drawing `size`: the output width over the
+        /// canvas width, like a stage drawn at its displayed width.
+        public func outputScale(for size: CGSize) -> Double {
+            composesAtOutputSize ? size.width / max(track.layout.canvas.width, 1) : 1
+        }
+
+        /// The compositor drawing at `scale`.
+        func compositor(scale: Double) -> FrameCompositor {
+            abs(scale - compositor.outputScale) < 1e-9 ? compositor : compositors.compositor(scale: scale)
+        }
+
+        /// `frame` (canvas pixels) drawn into `size` output pixels, cropped to them.
+        public func render(source: CIImage, camera: CIImage? = nil, frame: CameraFrame, quality: RenderQuality, size: CGSize) -> CIImage {
+            let canvas = track.layout.canvas
+            let bounds = CGRect(origin: .zero, size: size)
+            let scale = outputScale(for: size)
+            var image = compositor(scale: scale).compose(source: source, camera: camera, frame: frame, quality: quality)
+            let width = canvas.width * scale, height = canvas.height * scale
+            let scaleX = size.width / max(width, 1), scaleY = size.height / max(height, 1)
+            if composesAtOutputSize, abs(width - size.width) < 1, abs(height - size.height) < 1 {
+                // Drawn at the output size but for rounding to whole pixels: the edge pixels
+                // fill the last partial row or column.
+                if width != size.width || height != size.height { image = image.clampedToExtent() }
+            } else if scaleX != 1 || scaleY != 1 {
+                image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+            }
+            return image.cropped(to: bounds)
+        }
+    }
+
+    /// Compositors for other output scales than the snapshot's, built on first use (a frame
+    /// copied at another size than the preview's).
+    fileprivate final class CompositorCache: @unchecked Sendable {
+        private let make: @Sendable (Double) -> FrameCompositor
+        private let lock = NSLock()
+        private var built: [(scale: Double, compositor: FrameCompositor)] = []
+
+        init(make: @escaping @Sendable (Double) -> FrameCompositor) { self.make = make }
+
+        func compositor(scale: Double) -> FrameCompositor {
+            lock.lock()
+            if let hit = built.first(where: { abs($0.scale - scale) < 1e-9 }) {
+                lock.unlock()
+                return hit.compositor
+            }
+            lock.unlock()
+            let compositor = make(scale)
+            lock.lock()
+            built.append((scale, compositor))
+            if built.count > 2 { built.removeFirst() }
+            lock.unlock()
+            return compositor
+        }
     }
 
     private let lock = NSLock()
     private var snapshot: Snapshot
 
-    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps) {
-        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps)
+    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil) {
+        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps, outputSize: outputSize)
     }
 
     /// `assetsDirectory` is the project folder (background images). `fps` is the rate frames
-    /// are produced at: the editor's playback rate, or the export's.
-    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps) -> Snapshot {
+    /// are produced at: the editor's playback rate, or the export's. With `outputSize` frames
+    /// are drawn at the size they are shown, starting with that one; without it they are
+    /// composed at canvas size and scaled.
+    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil) -> Snapshot {
         let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
         let silence = assetsDirectory.flatMap { SilenceAnalyzer.stored(project: project, bundle: $0) } ?? []
         let hovers = assetsDirectory.flatMap(CursorHovers.load(bundle:))
@@ -30,8 +91,12 @@ public final class RenderState: @unchecked Sendable {
             .map { TranscriptTiming.clientTranscript([(0, $0.transcript)]) } ?? []
         // Hide sensitive data / Hide faces: the detections the scan has so far (an export waits for the finished scan).
         let sensitiveData = project.processing.isAutoMasking ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.previewDetections ?? []) : []
-        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps)
-        return Snapshot(track: track, compositor: compositor)
+        let layout = track.layout
+        let make: @Sendable (Double) -> FrameCompositor = { scale in
+            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale)
+        }
+        let scale = outputSize.map { $0.width.rounded() / max(layout.canvas.width, 1) } ?? 1
+        return Snapshot(track: track, compositor: make(scale), composesAtOutputSize: outputSize != nil, compositors: CompositorCache(make: make))
     }
 
     public var current: Snapshot {
@@ -84,18 +149,20 @@ public final class RenderState: @unchecked Sendable {
         lock.unlock()
     }
 
-    public func render(source: CIImage, camera: CIImage? = nil, timeMs: Double) -> CIImage {
+    /// The frame at playback time `timeMs` drawn into `size` output pixels.
+    public func render(source: CIImage, camera: CIImage? = nil, timeMs: Double, size: CGSize) -> CIImage {
         let s = current
         let frame = isPlainScreen ? s.track.plainFrame(at: timeMs) : s.track.frame(at: timeMs)
-        return s.compositor.compose(source: source, camera: camera, frame: frame, quality: quality)
+        return s.render(source: source, camera: camera, frame: frame, quality: quality, size: size)
     }
 }
 
 public enum CompositionFactory {
     /// Video composition that runs every frame through `state`.
     ///
-    /// Frames are composed at canvas size and then scaled to `outputSize` (defaults to the
-    /// canvas). `fps` sets the composition frame rate (defaults to the source's).
+    /// Frames are drawn at `outputSize` (defaults to `canvas`, the project's) as `state` says:
+    /// composed there, or at canvas size and scaled. `fps` sets the composition frame rate
+    /// (defaults to the source's).
     public static func make(
         asset: AVAsset,
         state: RenderState,
@@ -127,9 +194,7 @@ public enum CompositionFactory {
             timeRange: CMTimeRange(start: .zero, duration: duration),
             trackID: tracks.first?.trackID ?? kCMPersistentTrackID_Invalid,
             cameraTrackID: tracks.count > 1 ? tracks[1].trackID : nil,
-            state: state,
-            canvas: canvas,
-            renderSize: renderSize
+            state: state
         )
         return AVVideoComposition.Configuration(
             customVideoCompositorClass: CanvasCompositor.self,
@@ -150,16 +215,12 @@ extension CompositionFactory {
         prewarmCutout(state: state, outputSize: outputSize, cameraSize: cameraSize)
         if Task.isCancelled { return }
         let snapshot = state.current
-        let compositor = snapshot.compositor
-        let strength = compositor.motionBlurStrength
+        let strength = snapshot.compositor.motionBlurStrength
         guard strength > 0 else { return }
         let layout = snapshot.track.layout
         let video = layout.videoSize
-        let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
-        var sourceBuffer: CVPixelBuffer?, outputBuffer: CVPixelBuffer?
-        CVPixelBufferCreate(nil, Int(video.width), Int(video.height), kCVPixelFormatType_32BGRA, attributes, &sourceBuffer)
-        CVPixelBufferCreate(nil, Int(outputSize.width), Int(outputSize.height), kCVPixelFormatType_32BGRA, attributes, &outputBuffer)
-        guard let sourceBuffer, let outputBuffer else { return }
+        let size = CGSize(width: outputSize.width.rounded(), height: outputSize.height.rounded())
+        guard let sourceBuffer = decodedFrameBuffer(video), let outputBuffer = outputBuffer(size) else { return }
         let source = CIImage(cvPixelBuffer: sourceBuffer)
         var base = snapshot.track.frame(at: 0)
         base.isInstantSnap = false
@@ -167,10 +228,10 @@ extension CompositionFactory {
         let cursor = base.cursor ?? Vec2(video.width / 2, video.height / 2)
         base.cursor = cursor
         let videoToCanvas = base.screenRect.width / max(video.width, 1)
-        let texels = RenderQuality.playing.texelsPerSample
+        // Trails are counted in output pixels.
+        let texels = RenderQuality.playing.texelsPerSample / snapshot.outputScale(for: size)
         let counts = [0] + Array(2...RenderQuality.playing.maxSamples)
-        let scale = outputSize.width / max(layout.canvas.width, 1)
-        let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+        let bounds = CGRect(origin: .zero, size: size)
         for screenSamples in counts {
             for cursorSamples in counts {
                 if Task.isCancelled { return }
@@ -181,9 +242,8 @@ extension CompositionFactory {
                 frame.previousScreenRect = previous
                 let cursorTravel = cursorSamples == 0 ? 0 : (Double(cursorSamples) - 0.5) * texels
                 frame.previousCursor = Vec2(cursor.x + cursorTravel / strength / max(videoToCanvas, 0.0001), cursor.y)
-                let image = compositor.compose(source: source, frame: frame, quality: .playing)
-                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
+                let image = snapshot.render(source: source, frame: frame, quality: .playing, size: size)
+                CanvasCompositor.context.render(image, to: outputBuffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
             }
         }
     }
@@ -197,25 +257,34 @@ extension CompositionFactory {
         guard snapshot.compositor.mattesCamera, let cameraSize, cameraSize.width > 0, cameraSize.height > 0 else { return }
         var frame = snapshot.track.frame(at: 0)
         guard frame.cameraRect != nil else { return }
-        let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
-        var screenBuffer: CVPixelBuffer?, cameraBuffer: CVPixelBuffer?, outputBuffer: CVPixelBuffer?
-        let video = snapshot.track.layout.videoSize
-        CVPixelBufferCreate(nil, Int(video.width), Int(video.height), kCVPixelFormatType_32BGRA, attributes, &screenBuffer)
-        CVPixelBufferCreate(nil, Int(cameraSize.width), Int(cameraSize.height), kCVPixelFormatType_32BGRA, attributes, &cameraBuffer)
-        CVPixelBufferCreate(nil, Int(outputSize.width), Int(outputSize.height), kCVPixelFormatType_32BGRA, attributes, &outputBuffer)
-        guard let screenBuffer, let cameraBuffer, let outputBuffer else { return }
-        let scale = outputSize.width / max(snapshot.track.layout.canvas.width, 1)
-        let bounds = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+        let size = CGSize(width: outputSize.width.rounded(), height: outputSize.height.rounded())
+        guard let screenBuffer = decodedFrameBuffer(snapshot.track.layout.videoSize), let cameraBuffer = decodedFrameBuffer(cameraSize),
+              let outputBuffer = outputBuffer(size) else { return }
+        let bounds = CGRect(origin: .zero, size: size)
         for quality in [RenderQuality.playing, .pausedHigh] {
             for cutout in [1.0, 0.5] {
                 if Task.isCancelled { return }
                 frame.cameraCutout01 = cutout
                 frame.cameraOpacity = 1
-                let image = snapshot.compositor.compose(source: CIImage(cvPixelBuffer: screenBuffer), camera: CIImage(cvPixelBuffer: cameraBuffer), frame: frame, quality: quality)
-                    .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                CanvasCompositor.context.render(image.cropped(to: bounds), to: outputBuffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
+                let image = snapshot.render(source: CIImage(cvPixelBuffer: screenBuffer), camera: CIImage(cvPixelBuffer: cameraBuffer), frame: frame, quality: quality, size: size)
+                CanvasCompositor.context.render(image, to: outputBuffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
             }
         }
+    }
+
+    /// A blank frame as the decoder hands it over (`CanvasCompositor.sourceFormat`).
+    static func decodedFrameBuffer(_ size: Size2) -> CVPixelBuffer? {
+        var buffer: CVPixelBuffer?
+        let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        CVPixelBufferCreate(nil, Int(size.width), Int(size.height), CanvasCompositor.sourceFormat, attributes, &buffer)
+        return buffer
+    }
+
+    private static func outputBuffer(_ size: CGSize) -> CVPixelBuffer? {
+        var buffer: CVPixelBuffer?
+        let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        CVPixelBufferCreate(nil, Int(size.width), Int(size.height), kCVPixelFormatType_32BGRA, attributes, &buffer)
+        return buffer
     }
 }
 
@@ -229,29 +298,27 @@ final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
     let trackID: CMPersistentTrackID
     let cameraTrackID: CMPersistentTrackID?
     let state: RenderState
-    let canvas: Size2
-    let renderSize: CGSize
 
-    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, state: RenderState, canvas: Size2, renderSize: CGSize) {
+    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, state: RenderState) {
         self.timeRange = timeRange
         self.trackID = trackID
         self.cameraTrackID = cameraTrackID
         self.state = state
-        self.canvas = canvas
-        self.renderSize = renderSize
         requiredSourceTrackIDs = ([trackID] + (cameraTrackID.map { [$0] } ?? [])).map { NSNumber(value: $0) }
     }
 }
 
-/// Renders each frame with Core Image on the GPU (Metal) at canvas size, scaled to the
-/// output size.
+/// Renders each frame with Core Image on the GPU (Metal) at the output size (`RenderState`).
 final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     static let context = CIContext(options: [.cacheIntermediates: false])
     /// The colour space every composed frame is rendered in.
     static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
+    /// The pixel format decoded frames are read in.
+    static let sourceFormat = kCVPixelFormatType_32BGRA
+
     let sourcePixelBufferAttributes: [String: any Sendable]? = [
-        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferPixelFormatTypeKey as String: sourceFormat,
         kCVPixelBufferMetalCompatibilityKey as String: true,
     ]
     let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [
@@ -288,14 +355,11 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
         // Each decoded track counts as an interactive stream background analyses yield lanes to.
         SD.InteractiveDecodeActivity.shared.noteDecoding(self)
         if camera != nil { SD.InteractiveDecodeActivity.shared.noteDecoding(cameraStream) }
-        var image = instruction.state.render(source: CIImage(cvPixelBuffer: source), camera: camera, timeMs: timeMs)
-        let scaleX = instruction.renderSize.width / max(instruction.canvas.width, 1)
-        let scaleY = instruction.renderSize.height / max(instruction.canvas.height, 1)
-        if scaleX != 1 || scaleY != 1 {
-            image = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        }
-        let bounds = CGRect(origin: .zero, size: instruction.renderSize)
-        Self.context.render(image.cropped(to: bounds), to: output, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
+        // The composition's render size, which can change without new instructions.
+        let size = request.renderContext.size
+        let image = instruction.state.render(source: CIImage(cvPixelBuffer: source), camera: camera, timeMs: timeMs, size: size)
+        let bounds = CGRect(origin: .zero, size: size)
+        Self.context.render(image, to: output, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
         request.finish(withComposedVideoFrame: output)
     }
 

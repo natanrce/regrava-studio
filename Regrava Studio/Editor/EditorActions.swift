@@ -802,11 +802,9 @@ extension EditorModel {
         let candidates = larger ? heights.filter { $0 > current } : Array(heights.filter { $0 < current }.reversed())
         guard let space = previewAvailableSpace else { return candidates.first }
         let canvas = project.canvasSize
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let scale = previewBackingScale
         func shownHeight(_ maxHeight: Int) -> CGFloat {
-            let height = min(space.height, CGFloat(maxHeight) / scale)
-            guard space.width > 0, height > 0 else { return 0 }
-            return canvas.height * min(space.width / canvas.width, height / canvas.height)
+            Self.previewDisplaySize(canvas: canvas, available: space, maxHeight: CGFloat(maxHeight) / scale).height
         }
         let shown = shownHeight(current)
         return candidates.first { abs(shownHeight($0) - shown) >= 1 }

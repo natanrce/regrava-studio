@@ -9,19 +9,27 @@ import RegravaCore
 final class ShortcutRenderer: @unchecked Sendable {
     let track: ShortcutTrack
     private let canvasHeight: Double
-    /// Stage units (1080 high) to canvas pixels.
+    /// Stage units (1080 high) to output pixels.
     private let unit: Double
+    /// Output pixels per canvas pixel: keys are laid out on the canvas and drawn at the
+    /// output size.
+    private let outputScale: Double
     private var cache: [String: CIImage] = [:]
     private let lock = NSLock()
 
-    init?(project: Project, canvas: Rect2, captionsShown: Bool, fps: Double) {
+    init?(project: Project, canvas: Rect2, captionsShown: Bool, fps: Double, outputScale: Double = 1) {
         guard let track = ShortcutTrack(project: project, canvas: canvas, captionsShown: captionsShown, fps: fps) else { return nil }
         self.track = track
         canvasHeight = canvas.height
-        unit = canvas.height / 1080
+        unit = canvas.height / 1080 * outputScale
+        self.outputScale = outputScale
     }
 
-    private func ciRect(_ r: Rect2) -> CGRect { CGRect(x: r.x, y: canvasHeight - r.y - r.height, width: r.width, height: r.height) }
+    /// A canvas rect (top-left) in output pixels (y up).
+    private func ciRect(_ r: Rect2) -> CGRect {
+        let k = outputScale
+        return CGRect(x: r.x * k, y: (canvasHeight - r.y - r.height) * k, width: r.width * k, height: r.height * k)
+    }
 
     // MARK: Artwork (256-unit key space)
 
@@ -67,7 +75,7 @@ final class ShortcutRenderer: @unchecked Sendable {
         return CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [color(top), color(bottom)] as CFArray, locations: [0, 1])!
     }
 
-    /// The key cap at `height` canvas pixels.
+    /// The key cap at `height` output pixels.
     private func artwork(_ cap: ShortcutKeyCap, height: Double) -> CIImage {
         let key = "\(cap.identity)|\(cap.widthRatio)|\((height * 2).rounded())"
         lock.lock()
@@ -144,7 +152,7 @@ final class ShortcutRenderer: @unchecked Sendable {
         let shadow = SmoothShapes.shadow(rect, radius: radius, .init(alpha: 0.33, blur: ratio * 200 * unit, offset: CGVector(dx: 0, dy: -ratio * 25 * unit), directional: nil, unit: unit))
         // Artwork at its resting scale, placed at the sprung rect and clipped to it with
         // smooth corners (`borderRoundness` 1).
-        let art = artwork(node.cap, height: node.restingHeight)
+        let art = artwork(node.cap, height: node.restingHeight * outputScale)
         let placed = art.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.maxY - art.extent.height))
         let clipped = SmoothShapes.clip(placed, to: rect, radius: radius)
         return faded(clipped.composited(over: shadow), opacity: node.opacity)
@@ -165,7 +173,7 @@ final class ShortcutRenderer: @unchecked Sendable {
             var image = key(node, rect: node.rect)
             if let previous = before[node.instance] {
                 let trailStart = node.rect.lerp(to: previous.rect, strength)
-                let travel = node.rect.cornerTravel(to: trailStart)
+                let travel = node.rect.cornerTravel(to: trailStart) * outputScale
                 if travel >= 1 {
                     let reach = track.sizeRatio * 250 * unit + 8
                     let bounds = ciRect(node.rect).union(ciRect(trailStart)).insetBy(dx: -reach, dy: -reach).integral

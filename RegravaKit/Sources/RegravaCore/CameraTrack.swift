@@ -18,6 +18,18 @@ public struct CanvasLayout: Hashable, Sendable {
         restScreen = Self.scaled(resolver.initialScreenRect, scale)
     }
 
+    private init(canvas: Rect2, scale: Double, restScreen: Rect2, videoSize: Size2) {
+        self.canvas = canvas
+        self.scale = scale
+        self.restScreen = restScreen
+        self.videoSize = videoSize
+    }
+
+    /// The same layout on a canvas `k` times larger: everything in canvas pixels grows by `k`.
+    public func scaled(by k: Double) -> CanvasLayout {
+        CanvasLayout(canvas: Self.scaled(canvas, k), scale: scale * k, restScreen: Self.scaled(restScreen, k), videoSize: videoSize)
+    }
+
     static func scaled(_ r: Rect2, _ k: Double) -> Rect2 {
         Rect2(x: r.x * k, y: r.y * k, width: r.width * k, height: r.height * k)
     }
@@ -91,6 +103,24 @@ public struct CameraFrame: Hashable, Sendable {
     /// from the style alone.
     public var backgroundBlurRadius: Double?
     public var frostBlurRadius: Double?
+}
+
+extension CameraFrame {
+    /// The frame on a canvas `k` times larger: every canvas-pixel placement grows by `k`;
+    /// video pixels, stage units and fractions stay as they are.
+    public func scaled(by k: Double) -> CameraFrame {
+        guard k != 1 else { return self }
+        func r(_ rect: Rect2) -> Rect2 { CanvasLayout.scaled(rect, k) }
+        var f = self
+        f.screenRect = r(screenRect)
+        f.previousScreenRect = previousScreenRect.map(r)
+        f.cameraRect = cameraRect.map(r)
+        f.previousCameraRect = previousCameraRect.map(r)
+        f.cameraCornerRadius = cameraCornerRadius * k
+        f.screenReferenceWidth = screenReferenceWidth * k
+        f.backgroundRect = backgroundRect.map(r)
+        return f
+    }
 }
 
 /// Precomputed, deterministic camera and cursor animation for a whole project.
