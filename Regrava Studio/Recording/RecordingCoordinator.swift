@@ -85,6 +85,8 @@ final class RecordingCoordinator: ObservableObject {
     @Published private(set) var microphones: [CaptureDeviceInfo] = []
     /// App state, not persisted.
     @Published var showCameraPreview = true
+    /// The Settings window is open (the picker is then hidden, keeping its state).
+    @Published private(set) var settingsOpened = false
     // Recording
     @Published private(set) var phase: Phase = .idle
     /// The recording's elapsed time, observed only by the timer that shows it.
@@ -143,6 +145,20 @@ final class RecordingCoordinator: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        // The picker steps aside while Settings is open.
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didChangeOcclusionStateNotification, NSWindow.willCloseNotification] {
+            center.publisher(for: name)
+                .compactMap { note -> (NSWindow, Bool)? in
+                    guard let window = note.object as? NSWindow, window.windowController is SettingsWindowController else { return nil }
+                    return (window, note.name != NSWindow.willCloseNotification)
+                }
+                .sink { [weak self] window, open in
+                    let opened = open && window.isVisible
+                    if self?.settingsOpened != opened { self?.settingsOpened = opened }
+                }
+                .store(in: &cancellables)
+        }
         // Keep auxiliary windows in sync with the state.
         objectWillChange
             .debounce(for: .milliseconds(10), scheduler: RunLoop.main)
@@ -843,15 +859,24 @@ final class RecordingCoordinator: ObservableObject {
     // MARK: Auxiliary windows
 
     private func syncWindows() {
+        let pickerShown = isPickerOpen && !settingsOpened
+        if isPickerOpen, !isRecording {
+            if settingsOpened {
+                pickerPanel?.orderOut(nil)
+            } else if pickerPanel?.isVisible == false {
+                pickerPanel?.present()
+            }
+        }
+
         // Source overlays while choosing a display / window / area, or the device overlay.
-        if isPickerOpen, sourceType != nil, !isRecording {
+        if pickerShown, sourceType != nil, !isRecording {
             if case .countdown = phase { overlays.hide() } else { overlays.show() }
         } else {
             overlays.hide()
         }
 
         // Recent projects, beside the picker while no source is chosen.
-        if isPickerOpen, sourceType == nil, !isRecording, preferences.openRecentProjectsWithRecordingPicker,
+        if pickerShown, sourceType == nil, !isRecording, preferences.openRecentProjectsWithRecordingPicker,
            !AppController.shared.recentProjects.isEmpty {
             if recentProjectsPanel == nil {
                 recentProjectsPanel = RecentProjectsPanel { [weak self] in
