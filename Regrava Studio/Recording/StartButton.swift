@@ -15,10 +15,12 @@ struct StartRecordingButton: View {
     var body: some View {
         VStack(spacing: Theme.gap(1)) {
             HStack(spacing: 0) {
-                Button { coordinator.startPressed(target: target) } label: {
+                Button { press(byEnter: false) } label: {
                     HStack(spacing: Theme.gap(1)) {
                         Image(systemName: "record.circle").font(.system(size: 18))
                         Text(preferences.actionAfterRecording.startButtonTitle)
+                        // While the start runs.
+                        if coordinator.isStartPending { ProgressView().controlSize(.small) }
                     }
                     .padding(.leading, 20)
                     .padding(.trailing, 14)
@@ -41,6 +43,16 @@ struct StartRecordingButton: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(Theme.Colors.primary))
             .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
         }
+        .background(EnterShortcut(isEnabled: isActive && !pressed && !coordinator.isStartPending) { press(byEnter: true) })
+    }
+
+    /// Enter was pressed: it is not taken again by this button.
+    @State private var pressed = false
+
+    private func press(byEnter: Bool) {
+        guard !coordinator.isStartPending else { return }
+        if byEnter { pressed = true }
+        coordinator.startPressed(target: target)
     }
 
     private func showMenu() {
@@ -58,5 +70,34 @@ struct StartRecordingButton: View {
         menu.group("settings")
         menu.item("Quick export settings...", icon: "gearshape") { SettingsWindowController.shared.show(.widget) }
         menu.popUp(below: anchor.view)
+    }
+}
+
+/// Enter as a system-wide shortcut while enabled (the Start button on screen), so it works
+/// from any app.
+private struct EnterShortcut: View {
+    var isEnabled: Bool
+    var action: () -> Void
+    @State private var token: UInt32?
+
+    var body: some View {
+        Color.clear
+            .onAppear { update() }
+            .onChange(of: isEnabled) { _, _ in update() }
+            .onDisappear { unregister() }
+    }
+
+    private func update() {
+        if isEnabled, token == nil {
+            // 36 is Return.
+            token = GlobalHotKeys.shared.register(keyCode: 36) { action() }
+        } else if !isEnabled {
+            unregister()
+        }
+    }
+
+    private func unregister() {
+        if let token { GlobalHotKeys.shared.unregister(token) }
+        token = nil
     }
 }

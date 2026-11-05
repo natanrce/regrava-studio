@@ -39,15 +39,11 @@ final class SourceOverlayController {
         keyMonitor = nil
     }
 
-    /// Enter starts, Escape cancels, arrows move/resize the area (⇧ = 10 px, ⌘ = resize).
+    /// Escape cancels, arrows move/resize the area (⇧ = 10 px, ⌘ = resize). Enter belongs to
+    /// the Start button.
     private func handleKey(_ event: NSEvent) -> Bool {
         guard let coordinator else { return false }
         switch event.keyCode {
-        case 36, 76:
-            if coordinator.selection != nil, coordinator.selectionError == nil {
-                coordinator.startPressed()
-                return true
-            }
         case 53:
             if let override = coordinator.overlayEscapeOverride {
                 override()

@@ -25,11 +25,32 @@ final class GlobalHotKeys {
         }, 1, &spec, nil, &eventHandler)
     }
 
+    /// Ids of the shortcuts registered one at a time, apart from the Settings ones.
+    private static let transientIDs: UInt32 = 10_000
+    private var nextTransientID = transientIDs
+    private var transient: [UInt32: EventHotKeyRef] = [:]
+
+    /// Registers one more system-wide shortcut until `unregister`; nil when the key is taken.
+    func register(keyCode: UInt32, modifiers: UInt32 = 0, handler: @escaping () -> Void) -> UInt32? {
+        nextTransientID += 1
+        let id = EventHotKeyID(signature: OSType(0x5247_5354), id: nextTransientID)
+        var reference: EventHotKeyRef?
+        guard RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &reference) == noErr, let reference else { return nil }
+        transient[id.id] = reference
+        Self.handlers[id.id] = handler
+        return id.id
+    }
+
+    func unregister(_ token: UInt32) {
+        if let reference = transient.removeValue(forKey: token) { UnregisterEventHotKey(reference) }
+        Self.handlers[token] = nil
+    }
+
     func register(_ bindings: [(KeyShortcut, () -> Void)]) {
         references.forEach { UnregisterEventHotKey($0) }
         references.removeAll()
         registered.removeAll()
-        Self.handlers.removeAll()
+        Self.handlers = Self.handlers.filter { $0.key >= Self.transientIDs }
         for (index, binding) in bindings.enumerated() {
             let shortcut = binding.0
             let id = EventHotKeyID(signature: OSType(0x5247_5354), id: UInt32(index + 1)) // "RGST"

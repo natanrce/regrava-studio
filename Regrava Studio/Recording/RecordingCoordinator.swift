@@ -459,8 +459,10 @@ final class RecordingCoordinator: ObservableObject {
             }
             selection = target
         }
-        guard let selection, selectionError == nil, !isRecording else { return }
+        guard let selection, selectionError == nil, !isRecording, !isStartPending else { return }
+        isStartPending = true
         Task {
+            defer { isStartPending = false }
             // Missing access is asked for first; Start is then pressed again.
             if microphoneID != nil, !MediaPermission.microphone.isAuthorized {
                 MediaPermission.microphone.request()
@@ -485,6 +487,9 @@ final class RecordingCoordinator: ObservableObject {
             }
         }
     }
+
+    /// From a Start press until the recording (or its countdown) starts.
+    @Published private(set) var isStartPending = false
 
     /// The camera and microphone the recording uses: the chosen ones that are connected.
     private var startDevices: (cameraID: String?, microphoneID: String?) = (nil, nil)
