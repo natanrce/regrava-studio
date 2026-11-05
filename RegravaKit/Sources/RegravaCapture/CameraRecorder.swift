@@ -29,15 +29,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         guard let device = AVCaptureDevice(uniqueID: deviceID) else {
             throw CaptureError.failed("The selected camera is not connected.")
         }
-        let formats = device.formats.filter {
-            let d = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
-            return Int(d.height) <= maxHeight
-        }
-        if let best = formats.max(by: { a, b in
-            let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
-            let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
-            return Int(da.width) * Int(da.height) < Int(db.width) * Int(db.height)
-        }) {
+        if let best = CameraFormats.best(of: device, maxHeight: maxHeight) {
             try device.lockForConfiguration()
             device.activeFormat = best
             device.unlockForConfiguration()
@@ -94,5 +86,19 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
         await run { $0.stopRunning() }
         await writer?.finish()
+    }
+}
+
+/// Choosing the format a camera is opened at.
+public enum CameraFormats {
+    /// The camera's largest format no taller than `maxHeight`.
+    public static func best(of device: AVCaptureDevice, maxHeight: Int) -> AVCaptureDevice.Format? {
+        device.formats
+            .filter { Int(CMVideoFormatDescriptionGetDimensions($0.formatDescription).height) <= maxHeight }
+            .max { a, b in
+                let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
+                let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
+                return Int(da.width) * Int(da.height) < Int(db.width) * Int(db.height)
+            }
     }
 }
