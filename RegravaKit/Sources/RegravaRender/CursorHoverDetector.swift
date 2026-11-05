@@ -78,6 +78,11 @@ public enum CursorHoverDetector {
 
             for (start, end) in spans {
                 try cancellation.check()
+                // One background decode lane per span, given back once the span is read.
+                guard let lane = SD.DecodeLanes.shared.acquire(isCancelled: { cancellation.isCancelled }) else {
+                    throw CancellationError()
+                }
+                defer { lane.release() }
                 let reader = try AVAssetReader(asset: asset)
                 // Read from before the span so the history holds the stability frames.
                 let from = max(0, start - settings.lookBackMs - settings.stabilityLookBackMs - 1000)

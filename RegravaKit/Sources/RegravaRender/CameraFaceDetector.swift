@@ -24,6 +24,17 @@ public enum CameraFaceDetector {
             var faces = start
             let interval = faces.intervalMs
             var next = faces.samples.last.map { $0.timeMs + interval } ?? 0
+            guard next < durationMs else {
+                faces.analyzedUntilMs = durationMs
+                faces.isComplete = true
+                progress(faces)
+                return faces
+            }
+            // One background decode lane, held for the whole read.
+            guard let lane = SD.DecodeLanes.shared.acquire(isCancelled: { cancellation.isCancelled }) else {
+                throw CancellationError()
+            }
+            defer { lane.release() }
 
             let reader = try AVAssetReader(asset: asset)
             let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
