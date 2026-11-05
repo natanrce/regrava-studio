@@ -711,6 +711,8 @@ final class RecordingCoordinator: ObservableObject {
             if isDeviceRecording { await deviceRecorder.cancel() } else { await recorder.cancel() }
             if let bundleURL { try? FileManager.default.removeItem(at: bundleURL) }
             endRecordingUI()
+            // The picker comes back for the next recording.
+            openPicker()
         }
     }
 
