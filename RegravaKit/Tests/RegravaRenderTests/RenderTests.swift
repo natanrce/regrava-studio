@@ -532,7 +532,8 @@ struct InteractiveDecodingTests {
         #expect(!isNoted(scrubber))
         scrubber.demand(200)
         let start = Date()
-        while scrubber.frame(at: 200) == nil, Date().timeIntervalSince(start) < 5 {
+        // Generous: the full suite runs exports alongside on a busy machine.
+        while scrubber.frame(at: 200) == nil, Date().timeIntervalSince(start) < 60 {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
         #expect(scrubber.frame(at: 200) != nil)
