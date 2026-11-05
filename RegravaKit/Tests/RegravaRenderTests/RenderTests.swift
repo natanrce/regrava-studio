@@ -476,3 +476,29 @@ struct RenderTests {
         }
     }
 }
+
+struct InteractiveDecodingTests {
+    private func isNoted(_ stream: AnyObject) -> Bool {
+        let activity = SD.InteractiveDecodeActivity.shared
+        activity.lock.lock()
+        defer { activity.lock.unlock() }
+        return activity.lastDecodeByStream[ObjectIdentifier(stream)] != nil
+    }
+
+    @Test func scrubberDecodingIsInteractiveUntilClosed() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("scrub-activity-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await makeTestVideo(url: url, width: 320, height: 180, frames: 30, fps: 30)
+        let scrubber = VideoScrubber(url: url)
+        #expect(!isNoted(scrubber))
+        scrubber.demand(200)
+        let start = Date()
+        while scrubber.frame(at: 200) == nil, Date().timeIntervalSince(start) < 5 {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        #expect(scrubber.frame(at: 200) != nil)
+        #expect(isNoted(scrubber))
+        scrubber.close()
+        #expect(!isNoted(scrubber))
+    }
+}

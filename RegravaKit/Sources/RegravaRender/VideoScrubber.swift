@@ -59,6 +59,7 @@ public final class VideoScrubber: @unchecked Sendable {
         isClosed = true
         frames.removeAll()
         lock.unlock()
+        SD.InteractiveDecodeActivity.shared.forget(self)
         queue.async {
             self.reader?.cancelReading()
             self.reader = nil
@@ -196,6 +197,8 @@ public final class VideoScrubber: @unchecked Sendable {
             lock.unlock()
             return
         }
+        // Background analyses give up decode lanes while this stream decodes.
+        SD.InteractiveDecodeActivity.shared.noteDecoding(self)
         guard let buffer = CMSampleBufferGetImageBuffer(sample) else { return }
         let ms = CMSampleBufferGetPresentationTimeStamp(sample).seconds * 1000
         lock.lock()

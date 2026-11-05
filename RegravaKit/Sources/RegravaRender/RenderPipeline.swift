@@ -266,6 +266,8 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
     /// failing those requests would stop playback.
     private var lastSource: CVPixelBuffer?
     private let lock = NSLock()
+    /// Stands for the camera track's decode stream.
+    private let cameraStream = NSObject()
 
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         guard let instruction = request.videoCompositionInstruction as? CanvasInstruction,
@@ -283,6 +285,9 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
         }
         let timeMs = request.compositionTime.seconds * 1000
         let camera = instruction.cameraTrackID.flatMap { request.sourceFrame(byTrackID: $0) }.map { CIImage(cvPixelBuffer: $0) }
+        // Each decoded track counts as an interactive stream background analyses yield lanes to.
+        SD.InteractiveDecodeActivity.shared.noteDecoding(self)
+        if camera != nil { SD.InteractiveDecodeActivity.shared.noteDecoding(cameraStream) }
         var image = instruction.state.render(source: CIImage(cvPixelBuffer: source), camera: camera, timeMs: timeMs)
         let scaleX = instruction.renderSize.width / max(instruction.canvas.width, 1)
         let scaleY = instruction.renderSize.height / max(instruction.canvas.height, 1)
