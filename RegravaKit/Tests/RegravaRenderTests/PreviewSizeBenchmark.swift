@@ -154,3 +154,40 @@ struct SourceFormatComparison {
         }
     }
 }
+
+/// Compose-only GPU frame time on one decoded frame of a real project (REGRAVA_BENCH_COMPOSE=<bundle>).
+struct PreviewComposeBenchmark {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["REGRAVA_BENCH_COMPOSE"] != nil))
+    func composeFrameTime() async throws {
+        let bundle = URL(fileURLWithPath: ProcessInfo.processInfo.environment["REGRAVA_BENCH_COMPOSE"]!)
+        let project = try ProjectStore.load(from: bundle)
+        let asset = AVURLAsset(url: ProjectStore.videoURL(bundle: bundle, project: project))
+        let track = try await asset.loadTracks(withMediaType: .video)[0]
+        let reader = try AVAssetReader(asset: asset)
+        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: CanvasCompositor.sourceFormat, kCVPixelBufferMetalCompatibilityKey as String: true])
+        reader.add(out)
+        reader.startReading()
+        let buffer = CMSampleBufferGetImageBuffer(out.copyNextSampleBuffer()!)!
+        let canvas = project.canvasSize
+        for height in [1080.0, 720, 540] {
+            let output = Size2(width: (height * canvas.aspectRatio).rounded(), height: height)
+            let size = CGSize(width: output.width, height: output.height)
+            for quality in [RenderQuality.playing, .pausedHigh] {
+                let state = RenderState(project: project, cursors: CursorLibrary.arrowOnly(), assetsDirectory: bundle, outputSize: output)
+                state.quality = quality
+                var target: CVPixelBuffer?
+                CVPixelBufferCreate(nil, Int(size.width), Int(size.height), kCVPixelFormatType_32BGRA, [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &target)
+                var times: [Double] = []
+                for t in stride(from: 0.0, to: 6000, by: 1000.0 / 60) {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    let image = state.render(source: CIImage(cvPixelBuffer: buffer), timeMs: t, size: size)
+                    CanvasCompositor.context.render(image, to: target!, bounds: CGRect(origin: .zero, size: size), colorSpace: CanvasCompositor.sRGB)
+                    CVPixelBufferLockBaseAddress(target!, .readOnly); CVPixelBufferUnlockBaseAddress(target!, .readOnly)
+                    times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                }
+                let warm = times.dropFirst(30).sorted()
+                print(String(format: "COMPOSE %.0fx%.0f %@: median %.2f ms, p90 %.2f ms", size.width, size.height, "\(quality)", warm[warm.count / 2], warm[warm.count * 9 / 10]))
+            }
+        }
+    }
+}
