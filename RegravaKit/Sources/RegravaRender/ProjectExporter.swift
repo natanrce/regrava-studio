@@ -228,9 +228,12 @@ public enum ProjectExporter {
             audioInput = input
         }
 
-        guard reader.startReading() else { throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error") }
-        guard writer.startWriting() else { throw ExportError.cannotWrite(writer.error?.localizedDescription ?? "unknown error") }
-        writer.startSession(atSourceTime: .zero)
+        nonisolated(unsafe) let startedReader = reader, startedWriter = writer
+        try await BlockingWork.run("export start") { _ in
+            guard startedReader.startReading() else { throw ExportError.cannotRead(startedReader.error?.localizedDescription ?? "unknown error") }
+            guard startedWriter.startWriting() else { throw ExportError.cannotWrite(startedWriter.error?.localizedDescription ?? "unknown error") }
+            startedWriter.startSession(atSourceTime: .zero)
+        }
 
         let totalSeconds = max(duration.seconds, 0.001)
         let cancelled = CancellationFlag()
@@ -339,71 +342,73 @@ public enum ProjectExporter {
         let gifSettings = GifEncodingSettings.forMode(settings.quality.gifMode)
         let partialURL = outputURL.appendingPathExtension("partial")
 
-        /// Hands each frame, in order, to `body` with its index while its pixels are locked.
-        func readFrames(_ body: (Int, GifFramePixels) throws -> Void) throws {
-            let reader = try AVAssetReader(asset: asset)
-            let output = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            ])
-            output.videoComposition = composition
-            reader.add(output)
-            guard reader.startReading() else { throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error") }
-            defer { reader.cancelReading() }
-            var next = 0
-            while next < kept.count, let buffer = output.copyNextSampleBuffer() {
-                if Task.isCancelled { throw ExportError.cancelled }
-                let time = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
-                guard abs(time - kept[next]) < 0.0005, let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else { continue }
-                let frameWidth = CVPixelBufferGetWidth(pixelBuffer), frameHeight = CVPixelBufferGetHeight(pixelBuffer)
-                guard frameWidth == width, frameHeight == height else {
-                    throw ExportError.cannotWrite("A frame does not fit the GIF: \(frameWidth)×\(frameHeight) for a \(width)×\(height) GIF")
-                }
-                CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-                defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-                guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { continue }
-                let pixels = GifFramePixels(
-                    base: base.assumingMemoryBound(to: UInt8.self), width: frameWidth, height: frameHeight,
-                    bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer), layout: .bgra
-                )
-                try body(next, pixels)
-                next += 1
-            }
-            if reader.status == .failed { throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error") }
-        }
-
         // The palette comes from sample frames first, then every frame is encoded.
         let steps = Double(max(kept.count * 2, 1))
-        do {
-            let sampler = GifPaletteSampler(pixelStride: 2)
-            try readFrames { index, pixels in
-                sampler.add(pixels)
-                progress(min(Double(index + 1) / steps, 0.999))
+        try await BlockingWork.run("gif export") { cancellation in
+            /// Hands each frame, in order, to `body` with its index while its pixels are locked.
+            func readFrames(_ body: (Int, GifFramePixels) throws -> Void) throws {
+                let reader = try AVAssetReader(asset: asset)
+                let output = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                ])
+                output.videoComposition = composition
+                reader.add(output)
+                guard reader.startReading() else { throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error") }
+                defer { reader.cancelReading() }
+                var next = 0
+                while next < kept.count, let buffer = output.copyNextSampleBuffer() {
+                    if cancellation.isCancelled { throw ExportError.cancelled }
+                    let time = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
+                    guard abs(time - kept[next]) < 0.0005, let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else { continue }
+                    let frameWidth = CVPixelBufferGetWidth(pixelBuffer), frameHeight = CVPixelBufferGetHeight(pixelBuffer)
+                    guard frameWidth == width, frameHeight == height else {
+                        throw ExportError.cannotWrite("A frame does not fit the GIF: \(frameWidth)×\(frameHeight) for a \(width)×\(height) GIF")
+                    }
+                    CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+                    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+                    guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { continue }
+                    let pixels = GifFramePixels(
+                        base: base.assumingMemoryBound(to: UInt8.self), width: frameWidth, height: frameHeight,
+                        bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer), layout: .bgra
+                    )
+                    try body(next, pixels)
+                    next += 1
+                }
+                if reader.status == .failed { throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error") }
             }
-            let palette = sampler.makePalette(maxColors: gifSettings.maxColors)
 
-            try? FileManager.default.removeItem(at: partialURL)
-            guard FileManager.default.createFile(atPath: partialURL.path, contents: nil) else {
-                throw ExportError.cannotWrite("could not create \(partialURL.path)")
+            do {
+                let sampler = GifPaletteSampler(pixelStride: 2)
+                try readFrames { index, pixels in
+                    sampler.add(pixels)
+                    progress(min(Double(index + 1) / steps, 0.999))
+                }
+                let palette = sampler.makePalette(maxColors: gifSettings.maxColors)
+
+                try? FileManager.default.removeItem(at: partialURL)
+                guard FileManager.default.createFile(atPath: partialURL.path, contents: nil) else {
+                    throw ExportError.cannotWrite("could not create \(partialURL.path)")
+                }
+                let handle = try FileHandle(forWritingTo: partialURL)
+                defer { try? handle.close() }
+                let encoder = GifStreamEncoder(
+                    width: width, height: height, framesPerSecond: Double(fps), palette: palette,
+                    settings: gifSettings, loops: !settings.gifDisableLoop, output: handle
+                )
+                try readFrames { index, pixels in
+                    try encoder.add(pixels, frameIndex: index)
+                    progress(min(Double(kept.count + index + 1) / steps, 0.999))
+                }
+                _ = try encoder.finish(endFrameIndex: kept.count)
+                try handle.synchronize()
+                try? FileManager.default.removeItem(at: outputURL)
+                guard rename(partialURL.path, outputURL.path) == 0 else {
+                    throw ExportError.cannotWrite("could not move the GIF to \(outputURL.path)")
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: partialURL)
+                throw error
             }
-            let handle = try FileHandle(forWritingTo: partialURL)
-            defer { try? handle.close() }
-            let encoder = GifStreamEncoder(
-                width: width, height: height, framesPerSecond: Double(fps), palette: palette,
-                settings: gifSettings, loops: !settings.gifDisableLoop, output: handle
-            )
-            try readFrames { index, pixels in
-                try encoder.add(pixels, frameIndex: index)
-                progress(min(Double(kept.count + index + 1) / steps, 0.999))
-            }
-            _ = try encoder.finish(endFrameIndex: kept.count)
-            try handle.synchronize()
-            try? FileManager.default.removeItem(at: outputURL)
-            guard rename(partialURL.path, outputURL.path) == 0 else {
-                throw ExportError.cannotWrite("could not move the GIF to \(outputURL.path)")
-            }
-        } catch {
-            try? FileManager.default.removeItem(at: partialURL)
-            throw error
         }
         progress(1)
     }
