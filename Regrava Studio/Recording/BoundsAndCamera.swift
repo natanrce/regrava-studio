@@ -25,13 +25,14 @@ final class BoundsIndicatorController {
                 guard display.id != id, cover else { continue }
                 view = AnyView(Color.black.opacity(0.4))
             } else {
-                let overlap = displayFrame.intersection(bounds)
-                guard !overlap.isNull else {
+                // A display shows the recorded bounds only when they cover 70% of it (or of
+                // themselves); otherwise it is covered whole.
+                guard PickerRules.overlaps(bounds, displayFrame, ratio: PickerRules.boundsIndicatorOverlap) else {
                     if cover { view = AnyView(Color.black.opacity(0.4)) } else { continue }
                     panels.append(makePanel(screen: screen, view: view))
                     continue
                 }
-                let local = overlap.offsetBy(dx: -displayFrame.minX, dy: -displayFrame.minY)
+                let local = bounds.offsetBy(dx: -displayFrame.minX, dy: -displayFrame.minY)
                 view = AnyView(BoundsMask(rect: local, cover: cover))
             }
             panels.append(makePanel(screen: screen, view: view))
@@ -63,9 +64,9 @@ private struct BoundsMask: View {
             ZStack(alignment: .topLeading) {
                 if cover {
                     let c = Color.black.opacity(0.4)
-                    c.frame(width: size.width, height: rect.minY)
+                    c.frame(width: size.width, height: max(rect.minY, 0))
                     c.frame(width: size.width, height: max(size.height - rect.maxY, 0)).offset(y: rect.maxY)
-                    c.frame(width: rect.minX, height: rect.height).offset(y: rect.minY)
+                    c.frame(width: max(rect.minX, 0), height: rect.height).offset(y: rect.minY)
                     c.frame(width: max(size.width - rect.maxX, 0), height: rect.height).offset(x: rect.maxX, y: rect.minY)
                 } else {
                     Rectangle()
