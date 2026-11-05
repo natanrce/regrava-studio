@@ -213,11 +213,13 @@ public enum ProjectExporter {
         }
 
         var writers: [(writer: AVAssetWriter, video: AVAssetWriterInput, audio: AVAssetWriterInput?)] = []
-        for output in outputs {
-            try? FileManager.default.removeItem(at: output.url)
+        // MP4s are written beside their outputs and moved there once every output has finished.
+        let files = outputs.map { settings.format == .mp4 ? encodingURL(for: $0.url) : $0.url }
+        for (output, file) in zip(outputs, files) {
+            try? FileManager.default.removeItem(at: file)
             let writer: AVAssetWriter
             do {
-                writer = try AVAssetWriter(outputURL: output.url, fileType: settings.format == .prores ? .mov : .mp4)
+                writer = try AVAssetWriter(outputURL: file, fileType: settings.format == .prores ? .mov : .mp4)
             } catch {
                 throw ExportError.cannotWrite(error.localizedDescription)
             }
@@ -292,23 +294,48 @@ public enum ProjectExporter {
 
         if cancelled.isSet || Task.isCancelled {
             reader.cancelReading()
-            for (writer, output) in zip(writers, outputs) {
+            for (writer, file) in zip(writers, files) {
                 writer.writer.cancelWriting()
-                try? FileManager.default.removeItem(at: output.url)
+                try? FileManager.default.removeItem(at: file)
             }
             throw ExportError.cancelled
         }
         if reader.status == .failed {
-            for writer in writers { writer.writer.cancelWriting() }
+            for (writer, file) in zip(writers, files) {
+                writer.writer.cancelWriting()
+                if settings.format == .mp4 { try? FileManager.default.removeItem(at: file) }
+            }
             throw ExportError.cannotRead(reader.error?.localizedDescription ?? "unknown error")
         }
         for writer in writers {
             await writer.writer.finishWriting()
         }
         if let failed = writers.first(where: { $0.writer.status != .completed }) {
+            if settings.format == .mp4 { for file in files { try? FileManager.default.removeItem(at: file) } }
             throw ExportError.cannotWrite(failed.writer.error?.localizedDescription ?? "unknown error")
         }
+        if settings.format == .mp4 {
+            do {
+                for (file, output) in zip(files, outputs) {
+                    if FileManager.default.fileExists(atPath: output.url.path) {
+                        _ = try FileManager.default.replaceItemAt(output.url, withItemAt: file)
+                    } else {
+                        try FileManager.default.moveItem(at: file, to: output.url)
+                    }
+                }
+            } catch {
+                for file in files { try? FileManager.default.removeItem(at: file) }
+                throw ExportError.cannotWrite(error.localizedDescription)
+            }
+        }
         progress(1)
+    }
+
+    /// Where an MP4 is written until the export finishes: a hidden file beside it,
+    /// `.<name>.encoding.mp4`.
+    static func encodingURL(for output: URL) -> URL {
+        output.deletingLastPathComponent()
+            .appendingPathComponent(".\(output.deletingPathExtension().lastPathComponent).encoding.mp4")
     }
 
     /// Feeds one input its samples until they end, the input refuses one, or the export stops.

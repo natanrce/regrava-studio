@@ -410,7 +410,17 @@ struct RenderTests {
                 frameCounts.append(frames)
             }
             #expect(frameCounts[0] > 0 && frameCounts[0] == frameCounts[1])
+            // Each file was written beside its output and moved there; nothing is left behind.
+            let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            #expect(!left.contains { $0.hasSuffix(".encoding.mp4") })
         }
+    }
+
+    @Test func mp4IsWrittenBesideItsOutputUntilItFinishes() {
+        let output = URL(fileURLWithPath: "/tmp/exports/My Demo.mp4")
+        #expect(ProjectExporter.encodingURL(for: output).path == "/tmp/exports/.My Demo.encoding.mp4")
+        let hevc = URL(fileURLWithPath: "/tmp/exports/My Demo.hevc.mp4")
+        #expect(ProjectExporter.encodingURL(for: hevc).path == "/tmp/exports/.My Demo.hevc.encoding.mp4")
     }
 
     @Test func exportsProRes() async throws {
