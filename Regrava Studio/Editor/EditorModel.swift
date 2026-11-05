@@ -894,14 +894,14 @@ final class EditorModel: ObservableObject {
         if isScrubbing { scrubPreview?.refresh() } else { seek(to: currentTimeMs, moveHead: false) }
     }
 
-    /// Lighter motion blur while playing, full quality when paused (`wf.qualityByMode`). A frame
-    /// left on screen after playback or scrubbing is drawn again at full quality.
+    /// Lighter motion blur while playing, full quality whenever not playing, hover scrubbing
+    /// included. A frame left on screen after playback is drawn again at full quality.
     private func updateRenderQuality() {
-        let quality: RenderQuality = isPlaying ? .playing : isScrubbing ? .pausedLow : .pausedHigh
+        let quality: RenderQuality = isPlaying ? .playing : .pausedHigh
         let previous = renderState.quality
         guard quality != previous else { return }
         renderState.quality = quality
-        if quality == .pausedHigh, previous == .playing || previous == .pausedLow,
+        if quality == .pausedHigh, previous == .playing,
            let base = baseConfiguration, let item = player.currentItem {
             item.videoComposition = AVVideoComposition(configuration: base)
             seek(to: currentTimeMs, moveHead: false)
