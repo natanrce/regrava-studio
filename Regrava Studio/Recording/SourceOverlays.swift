@@ -505,8 +505,19 @@ private struct SuggestionChip: View {
 
 @MainActor
 final class AreaPickerState: ObservableObject {
-    /// Width / height constraint, nil = Any.
-    @Published var aspectRatio: Double?
+    /// Forced aspect ratio x:y, nil = Any.
+    @Published var aspectRatio: AspectRatio?
+
+    struct AspectRatio: Hashable {
+        var x: Int
+        var y: Int
+
+        var value: Double { Double(x) / Double(y) }
+        var label: String { "\(x):\(y)" }
+    }
+
+    /// Any, 16:9, 4:3, 1:1, 3:4, 9:16.
+    static let aspectOptions: [AspectRatio?] = [nil, .init(x: 16, y: 9), .init(x: 4, y: 3), .init(x: 1, y: 1), .init(x: 3, y: 4), .init(x: 9, y: 16)]
 
     static func clamp(_ rect: CGRect, to size: CGSize) -> CGRect {
         var r = rect.standardized
@@ -592,7 +603,7 @@ private struct AreaPickerOverlay: View {
                         x: min(start.x, value.location.x), y: min(start.y, value.location.y),
                         width: abs(value.location.x - start.x), height: abs(value.location.y - start.y)
                     )
-                    if let ratio = state.aspectRatio { updated.size.height = updated.width / ratio }
+                    if let ratio = state.aspectRatio?.value { updated.size.height = updated.width / ratio }
                 case .move:
                     updated = dragOrigin.offsetBy(dx: value.translation.width, dy: value.translation.height)
                 case .resize(let edges):
@@ -601,7 +612,7 @@ private struct AreaPickerOverlay: View {
                     if edges.contains(.trailing) { updated.size.width += value.translation.width }
                     if edges.contains(.top) { updated.origin.y += value.translation.height; updated.size.height -= value.translation.height }
                     if edges.contains(.bottom) { updated.size.height += value.translation.height }
-                    if let ratio = state.aspectRatio { updated.size.height = updated.width / ratio }
+                    if let ratio = state.aspectRatio?.value { updated.size.height = updated.width / ratio }
                 }
                 coordinator.setArea(displayID: displayID, rect: AreaPickerState.clamp(updated, to: size))
             }
@@ -654,6 +665,7 @@ private struct AreaToolbar: View {
     var rect: CGRect
     private let aspectAnchor = AnchorHolder()
     private let savedAnchor = AnchorHolder()
+    @State private var showsAspectOptions = false
 
     private var isTooSmall: Bool {
         rect.width < RecordingCoordinator.minimumAreaSize || rect.height < RecordingCoordinator.minimumAreaSize
@@ -665,8 +677,11 @@ private struct AreaToolbar: View {
                 fieldsRow("Size", a: value(\.size.width), b: value(\.size.height), separator: "×")
                 fieldsRow("Position", a: value(\.origin.x), b: value(\.origin.y), separator: " ")
                 HStack(spacing: Theme.gap(1)) {
-                    toolbarDropdown(icon: "aspectratio", tooltip: "Set crop aspect ratio", anchor: aspectAnchor, isSet: state.aspectRatio != nil, action: aspectMenu)
-                    toolbarDropdown(icon: "rectangle.dashed", title: "Saved", tooltip: "Use and manage saved area dimensions", anchor: savedAnchor, isSet: false, action: savedMenu)
+                    toolbarDropdown(icon: "aspectratio", tooltip: "Set crop aspect ratio", anchor: aspectAnchor, isSet: state.aspectRatio != nil) { showsAspectOptions = true }
+                        .popover(isPresented: $showsAspectOptions, arrowEdge: .bottom) {
+                            AspectRatioOptions(selected: state.aspectRatio, onSelect: setAspectRatio)
+                        }
+                    toolbarDropdown(icon: "rectangle.dashed", title: "Saved", tooltip: "Use and manage saved area dimensions", anchor: savedAnchor, isSet: isSavedSize, action: savedMenu)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -689,16 +704,37 @@ private struct AreaToolbar: View {
         .foregroundStyle(.white)
     }
 
+    private var displaySize: CGSize { CGDisplayBounds(displayID).size }
+
+    /// A typed width or height follows the forced aspect ratio; the area is then fitted onto
+    /// the display.
     private func value(_ keyPath: WritableKeyPath<CGRect, CGFloat>) -> Binding<String> {
         Binding(
             get: { String(Int(rect[keyPath: keyPath])) },
             set: { text in
-                guard let number = Double(text) else { return }
-                var updated = rect
-                updated[keyPath: keyPath] = CGFloat(number)
-                coordinator.setArea(displayID: displayID, rect: AreaPickerState.clamp(updated, to: CGDisplayBounds(displayID).size))
+                guard let number = Double(text).map({ CGFloat($0) }) else { return }
+                var width: CGFloat?, height: CGFloat?, x: CGFloat?, y: CGFloat?
+                switch keyPath {
+                case \.size.width: width = number
+                case \.size.height: height = number
+                case \.origin.x: x = number
+                default: y = number
+                }
+                if let ratio = state.aspectRatio, width != nil || height != nil {
+                    let constrained = AreaCrop.constrain(width: width, height: height, crop: rect, aspectRatio: ratio.value, display: displaySize, minimumSize: 1)
+                    width = constrained.width
+                    height = constrained.height
+                }
+                coordinator.setArea(displayID: displayID, rect: AreaCrop.fit(x: x, y: y, width: width, height: height, crop: rect, display: displaySize))
             }
         )
+    }
+
+    /// A chosen aspect ratio reshapes the area from its height.
+    private func setAspectRatio(_ ratio: AreaPickerState.AspectRatio?) {
+        let constrained = AreaCrop.constrain(crop: rect, aspectRatio: ratio?.value, display: displaySize, minimumSize: 200)
+        state.aspectRatio = ratio
+        coordinator.setArea(displayID: displayID, rect: constrained)
     }
 
     private func fieldsRow(_ label: String, a: Binding<String>, b: Binding<String>, separator: String) -> some View {
@@ -727,53 +763,90 @@ private struct AreaToolbar: View {
         .tooltip(tooltip)
     }
 
-    private func aspectMenu() {
-        let menu = MenuBuilder()
-        let options: [(String, Double?)] = [("Any", nil), ("16:9", 16.0 / 9), ("4:3", 4.0 / 3), ("1:1", 1), ("3:4", 3.0 / 4), ("9:16", 9.0 / 16)]
-        for (label, ratio) in options {
-            menu.item(label, checked: state.aspectRatio == ratio) {
-                state.aspectRatio = ratio
-                if let ratio {
-                    var updated = rect
-                    updated.size.width = max(updated.width, 200)
-                    updated.size.height = max(updated.width / ratio, 200)
-                    updated.size.width = updated.height * ratio
-                    coordinator.setArea(displayID: displayID, rect: AreaPickerState.clamp(updated, to: CGDisplayBounds(displayID).size))
-                }
-            }
-        }
-        menu.popUp(below: aspectAnchor.view)
+    private func isSameSize(_ saved: AreaSize) -> Bool {
+        saved.width == Int(rect.width) && saved.height == Int(rect.height)
     }
 
+    /// The Saved button stands out while the area has a saved size.
+    private var isSavedSize: Bool { preferences.recordingAreaCropPresets.contains(where: isSameSize) }
+
+    /// Saved areas (usable when they fit the display and differ from the current size),
+    /// "Save current dimensions" and "Delete saved dimensions ▸".
     private func savedMenu() {
         let menu = MenuBuilder()
-        let current = AreaSize(width: Int(rect.width), height: Int(rect.height))
-        if preferences.recordingAreaCropPresets.isEmpty {
+        let saved = preferences.recordingAreaCropPresets
+        let current = rect.size
+        menu.group("option")
+        if saved.isEmpty {
             menu.disabled("No saved dimensions")
         } else {
-            for size in preferences.recordingAreaCropPresets {
-                menu.item("\(size.width) × \(size.height)" + (size == current ? " (current)" : "")) {
-                    var updated = rect
-                    updated.size = CGSize(width: size.width, height: size.height)
-                    coordinator.setArea(displayID: displayID, rect: AreaPickerState.clamp(updated, to: CGDisplayBounds(displayID).size))
+            for size in saved {
+                let savedRect = CGRect(x: size.x ?? 0, y: size.y ?? 0, width: size.width, height: size.height)
+                menu.item("\(size.width) × \(size.height)" + (isSameSize(size) ? " (current)" : ""), enabled: AreaCrop.isSavedEnabled(savedRect, current: current, display: displaySize)) {
+                    state.aspectRatio = nil
+                    coordinator.setArea(displayID: displayID, rect: AreaCrop.fit(width: CGFloat(size.width), height: CGFloat(size.height), crop: rect, display: displaySize))
                 }
             }
         }
-        if !preferences.recordingAreaCropPresets.contains(current) && !isTooSmall {
-            menu.group("manage")
-            menu.item("Save current dimensions") { preferences.recordingAreaCropPresets.append(current) }
+        if !saved.contains(where: isSameSize), !isTooSmall {
+            let crop = AreaSize(width: Int(rect.width), height: Int(rect.height), x: Int(rect.minX), y: Int(rect.minY))
+            menu.item("Save current dimensions") { preferences.recordingAreaCropPresets.append(crop) }
         }
-        if !preferences.recordingAreaCropPresets.isEmpty {
-            menu.group("manage")
+        if !saved.isEmpty {
+            menu.group("delete")
             menu.submenu("Delete saved dimensions") { sub in
-                for size in preferences.recordingAreaCropPresets {
+                for size in saved {
                     sub.item("Delete \(size.width) × \(size.height)", destructive: true) {
-                        preferences.recordingAreaCropPresets.removeAll { $0 == size }
+                        preferences.recordingAreaCropPresets.removeAll { $0.width == size.width && $0.height == size.height }
                     }
                 }
             }
         }
         menu.popUp(below: savedAnchor.view)
+    }
+}
+
+/// The aspect ratio choices, which stay open after a choice, and a "Custom aspect ratio"
+/// x:y pair (each at least 1).
+private struct AspectRatioOptions: View {
+    var selected: AreaPickerState.AspectRatio?
+    var onSelect: (AreaPickerState.AspectRatio?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(AreaPickerState.aspectOptions, id: \.self) { option in
+                Button { onSelect(option) } label: {
+                    HStack(spacing: Theme.gap(1)) {
+                        Text(option?.label ?? "Any")
+                        Spacer(minLength: Theme.gap(2))
+                        if option == selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)) }
+                    }
+                    .font(Theme.Typo.controlCopy)
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Divider().padding(.vertical, 4)
+            VStack(alignment: .leading, spacing: Theme.gap(1)) {
+                Text("Custom aspect ratio").font(Theme.Typo.label).opacity(Theme.tertiaryOpacity)
+                HStack(spacing: Theme.gap(0)) {
+                    NumberField(text: Binding(
+                        get: { selected.map { String($0.x) } ?? "" },
+                        set: { if let x = Int($0) { onSelect(.init(x: max(x, 1), y: selected?.y ?? 1)) } }
+                    ))
+                    NumberField(text: Binding(
+                        get: { selected.map { String($0.y) } ?? "" },
+                        set: { if let y = Int($0) { onSelect(.init(x: selected?.x ?? 1, y: max(y, 1))) } }
+                    ))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+        .padding(.vertical, 6)
+        .frame(minWidth: 180)
     }
 }
 

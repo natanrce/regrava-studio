@@ -29,10 +29,13 @@ enum AfterRecordingAction: String, Codable, CaseIterable {
     }
 }
 
-/// Width × height in points (saved area dimensions).
+/// Width × height in points (saved window sizes and area dimensions); a saved area also keeps
+/// where it was on the display.
 struct AreaSize: Codable, Hashable {
     var width: Int
     var height: Int
+    var x: Int?
+    var y: Int?
 }
 
 /// An area selection on a display, in display-local points (top-left origin).
