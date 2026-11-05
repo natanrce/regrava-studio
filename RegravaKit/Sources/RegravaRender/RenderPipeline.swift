@@ -272,11 +272,16 @@ extension CompositionFactory {
         }
     }
 
-    /// A blank frame as the decoder hands it over (`CanvasCompositor.sourceFormat`).
+    /// A blank frame as the decoder hands it over (`CanvasCompositor.sourceFormat`, BT.709), so
+    /// the warmed programs include its conversion.
     static func decodedFrameBuffer(_ size: Size2) -> CVPixelBuffer? {
         var buffer: CVPixelBuffer?
         let attributes = [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
         CVPixelBufferCreate(nil, Int(size.width), Int(size.height), CanvasCompositor.sourceFormat, attributes, &buffer)
+        guard let buffer else { return nil }
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
         return buffer
     }
 
@@ -314,8 +319,9 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
     /// The colour space every composed frame is rendered in.
     static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    /// The pixel format decoded frames are read in.
-    static let sourceFormat = kCVPixelFormatType_32BGRA
+    /// The pixel format decoded frames are read in: video-range 4:2:0 as the decoder produces
+    /// it, converted to RGB by Core Image with the frame's own matrix instead of by a copy.
+    static let sourceFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
 
     let sourcePixelBufferAttributes: [String: any Sendable]? = [
         kCVPixelBufferPixelFormatTypeKey as String: sourceFormat,

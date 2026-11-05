@@ -101,3 +101,56 @@ struct PreviewSizeComparison {
         }
     }
 }
+
+/// Real-project frames read as BGRA (converted by the decoder) against frames read as
+/// video-range 4:2:0 and converted by Core Image (REGRAVA_COMPARE_SOURCE=<bundle path>).
+struct SourceFormatComparison {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["REGRAVA_COMPARE_SOURCE"] != nil))
+    func compareFormats() async throws {
+        let bundle = URL(fileURLWithPath: ProcessInfo.processInfo.environment["REGRAVA_COMPARE_SOURCE"]!)
+        let project = try ProjectStore.load(from: bundle)
+        let asset = AVURLAsset(url: ProjectStore.videoURL(bundle: bundle, project: project))
+        let track = try await asset.loadTracks(withMediaType: .video)[0]
+        func frames(_ format: OSType) throws -> [CVPixelBuffer] {
+            let reader = try AVAssetReader(asset: asset)
+            let out = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: format, kCVPixelBufferMetalCompatibilityKey as String: true])
+            reader.add(out)
+            reader.startReading()
+            var buffers: [CVPixelBuffer] = []
+            var index = 0
+            while let sample = out.copyNextSampleBuffer() {
+                if index % 400 == 0, let buffer = CMSampleBufferGetImageBuffer(sample) { buffers.append(buffer) }
+                index += 1
+            }
+            return buffers
+        }
+        let bgra = try frames(kCVPixelFormatType_32BGRA), yuv = try frames(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+        let snapshot = RenderState.makeSnapshot(project: project, cursors: CursorLibrary.arrowOnly(), assetsDirectory: bundle)
+        let canvas = snapshot.track.layout.canvas
+        let size = CGSize(width: canvas.width, height: canvas.height)
+        let context = CIContext()
+        func rgba(_ image: CIImage) -> [UInt8] {
+            var data = [UInt8](repeating: 0, count: Int(size.width) * Int(size.height) * 4)
+            context.render(image, toBitmap: &data, rowBytes: Int(size.width) * 4, bounds: CGRect(origin: .zero, size: size), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            return data
+        }
+        for (i, (a, b)) in zip(bgra, yuv).enumerated() {
+            for (name, plain) in [("source", true), ("composed", false)] {
+                let ia = CIImage(cvPixelBuffer: a), ib = CIImage(cvPixelBuffer: b)
+                let frame = snapshot.track.frame(at: Double(i) * 400 * 1000 / 240)
+                let pa = rgba(plain ? ia : snapshot.render(source: ia, frame: frame, quality: .export, size: size))
+                let pb = rgba(plain ? ib : snapshot.render(source: ib, frame: frame, quality: .export, size: size))
+                var sum = 0.0, worst = 0, histogram = [Int](repeating: 0, count: 4)
+                for j in 0..<pa.count where j % 4 != 3 {
+                    let d = abs(Int(pa[j]) - Int(pb[j]))
+                    sum += Double(d)
+                    worst = max(worst, d)
+                    histogram[min(d, 3)] += 1
+                }
+                let n = Double(pa.count) * 0.75
+                print(String(format: "SOURCE frame %d %@: mean %.3f, max %d, |d|=0 %.1f%%, 1 %.1f%%, 2 %.2f%%, ≥3 %.3f%%", i, name, sum / n, worst,
+                             Double(histogram[0]) * 100 / n, Double(histogram[1]) * 100 / n, Double(histogram[2]) * 100 / n, Double(histogram[3]) * 100 / n))
+            }
+        }
+    }
+}
