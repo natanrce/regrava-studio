@@ -252,7 +252,7 @@ private struct PreviewSpace: View {
         GeometryReader { geometry in
             let canvas = editor.project.canvasSize
             let available = CGSize(width: floor(geometry.size.width), height: max(floor(geometry.size.height) - 40, 50))
-            let size = EditorModel.previewDisplaySize(canvas: canvas, available: available, maxHeight: EditorModel.previewMaxHeight(backingScale: displayScale))
+            let size = EditorModel.previewDisplaySize(canvas: canvas, available: available, maxHeight: EditorModel.previewMaxHeight)
             let scale = size.width / max(canvas.width, 1)
             VStack(spacing: Theme.gap(1)) {
                 LayoutControls(editor: editor, preferences: preferences)

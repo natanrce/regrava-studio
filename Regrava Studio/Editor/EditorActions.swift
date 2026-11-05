@@ -802,9 +802,8 @@ extension EditorModel {
         let candidates = larger ? heights.filter { $0 > current } : Array(heights.filter { $0 < current }.reversed())
         guard let space = previewAvailableSpace else { return candidates.first }
         let canvas = project.canvasSize
-        let scale = previewBackingScale
         func shownHeight(_ maxHeight: Int) -> CGFloat {
-            Self.previewDisplaySize(canvas: canvas, available: space, maxHeight: CGFloat(maxHeight) / scale).height
+            Self.previewDisplaySize(canvas: canvas, available: space, maxHeight: CGFloat(maxHeight)).height
         }
         let shown = shownHeight(current)
         return candidates.first { abs(shownHeight($0) - shown) >= 1 }

@@ -234,7 +234,7 @@ final class EditorModel: ObservableObject {
         resolver = project.resolver
         cursors = CursorLibrary.make(project: project, bundle: bundleURL)
         renderState = RenderState(project: project, cursors: cursors, assetsDirectory: bundleURL, outputSize: Self.previewOutputSize(
-            canvas: project.canvasSize, display: Self.previewDisplaySize(canvas: project.canvasSize, available: nil, maxHeight: Self.previewMaxHeight(backingScale: NSScreen.main?.backingScaleFactor ?? 2)),
+            canvas: project.canvasSize, display: Self.previewDisplaySize(canvas: project.canvasSize, available: nil, maxHeight: Self.previewMaxHeight),
             backingScale: NSScreen.main?.backingScaleFactor ?? 2, resolution: Preferences.shared.playbackPreviewResolution
         ))
         transcript = SessionTranscript.load(bundle: bundleURL)
@@ -521,9 +521,10 @@ final class EditorModel: ObservableObject {
         max(NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60, 30)
     }
 
-    /// The tallest the preview is shown, in points: the preview size setting.
-    static func previewMaxHeight(backingScale: CGFloat) -> CGFloat {
-        CGFloat(Preferences.shared.playbackPreviewMaxHeight) / backingScale
+    /// The tallest the preview is shown, in points: the preview size setting (480p … 2160p
+    /// are heights in points, drawn at the backing scale).
+    static var previewMaxHeight: CGFloat {
+        CGFloat(Preferences.shared.playbackPreviewMaxHeight)
     }
 
     /// The preview's size in points: the stage fitted inside `available`, no taller than
@@ -544,7 +545,7 @@ final class EditorModel: ObservableObject {
     }
 
     var previewDisplaySize: CGSize {
-        Self.previewDisplaySize(canvas: project.canvasSize, available: previewAvailableSpace, maxHeight: Self.previewMaxHeight(backingScale: previewBackingScale))
+        Self.previewDisplaySize(canvas: project.canvasSize, available: previewAvailableSpace, maxHeight: Self.previewMaxHeight)
     }
 
     private var previewOutputSize: Size2 {
