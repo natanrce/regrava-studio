@@ -648,6 +648,7 @@ final class RecordingCoordinator: ObservableObject {
         phase = .recording
         if preferences.hideAppDockIconWhileRecording { NSApp.setActivationPolicy(.accessory) }
         startTimer()
+        startDiskSpaceChecks()
         onStateChange?()
     }
 
@@ -776,6 +777,7 @@ final class RecordingCoordinator: ObservableObject {
 
     private func endRecordingUI() {
         stopTimer()
+        stopDiskSpaceChecks()
         phase = .idle
         activeSelection = nil
         selection = nil
@@ -807,6 +809,38 @@ final class RecordingCoordinator: ObservableObject {
         workingTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             if !Task.isCancelled && self.isWorking { self.showsWorking = true }
+        }
+    }
+
+    // MARK: Disk space
+
+    private var diskSpaceTimer: Timer?
+
+    /// While recording, the free space of the recordings folder's and the projects folder's
+    /// volumes is checked every 2.5 s; below 1 GB the recording is finished and the user told.
+    private func startDiskSpaceChecks() {
+        diskSpaceTimer?.invalidate()
+        diskSpaceTimer = Timer.scheduledTimer(withTimeInterval: DiskSpace.checkInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkDiskSpace() }
+        }
+    }
+
+    private func stopDiskSpaceChecks() {
+        diskSpaceTimer?.invalidate()
+        diskSpaceTimer = nil
+    }
+
+    private func checkDiskSpace() {
+        guard phase == .recording || phase == .paused else { return }
+        let free = [RecordingFolders.root, preferences.projectsFolder].map(DiskSpace.freeBytes(at:))
+        guard DiskSpace.shouldStopRecording(freeBytes: free) else { return }
+        stopDiskSpaceChecks()
+        Task { await finish() }
+        DispatchQueue.main.async {
+            Dialogs.info(
+                title: "Recording stopped due to low disk space",
+                message: "Recording was stopped because there is not enough disk space to continue recording."
+            )
         }
     }
 
