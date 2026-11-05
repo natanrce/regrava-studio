@@ -72,46 +72,48 @@ public enum CursorHoverDetector {
         let pxPerPt = pointPixelScale * scale
         let frameScale = Double(width) / max(natural.width, 1)
         let total = max(1, spans.reduce(0) { $0 + ($1.1 - $1.0) })
-        var processed = 0.0
-        var changes: [Double] = []
+        return try await BlockingWork.run("hover detection") { cancellation in
+            var processed = 0.0
+            var changes: [Double] = []
 
-        for (start, end) in spans {
-            try Task.checkCancellation()
-            let reader = try AVAssetReader(asset: asset)
-            // Read from before the span so the history holds the stability frames.
-            let from = max(0, start - settings.lookBackMs - settings.stabilityLookBackMs - 1000)
-            reader.timeRange = CMTimeRange(start: CMTime(seconds: from / 1000, preferredTimescale: 600), end: CMTime(seconds: end / 1000, preferredTimescale: 600))
-            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-                kCVPixelBufferWidthKey as String: width,
-                kCVPixelBufferHeightKey as String: height,
-            ])
-            output.alwaysCopiesSampleData = false
-            reader.add(output)
-            guard reader.startReading() else { continue }
-            var history: [Frame] = []
-            var lastChange = -Double.infinity
-            while let sample = output.copyNextSampleBuffer() {
-                try Task.checkCancellation()
-                let t = CMSampleBufferGetPresentationTimeStamp(sample).seconds * 1000
-                guard let buffer = CMSampleBufferGetImageBuffer(sample), let frame = copyFrame(buffer, timeMs: t) else { continue }
-                // Keep the newest frame at or before t − 270 ms, and everything after it.
-                let horizon = t - settings.lookBackMs - settings.stabilityLookBackMs
-                while history.count > 1 && history[1].timeMs <= horizon { history.removeFirst() }
-                if t >= start && t - lastChange >= settings.lookBackMs, let cursor = position(atMs: t, moves: moves) {
-                    let px = (cursor.x * frameScale, cursor.y * frameScale)
-                    if change(at: t, frame: frame, history: history, cursorPx: px, pxPerPt: pxPerPt, moves: moves, clicks: clicks, pointPixelScale: pointPixelScale, settings: settings) {
-                        changes.append(t)
-                        lastChange = t
+            for (start, end) in spans {
+                try cancellation.check()
+                let reader = try AVAssetReader(asset: asset)
+                // Read from before the span so the history holds the stability frames.
+                let from = max(0, start - settings.lookBackMs - settings.stabilityLookBackMs - 1000)
+                reader.timeRange = CMTimeRange(start: CMTime(seconds: from / 1000, preferredTimescale: 600), end: CMTime(seconds: end / 1000, preferredTimescale: 600))
+                let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                    kCVPixelBufferWidthKey as String: width,
+                    kCVPixelBufferHeightKey as String: height,
+                ])
+                output.alwaysCopiesSampleData = false
+                reader.add(output)
+                guard reader.startReading() else { continue }
+                var history: [Frame] = []
+                var lastChange = -Double.infinity
+                while let sample = output.copyNextSampleBuffer() {
+                    try cancellation.check()
+                    let t = CMSampleBufferGetPresentationTimeStamp(sample).seconds * 1000
+                    guard let buffer = CMSampleBufferGetImageBuffer(sample), let frame = copyFrame(buffer, timeMs: t) else { continue }
+                    // Keep the newest frame at or before t − 270 ms, and everything after it.
+                    let horizon = t - settings.lookBackMs - settings.stabilityLookBackMs
+                    while history.count > 1 && history[1].timeMs <= horizon { history.removeFirst() }
+                    if t >= start && t - lastChange >= settings.lookBackMs, let cursor = position(atMs: t, moves: moves) {
+                        let px = (cursor.x * frameScale, cursor.y * frameScale)
+                        if change(at: t, frame: frame, history: history, cursorPx: px, pxPerPt: pxPerPt, moves: moves, clicks: clicks, pointPixelScale: pointPixelScale, settings: settings) {
+                            changes.append(t)
+                            lastChange = t
+                        }
                     }
+                    history.append(frame)
+                    if t >= start { progress(min(1, (processed + min(t, end) - start) / total)) }
                 }
-                history.append(frame)
-                if t >= start { progress(min(1, (processed + min(t, end) - start) / total)) }
+                processed += end - start
+                progress(min(1, processed / total))
             }
-            processed += end - start
-            progress(min(1, processed / total))
+            return changes.sorted()
         }
-        return changes.sorted()
     }
 
     /// `CursorPath.movementSpans(joinGapMs:tailMs:)`.
