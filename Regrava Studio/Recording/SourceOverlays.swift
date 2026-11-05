@@ -883,9 +883,9 @@ private struct DeviceRecordingOverlay: View {
 
     var body: some View {
         ZStack {
+            // Clicks on the cover do nothing.
             coverColor()
                 .contentShape(Rectangle())
-                .onTapGesture { coordinator.escape() }
             VStack(spacing: Theme.gap(3)) {
                 VStack(spacing: 22.6) {
                     Text("This is an experimental feature.")
