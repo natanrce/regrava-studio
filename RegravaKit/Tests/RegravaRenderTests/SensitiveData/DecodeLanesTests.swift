@@ -22,6 +22,17 @@ import Testing
         return "held"
     }
 
+    /// The pid of a child process that has exited and been reaped.
+    private func exitedProcessId() -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try! process.run()
+        process.waitUntilExit()
+        let pid = process.processIdentifier
+        #expect(kill(pid, 0) != 0 && errno == ESRCH)
+        return pid
+    }
+
     @Test func withoutDirectoryEightLanesInMemory() {
         let lanes = SD.DecodeLanes(directory: nil)
         #expect(lanes.allowedLaneCount == 8)
@@ -155,9 +166,11 @@ import Testing
         #expect(lane == nil)
         #expect(seen.contains { $0.hasPrefix("waiting-") && $0.contains("-\(getpid())-") })
         #expect(!((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).contains { $0.contains("-\(getpid())-") })
-        // A file left by a process that is gone does not block.
+        // A file left by a process that is gone does not block. A fixed pid could belong to a live
+        // process (then this would wait forever), so use one that just exited.
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("waiting-1-\(live)-1"))
-        FileManager.default.createFile(atPath: dir.appendingPathComponent("waiting-1-99999-1").path, contents: nil)
+        let gone = exitedProcessId()
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("waiting-1-\(gone)-1").path, contents: nil)
         #expect(lanes.acquire(isCancelled: { false })?.index == 0)
     }
 
