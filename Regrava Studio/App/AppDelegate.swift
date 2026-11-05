@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
+import Dispatch
 import RegravaCore
+import RegravaRender
 
 /// AppKit lifecycle:, there is no main window — the record picker opens on launch and
 /// every project opens in its own editor window.
@@ -21,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isRenderingSnapshots = true
             return
         }
+        // The text recognizer's first load compiles its models (tens of seconds); done now so a
+        // sensitive data scan does not wait for it.
+        DispatchQueue.global(qos: .utility).async { SensitiveDataScanner.prewarm() }
         AppController.shared.launch()
     }
 
