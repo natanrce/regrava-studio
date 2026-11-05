@@ -253,11 +253,7 @@ private struct WindowHighlight: View {
                 .strokeBorder(sourceHighlight.opacity(isSelected ? 0.5 : 0), lineWidth: 3)
             if active {
                 VStack(spacing: Theme.gap(2)) {
-                    if let path = window.appPath {
-                        Image(nsImage: FileIcons.icon(forFile: path))
-                            .resizable()
-                            .frame(width: 96, height: 96)
-                    }
+                    if let path = window.appPath { AppIconView(path: path) }
                     SourceCard(title: window.appName.replacingOccurrences(of: ".app", with: ""), meta: "\(Int(window.frame.width)) × \(Int(window.frame.height))") {
                         StartRecordingButton(coordinator: coordinator, target: .window(window), isActive: active)
                     }
@@ -304,6 +300,41 @@ extension WindowHighlight {
             menu.item("Reset ignored windows") { coordinator.ignoredWindowIDs.removeAll() }
         }
         return menu
+    }
+}
+
+/// The app's icon, 96 pt, wiggling (x 0,−2,2,−1,1,0 over 2 s); a pulsing squircle stands in
+/// until it is loaded.
+private struct AppIconView: View {
+    var path: String
+    @State private var icon: NSImage?
+
+    var body: some View {
+        ZStack {
+            if let icon {
+                TimelineView(.animation) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 96, height: 96)
+                        .offset(x: WiggleIcon.offset(t))
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+            } else {
+                // activeText of the highlight color (#4c6aff, lightness +20) at 0.5.
+                TimelineView(.animation) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5
+                    RoundedRectangle(cornerRadius: 48, style: .continuous)
+                        .fill(Color(hex: 0xB2BFFF).opacity(0.5))
+                        .padding(9)
+                        .opacity(0.7 + 0.3 * (1 - abs(2 * t - 1)))
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+            }
+        }
+        .frame(width: 96, height: 96)
+        .padding(.bottom, 4)
+        .task(id: path) { icon = FileIcons.icon(forFile: path) }
     }
 }
 
