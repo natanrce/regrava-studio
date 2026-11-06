@@ -616,8 +616,9 @@ final class EditorModel: ObservableObject {
         snapshotRequests += 1
         let request = snapshotRequests
         let project = self.project, cursors = self.cursors, bundle = bundleURL, output = previewOutputSize
+        let previous = renderState.current
         let snapshot = await Task.detached(priority: .userInitiated) {
-            RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle, outputSize: output)
+            RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle, outputSize: output, reusing: previous)
         }.value
         // A newer rebuild supersedes this one.
         guard generation == compositionGeneration else { return }
@@ -741,13 +742,14 @@ final class EditorModel: ObservableObject {
         let cursors = self.cursors
         let bundle = bundleURL
         let output = previewOutputSize
+        let previous = renderState.current
         snapshotRequests += 1
         let request = snapshotRequests
         refreshTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 30_000_000)
             guard !Task.isCancelled else { return }
             let snapshot = await Task.detached(priority: .userInitiated) {
-                RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle, outputSize: output)
+                RenderState.makeSnapshot(project: project, cursors: cursors, assetsDirectory: bundle, outputSize: output, reusing: previous)
             }.value
             guard !Task.isCancelled, let self, self.installSnapshot(snapshot, request: request) else { return }
             self.prewarmRenderer()

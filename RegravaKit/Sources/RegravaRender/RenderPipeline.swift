@@ -91,12 +91,13 @@ public final class RenderState: @unchecked Sendable {
     /// `assetsDirectory` is the project folder (background images). `fps` is the rate frames
     /// are produced at: the editor's playback rate, or the export's. With `outputSize` frames
     /// are drawn at the size they are shown, starting with that one; without it they are
-    /// composed at canvas size and scaled.
-    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false, exportSensitiveData: ExportSensitiveData? = nil) -> Snapshot {
+    /// composed at canvas size and scaled. `reusing` is the snapshot this one replaces: its
+    /// animation carries over when the edit left everything it reads as it was.
+    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false, exportSensitiveData: ExportSensitiveData? = nil, reusing previous: Snapshot? = nil) -> Snapshot {
         let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
         let silence = assetsDirectory.flatMap { SilenceAnalyzer.stored(project: project, bundle: $0) } ?? []
         let hovers = assetsDirectory.flatMap(CursorHovers.load(bundle:))
-        let track = CameraTrack(project: project, faces: faces, silence: silence, hovers: hovers, fps: fps)
+        let track = CameraTrack(project: project, faces: faces, silence: silence, hovers: hovers, fps: fps, reusing: previous?.track)
         // Captions read the transcript stored beside the project (source time, onset-adjusted).
         let transcript = assetsDirectory.flatMap { SessionTranscript.load(bundle: $0) }
             .map { TranscriptTiming.clientTranscript([(0, $0.transcript)]) } ?? []
