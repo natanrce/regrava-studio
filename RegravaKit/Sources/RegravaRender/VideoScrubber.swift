@@ -324,7 +324,7 @@ public final class ScrubPreview: @unchecked Sendable {
         lastRendered = key
         lock.unlock()
         guard let buffer = makeBuffer() else { return }
-        let image = state.render(source: CIImage(cvPixelBuffer: screenFrame.buffer), camera: cameraFrame.map { CIImage(cvPixelBuffer: $0.buffer) }, timeMs: playbackMs, size: output)
+        let image = state.render(source: CIImage(cvPixelBuffer: screenFrame.buffer), camera: cameraFrame.map { CIImage(cvPixelBuffer: $0.buffer) }, cameraTimeMs: cameraFrame?.ms, timeMs: playbackMs, size: output)
         let bounds = CGRect(origin: .zero, size: output)
         CanvasCompositor.context.render(image, to: buffer, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
         // Tagged, so the layer showing it matches the player's colours.

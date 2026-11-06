@@ -37,14 +37,14 @@ public final class RenderState: @unchecked Sendable {
         }
 
         /// `frame` (canvas pixels) drawn into `size` output pixels, cropped to them.
-        public func render(source: CIImage, camera: CIImage? = nil, frame: CameraFrame, quality: RenderQuality, size: CGSize) -> CIImage {
+        public func render(source: CIImage, camera: CIImage? = nil, cameraTimeMs: Double? = nil, frame: CameraFrame, quality: RenderQuality, size: CGSize) -> CIImage {
             let canvas = track.layout.canvas
             let bounds = CGRect(origin: .zero, size: size)
             let scales = outputScales(for: size)
             let toOutput = CGSize(width: size.width / max(canvas.width, 1), height: size.height / max(canvas.height, 1))
             // Composed at canvas size, the passes the compositor ends are drawn at the output's.
             let rasterScale = composesAtOutputSize ? CGSize(width: 1, height: 1) : toOutput
-            var image = compositor(scale: scales.y, scaleX: scales.x).compose(source: source, camera: camera, frame: frame, quality: quality, rasterScale: rasterScale)
+            var image = compositor(scale: scales.y, scaleX: scales.x).compose(source: source, camera: camera, cameraTimeMs: cameraTimeMs, frame: frame, quality: quality, rasterScale: rasterScale)
             // Drawn at the output size, the frame covers it exactly. Composed at canvas size,
             // it is scaled to the output.
             if !composesAtOutputSize, canvas.width != size.width || canvas.height != size.height {
@@ -82,15 +82,16 @@ public final class RenderState: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot: Snapshot
 
-    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil) {
-        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps, outputSize: outputSize)
+    /// `waitsForStoredMattes`: cutout frames wait for their stored mattes (an export).
+    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false) {
+        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps, outputSize: outputSize, waitsForStoredMattes: waitsForStoredMattes)
     }
 
     /// `assetsDirectory` is the project folder (background images). `fps` is the rate frames
     /// are produced at: the editor's playback rate, or the export's. With `outputSize` frames
     /// are drawn at the size they are shown, starting with that one; without it they are
     /// composed at canvas size and scaled.
-    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil) -> Snapshot {
+    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false) -> Snapshot {
         let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
         let silence = assetsDirectory.flatMap { SilenceAnalyzer.stored(project: project, bundle: $0) } ?? []
         let hovers = assetsDirectory.flatMap(CursorHovers.load(bundle:))
@@ -102,7 +103,7 @@ public final class RenderState: @unchecked Sendable {
         let sensitiveData = project.processing.isAutoMasking ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.previewDetections ?? []) : []
         let layout = track.layout
         let make: @Sendable (Double, Double) -> FrameCompositor = { scale, scaleX in
-            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale, outputScaleX: scaleX)
+            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale, outputScaleX: scaleX, waitsForStoredMattes: waitsForStoredMattes)
         }
         let scale = outputSize.map { $0.height.rounded() / max(layout.canvas.height, 1) } ?? 1
         let scaleX = outputSize.map { $0.width.rounded() / max(layout.canvas.width, 1) } ?? 1
@@ -159,11 +160,12 @@ public final class RenderState: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// The frame at playback time `timeMs` drawn into `size` output pixels.
-    public func render(source: CIImage, camera: CIImage? = nil, timeMs: Double, size: CGSize) -> CIImage {
+    /// The frame at playback time `timeMs` drawn into `size` output pixels. `cameraTimeMs` is
+    /// the webcam frame's presentation time in its movie.
+    public func render(source: CIImage, camera: CIImage? = nil, cameraTimeMs: Double? = nil, timeMs: Double, size: CGSize) -> CIImage {
         let s = current
         let frame = isPlainScreen ? s.track.plainFrame(at: timeMs) : s.track.frame(at: timeMs)
-        return s.render(source: source, camera: camera, frame: frame, quality: quality, size: size)
+        return s.render(source: source, camera: camera, cameraTimeMs: cameraTimeMs, frame: frame, quality: quality, size: size)
     }
 }
 
@@ -200,10 +202,13 @@ public enum CompositionFactory {
         if rate <= 0, let track = tracks.first { rate = try await track.load(.nominalFrameRate) }
         if rate <= 0 { rate = 60 }
         // The screen is the first video track; the webcam, when present, the second.
+        // Where each stretch of the webcam track comes from in its movie.
+        let cameraSegments = tracks.count > 1 ? (tracks[1] as? AVCompositionTrack)?.segments.filter { !$0.isEmpty }.map(\.timeMapping) : nil
         let instruction = CanvasInstruction(
             timeRange: CMTimeRange(start: .zero, duration: duration),
             trackID: tracks.first?.trackID ?? kCMPersistentTrackID_Invalid,
             cameraTrackID: tracks.count > 1 ? tracks[1].trackID : nil,
+            cameraSegments: cameraSegments,
             state: state
         )
         return AVVideoComposition.Configuration(
@@ -312,14 +317,28 @@ final class CanvasInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
     let passthroughTrackID = kCMPersistentTrackID_Invalid
     let trackID: CMPersistentTrackID
     let cameraTrackID: CMPersistentTrackID?
+    /// The webcam track's segments (composition time → movie time); nil when they are the same.
+    let cameraSegments: [CMTimeMapping]?
     let state: RenderState
 
-    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, state: RenderState) {
+    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, cameraSegments: [CMTimeMapping]? = nil, state: RenderState) {
         self.timeRange = timeRange
         self.trackID = trackID
         self.cameraTrackID = cameraTrackID
+        self.cameraSegments = cameraSegments
         self.state = state
         requiredSourceTrackIDs = ([trackID] + (cameraTrackID.map { [$0] } ?? [])).map { NSNumber(value: $0) }
+    }
+}
+
+extension CanvasInstruction {
+    /// The webcam movie's time shown at composition time `time`, in ms.
+    func cameraTimeMs(at time: CMTime) -> Double {
+        guard let segments = cameraSegments else { return time.seconds * 1000 }
+        guard let segment = segments.first(where: { $0.target.containsTime(time) }) ?? segments.last(where: { $0.target.start <= time }) else {
+            return time.seconds * 1000
+        }
+        return CMTimeMapTimeFromRangeToRange(time, fromRange: segment.target, toRange: segment.source).seconds * 1000
     }
 }
 
@@ -373,7 +392,8 @@ final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable 
         if camera != nil { SD.InteractiveDecodeActivity.shared.noteDecoding(cameraStream) }
         // The composition's render size, which can change without new instructions.
         let size = request.renderContext.size
-        let image = instruction.state.render(source: CIImage(cvPixelBuffer: source), camera: camera, timeMs: timeMs, size: size)
+        let cameraTimeMs = camera == nil ? nil : instruction.cameraTimeMs(at: request.compositionTime)
+        let image = instruction.state.render(source: CIImage(cvPixelBuffer: source), camera: camera, cameraTimeMs: cameraTimeMs, timeMs: timeMs, size: size)
         let bounds = CGRect(origin: .zero, size: size)
         Self.context.render(image, to: output, bounds: bounds, colorSpace: CanvasCompositor.sRGB)
         request.finish(withComposedVideoFrame: output)

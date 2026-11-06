@@ -42,7 +42,7 @@ struct CutoutTests {
 
     @Test func visionMatteRunsOnAnyFrame() {
         // No person in a flat frame: either no matte or an empty one, never a crash.
-        if let m = PersonMatter.shared.matte(for: frame, quality: .playing) {
+        if let bytes = try? FrameMatter.wholeFrame.matte(frame), let m = CameraCutout.matteImage(bytes) {
             #expect(m.extent.width > 0)
         }
     }

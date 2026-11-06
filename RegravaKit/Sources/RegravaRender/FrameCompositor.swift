@@ -28,6 +28,12 @@ public final class FrameCompositor: @unchecked Sendable {
     private let camera: CameraConfig
     /// A cutout layout is used somewhere, so camera frames are matted (`isCameraMatted`).
     private let isCameraMatted: Bool
+    /// The webcam movie the mattes are kept for.
+    private let cameraVideoURL: URL?
+    /// Frames wait for their stored matte (an export), so they do not depend on the cache.
+    private let waitsForStoredMattes: Bool
+    private let mattingLock = NSLock()
+    private var matting: Result<CameraMatting, Error>?
     /// Burned-in captions, drawn above everything.
     private let captions: CaptionRenderer?
     /// Keyboard shortcuts, the top-most layer.
@@ -48,7 +54,8 @@ public final class FrameCompositor: @unchecked Sendable {
     /// `outputScale` draws the frame that many times taller than `layout`'s canvas and
     /// `outputScaleX` (the same when nil) that many times wider; the frames passed to `compose`
     /// stay in canvas pixels.
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1, outputScaleX: Double? = nil) {
+    /// `waitsForStoredMattes`: a cutout frame waits until its stored matte exists (export).
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1, outputScaleX: Double? = nil, waitsForStoredMattes: Bool = false) {
         processing = project.processing
         self.sensitiveData = AutoMaskTimeline(detections: project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : [])
         resolver = project.resolver
@@ -64,6 +71,8 @@ public final class FrameCompositor: @unchecked Sendable {
         self.fps = fps
         camera = project.camera
         isCameraMatted = project.isCutoutLayoutUsed
+        cameraVideoURL = project.recording.cameraFileName.flatMap { name in assetsDirectory.map { $0.appendingPathComponent(name) } }
+        self.waitsForStoredMattes = waitsForStoredMattes
         captions = CaptionRenderer(project: project, words: transcript, canvas: layout.canvas, fps: fps, outputScale: outputScale, outputScaleX: self.outputScaleX)
         shortcuts = ShortcutRenderer(project: project, canvas: layout.canvas, captionsShown: captions != nil, fps: fps, outputScale: outputScale, outputScaleX: self.outputScaleX)
         cameraGrade = Self.loadGrade(project.camera, assetsDirectory: assetsDirectory)
@@ -115,7 +124,8 @@ public final class FrameCompositor: @unchecked Sendable {
     /// `frame` in canvas pixels; the result covers `layout`'s canvas. `rasterScale` is the
     /// scale the result is drawn at afterwards (when frames are composed at canvas size), so
     /// the passes it ends itself keep the output's resolution.
-    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export, rasterScale: CGSize = CGSize(width: 1, height: 1)) -> CIImage {
+    /// `cameraTimeMs` is the presentation time of `cameraImage` in the webcam movie.
+    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, cameraTimeMs: Double? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export, rasterScale: CGSize = CGSize(width: 1, height: 1)) -> CIImage {
         let frame = canvasFrame.scaled(x: outputScaleX, y: outputScale)
         let canvasRect = ciRect(layout.canvas)
         // The recording is debanded first (`screenDeband`), on the whole frame.
@@ -136,7 +146,7 @@ public final class FrameCompositor: @unchecked Sendable {
         // Click effects are part of the screen content: masks and motion blur carry them.
         src = clickEffects(on: src, frame: frame, quality: quality)
         // The webcam frame is matted, sharpened and graded once, for the stage and the loupe.
-        let camera = cameraImage.map { image in PreparedCamera { self.preparedCamera(image, frame: frame, quality: quality) } }
+        let camera = cameraImage.map { image in PreparedCamera { self.preparedCamera(image, timeMs: cameraTimeMs, frame: frame, quality: quality) } }
         var output = session(over: background(frame), source: src, camera: camera, frame: frame, quality: quality)
         // The glass loupe over the whole session, camera and cursor included.
         if let lens = frame.loupe {
@@ -389,13 +399,37 @@ public final class FrameCompositor: @unchecked Sendable {
         init(_ make: @escaping () -> CIImage) { self.make = make }
     }
 
+    /// The mattes of the project's webcam, opened on first use; nil without the movie.
+    private func cameraMatting() -> CameraMatting? {
+        guard let url = cameraVideoURL else { return nil }
+        mattingLock.lock()
+        defer { mattingLock.unlock() }
+        if let matting { return try? matting.get() }
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let opened = Result { try CameraMatting.open(videoURL: url, waitsForStoredMattes: waitsForStoredMattes) }
+        matting = opened
+        return try? opened.get()
+    }
+
+    /// The person matte of a webcam frame and the window it covers: the stored or remembered one
+    /// for a frame of the project's webcam, else the network's for the whole frame.
+    private func personMatte(_ content: CIImage, timeMs: Double?) -> (matte: CIImage, window: CGRect)? {
+        if let matting = cameraMatting(), let timeMs, let index = matting.frameIndex(atMs: timeMs) {
+            matting.demand(index)
+            guard let bytes = try? matting.matte(of: index, frame: content), let image = CameraCutout.matteImage(bytes) else { return nil }
+            return (image, matting.window)
+        }
+        guard let bytes = try? FrameMatter.wholeFrame.matte(content), let image = CameraCutout.matteImage(bytes) else { return nil }
+        return (image, PersonWindow.wholeFrame)
+    }
+
     /// The webcam frame matted, sharpened, graded, cropped and mirrored, at footage scale.
-    private func preparedCamera(_ image: CIImage, frame: CameraFrame, quality: RenderQuality) -> CIImage {
+    private func preparedCamera(_ image: CIImage, timeMs: Double?, frame: CameraFrame, quality: RenderQuality) -> CIImage {
         var content = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         // Cutout: the person matte goes first, before sharpen and the grade.
-        if isCameraMatted, frame.cameraCutout01 > 0.001, let matte = PersonMatter.shared.matte(for: content, quality: quality) {
+        if isCameraMatted, frame.cameraCutout01 > 0.001, let person = personMatte(content, timeMs: timeMs) {
             let fullSize = content.extent.size
-            content = CameraCutout.apply(frame: content, matte: matte, edge: camera.background, reveal01: 1 - frame.cameraCutout01, crop01: camera.crop01, density: quality == .playing ? 0.5 : 1)
+            content = CameraCutout.apply(frame: content, matte: person.matte, window: person.window, edge: camera.background, reveal01: 1 - frame.cameraCutout01, crop01: camera.crop01, density: quality == .playing ? 0.5 : 1)
             // Back to footage size so the crop window keeps its meaning.
             if content.extent.size != fullSize {
                 content = content.transformed(by: CGAffineTransform(scaleX: fullSize.width / content.extent.width, y: fullSize.height / content.extent.height))

@@ -2,57 +2,24 @@ import CoreImage
 import CoreVideo
 import Foundation
 import RegravaCore
-import Vision
 
-/// The person matte of a webcam frame. Uses Apple Vision person segmentation. One request is kept
-/// per quality so Vision smooths consecutive frames; playback uses the fast level, paused frames
-/// the balanced one, export the accurate one.
-final class PersonMatter: @unchecked Sendable {
-    static let shared = PersonMatter()
-    private let lock = NSLock()
-    private var requests: [VNGeneratePersonSegmentationRequest.QualityLevel: VNGeneratePersonSegmentationRequest] = [:]
-
-    static func level(for quality: RenderQuality) -> VNGeneratePersonSegmentationRequest.QualityLevel {
-        switch quality {
-        case .export: return .accurate
-        case .pausedHigh: return .balanced
-        case .pausedLow, .playing: return .fast
+extension CameraCutout {
+    /// A stored or computed matte (`FrameMatter.width`×`height` bytes, rows from the top) as a
+    /// one-channel image.
+    static func matteImage(_ matte: [UInt8]) -> CIImage? {
+        let width = FrameMatter.width, height = FrameMatter.height
+        guard matte.count == width * height else { return nil }
+        var created: CVPixelBuffer?
+        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_OneComponent8, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &created)
+        guard let buffer = created else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+        matte.withUnsafeBytes { bytes in
+            for y in 0..<height { memcpy(base + y * rowBytes, bytes.baseAddress! + y * width, width) }
         }
-    }
-
-    /// 0…1 matte as a one-channel image with the frame's orientation, nil without a person.
-    func matte(for image: CIImage, quality: RenderQuality) -> CIImage? {
-        lock.lock()
-        defer { lock.unlock() }
-        let level = Self.level(for: quality)
-        let request = requests[level] ?? {
-            let r = VNGeneratePersonSegmentationRequest()
-            r.qualityLevel = level
-            r.outputPixelFormat = kCVPixelFormatType_OneComponent8
-            requests[level] = r
-            return r
-        }()
-        guard (try? VNImageRequestHandler(ciImage: image, options: [:]).perform([request])) != nil,
-              let mask = request.results?.first?.pixelBuffer, let copy = Self.copy(mask) else { return nil }
-        return CIImage(cvPixelBuffer: copy)
-    }
-
-    /// Vision reuses its buffer; Core Image renders later, so the matte is copied.
-    private static func copy(_ source: CVPixelBuffer) -> CVPixelBuffer? {
-        let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
-        var target: CVPixelBuffer?
-        CVPixelBufferCreate(nil, width, height, CVPixelBufferGetPixelFormatType(source), [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &target)
-        guard let target else { return nil }
-        CVPixelBufferLockBaseAddress(source, .readOnly)
-        CVPixelBufferLockBaseAddress(target, [])
-        defer {
-            CVPixelBufferUnlockBaseAddress(target, [])
-            CVPixelBufferUnlockBaseAddress(source, .readOnly)
-        }
-        guard let from = CVPixelBufferGetBaseAddress(source), let to = CVPixelBufferGetBaseAddress(target) else { return nil }
-        let fromRow = CVPixelBufferGetBytesPerRow(source), toRow = CVPixelBufferGetBytesPerRow(target)
-        for y in 0..<height { memcpy(to + y * toRow, from + y * fromRow, min(fromRow, toRow)) }
-        return target
+        return CIImage(cvPixelBuffer: buffer)
     }
 }
 
@@ -63,24 +30,29 @@ enum CameraCutout {
     private static let coarseKernel = RenderKernels.general("cutoutForegroundCoarse")
     private static let foregroundKernel = RenderKernels.general("cutoutForeground")
 
-    /// `frame` has its origin at 0. `reveal01` = 1 − cutout01; `density` 0.5 while playing
+    /// `frame` has its origin at 0. `matte` covers `window` (0…1 of the frame, from the top);
+    /// outside it nothing is kept. `reveal01` = 1 − cutout01; `density` 0.5 while playing
     /// (`densityRatio`). Returns the premultiplied person (or the revealed frame).
-    static func apply(frame source: CIImage, matte: CIImage, edge: CameraBackgroundConfig, reveal01: Double, crop01: Rect2?, density: Double) -> CIImage {
+    static func apply(frame source: CIImage, matte: CIImage, window: CGRect = PersonWindow.wholeFrame, edge: CameraBackgroundConfig, reveal01: Double, crop01: Rect2?, density: Double) -> CIImage {
         let reveal = clamp(reveal01, 0, 1)
         guard reveal < 1, let matteKernel, let edgeKernel, let coarseKernel, let foregroundKernel else { return source }
         let frameH = source.extent.height
         let frame = density == 1 ? source : source.transformed(by: CGAffineTransform(scaleX: density, y: density))
         let bounds = frame.extent
         let W = bounds.width, H = bounds.height
-        let matteScaled = matte.transformed(by: CGAffineTransform(scaleX: W / matte.extent.width, y: H / matte.extent.height))
-        let texel = CGPoint(x: W / matte.extent.width, y: H / matte.extent.height)
+        let matteRect = FrameMatter.windowRect(window, in: bounds)
+        let matteScaled = matte
+            .transformed(by: CGAffineTransform(translationX: -matte.extent.minX, y: -matte.extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: matteRect.width / matte.extent.width, y: matteRect.height / matte.extent.height))
+            .transformed(by: CGAffineTransform(translationX: matteRect.minX, y: matteRect.minY))
+        let texel = CGPoint(x: matteRect.width / matte.extent.width, y: matteRect.height / matte.extent.height)
         let clampedFrame = frame.clampedToExtent()
 
         // Matte → alpha at frame resolution (`compositeMatte`).
         guard let alpha = matteKernel.apply(
             extent: bounds,
             roiCallback: { _, r in r.insetBy(dx: -3 * texel.x - 2, dy: -3 * texel.y - 2) },
-            arguments: [clampedFrame, matteScaled.clampedToExtent(), CIVector(x: texel.x, y: texel.y), CIVector(cgRect: bounds)]
+            arguments: [clampedFrame, matteScaled.clampedToExtent(), CIVector(x: texel.x, y: texel.y), CIVector(cgRect: matteRect)]
         ) else { return source }
 
         // Pass 1: inset and softness (the reveal is left to pass 3, which always runs here).

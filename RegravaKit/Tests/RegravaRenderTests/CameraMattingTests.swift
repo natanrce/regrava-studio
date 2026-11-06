@@ -87,4 +87,16 @@ struct MatteImageTests {
         #expect(quarter[300 * w + 100] == 255)
         #expect(quarter[300 * w + 900] == 0)
     }
+
+    @Test func matteImagesShowTheirFirstRowAtTheTop() {
+        var bytes = [UInt8](repeating: 0, count: FrameMatter.width * FrameMatter.height)
+        for i in 0..<(FrameMatter.width * 10) { bytes[i] = 255 }
+        let image = CameraCutout.matteImage(bytes)!
+        var p = [UInt8](repeating: 0, count: 4)
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        context.render(image, toBitmap: &p, rowBytes: 4, bounds: CGRect(x: 10, y: 570, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+        #expect(p[0] == 255)
+        context.render(image, toBitmap: &p, rowBytes: 4, bounds: CGRect(x: 10, y: 5, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+        #expect(p[0] == 0)
+    }
 }
