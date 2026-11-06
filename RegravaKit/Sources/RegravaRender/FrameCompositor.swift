@@ -112,8 +112,10 @@ public final class FrameCompositor: @unchecked Sendable {
     /// Trail strength of the screen and cursor while moving (0 = motion blur off).
     var motionBlurStrength: Double { MotionBlur.strength(amount: motionBlurAmount, fps: fps, disabled: false) }
 
-    /// `frame` in canvas pixels; the result covers `layout`'s canvas.
-    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export) -> CIImage {
+    /// `frame` in canvas pixels; the result covers `layout`'s canvas. `rasterScale` is the
+    /// scale the result is drawn at afterwards (when frames are composed at canvas size), so
+    /// the passes it ends itself keep the output's resolution.
+    public func compose(source: CIImage, camera cameraImage: CIImage? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export, rasterScale: CGSize = CGSize(width: 1, height: 1)) -> CIImage {
         let frame = canvasFrame.scaled(x: outputScaleX, y: outputScale)
         let canvasRect = ciRect(layout.canvas)
         // The recording is debanded first (`screenDeband`), on the whole frame.
@@ -140,8 +142,12 @@ public final class FrameCompositor: @unchecked Sendable {
         if let lens = frame.loupe {
             output = loupe(lens, over: output, source: src, camera: camera, frame: frame, quality: quality)
         }
-        if let captions { output = captions.draw(over: output, atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
-        if let shortcuts { output = shortcuts.draw(over: output, atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
+        // Captions, then keyboard shortcuts on top, in the pass that reads the session's
+        // layers (`RenderPass.sessionTextures`).
+        var overlays: [CIImage] = []
+        if let captions { overlays += captions.layers(atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
+        if let shortcuts { overlays += shortcuts.layers(atPlayback: frame.timeMs, motionBlurStrength: motionBlurStrength, quality: quality) }
+        output = RenderPass.stack(overlays, over: output, baseTextures: RenderPass.sessionTextures, rasterScale: rasterScale)
 
         return output.cropped(to: canvasRect)
     }
@@ -450,7 +456,8 @@ public final class FrameCompositor: @unchecked Sendable {
                 let reach = style.shadow.intensity > 0 ? (style.shadow.blur * 8 * frame.cameraSizeFactor + style.shadow.distance * 6 + 16) * layout.scale + 8 : 8
                 let bounds = now.union(ciRect(trailStart)).insetBy(dx: -reach, dy: -reach).integral
                 let samples = MotionBlur.sampleCount(travel: trailPx, quality: quality)
-                if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, layer: { t in placedLayer(trailStart.lerp(to: rect, t)) }) {
+                // Each sample reads the frame and, cut out, its silhouette's shadow.
+                if let blurred = MotionBlur.accumulate(samples: samples, bounds: bounds, texturesPerSample: 2, layer: { t in placedLayer(trailStart.lerp(to: rect, t)) }) {
                     layer = blurred
                 }
             }

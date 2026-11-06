@@ -24,6 +24,8 @@ enum MotionBlur {
     private static let weightedKernel = RenderKernels.color("motionBlurWeighted")
     private static let weightKernel = RenderKernels.color("motionBlurWeight")
     private static let divideKernel = RenderKernels.color("motionBlurNormalize")
+    /// Values as they are in the working space, past 1 too.
+    private static let extendedLinear = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
 
     /// Strength of the trail for the current settings.
     static func strength(amount: Double, fps: Double, disabled: Bool) -> Double {
@@ -60,25 +62,38 @@ enum MotionBlur {
     }
 
     /// Averages `layer(t)` for t spread over the trail (0 = trail start, 1 = now), inside `bounds`,
-    /// in a pass of its own. Left in the frame's pass, every sample would be one more input
-    /// there (read twice, for the colour and the weight), and Core Image can bind the wrong
-    /// texture to a pass with that many: the recording showed through the background.
-    static func accumulate(samples: Int, bounds: CGRect, falloffRatio: Double = 0, layer: (Double) -> CIImage) -> CIImage? {
+    /// in a pass of its own. The running sums end their pass every few samples, so no pass
+    /// reads more than `RenderPass.maxTextures`; `texturesPerSample` is what one `layer(t)`
+    /// reads. Without falloff every weight is 1 and their sum is the sample count, so each
+    /// sample is read once.
+    static func accumulate(samples: Int, bounds: CGRect, falloffRatio: Double = 0, texturesPerSample: Int = 1, layer: (Double) -> CIImage) -> CIImage? {
         guard samples > 1, let weighted = weightedKernel, let weightOnly = weightKernel, let divide = divideKernel else { return nil }
         let clear = CIImage(color: .clear).cropped(to: bounds)
         let ratio = NSNumber(value: falloffRatio)
+        let readsPerSample = falloffRatio == 0 ? 1 : 2
+        // The sums carried from the last pass, then the reads of each sample.
+        let perPass = max(1, (RenderPass.maxTextures - readsPerSample) / (readsPerSample * max(texturesPerSample, 1)))
         var colorSum: CIImage?
         var weightSum: CIImage?
         for k in 0..<samples {
             let t = (Double(k) + 0.5) / Double(samples)
             let sample = layer(t).composited(over: clear).cropped(to: bounds)
-            guard let color = weighted.apply(extent: bounds, arguments: [sample, ratio]),
-                  let weight = weightOnly.apply(extent: bounds, arguments: [sample, ratio]) else { return nil }
+            guard let color = weighted.apply(extent: bounds, arguments: [sample, ratio]) else { return nil }
             colorSum = colorSum.map { color.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: $0]) } ?? color
-            weightSum = weightSum.map { weight.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: $0]) } ?? weight
+            if falloffRatio != 0 {
+                guard let weight = weightOnly.apply(extent: bounds, arguments: [sample, ratio]) else { return nil }
+                weightSum = weightSum.map { weight.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: $0]) } ?? weight
+            }
+            if (k + 1) % perPass == 0, k + 1 < samples {
+                colorSum = colorSum.map { RenderPass.ended($0) }
+                weightSum = weightSum.map { RenderPass.ended($0) }
+            }
         }
-        guard let colorSum, let weightSum else { return nil }
-        return divide.apply(extent: bounds, arguments: [colorSum, weightSum])?.insertingIntermediate()
+        guard let colorSum else { return nil }
+        // Without falloff every weight is 1: their sum is the sample count everywhere.
+        let n = CGFloat(samples)
+        let weights = weightSum ?? CIImage(color: CIColor(red: n, green: n, blue: n, alpha: n, colorSpace: extendedLinear)!).cropped(to: bounds)
+        return divide.apply(extent: bounds, arguments: [colorSum, weights]).map { RenderPass.ended($0) }
     }
 }
 

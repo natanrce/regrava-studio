@@ -125,20 +125,23 @@ final class CaptionRenderer: @unchecked Sendable {
     /// Captions over `output` at a playback time. With motion blur on, the box and each word
     /// trail from `lerp(now, before, strength)` to now like every sprung node (uniform weights).
     func draw(over output: CIImage, atPlayback time: Double, motionBlurStrength strength: Double = 0, quality: RenderQuality = .export) -> CIImage {
+        RenderPass.stack(layers(atPlayback: time, motionBlurStrength: strength, quality: quality), over: output)
+    }
+
+    /// The box, then every word, bottom first, as `draw` lays them over the frame.
+    func layers(atPlayback time: Double, motionBlurStrength strength: Double = 0, quality: RenderQuality = .export) -> [CIImage] {
         let scene = track.scene(atPlayback: time)
         let before = strength > 0 ? track.scene(atPlayback: max(0, time - 1000 / track.fps)) : nil
-        var result = output
+        var layers: [CIImage] = []
         if let box = scene.box, box.opacity > 0.001 {
-            result = trailed(box.rect, previous: before?.box?.rect, strength: strength, quality: quality) { self.boxImage($0, opacity: box.opacity) }
-                .composited(over: result)
+            layers.append(trailed(box.rect, previous: before?.box?.rect, strength: strength, quality: quality) { self.boxImage($0, opacity: box.opacity) })
         }
         var previousWords: [Int: Rect2] = [:]
         for word in before?.words ?? [] { previousWords[word.id] = word.rect }
         for word in scene.words where word.opacity > 0.001 {
-            result = trailed(word.rect, previous: previousWords[word.id], strength: strength, quality: quality) { self.wordImage(word.text, rect: $0, opacity: word.opacity) }
-                .composited(over: result)
+            layers.append(trailed(word.rect, previous: previousWords[word.id], strength: strength, quality: quality) { self.wordImage(word.text, rect: $0, opacity: word.opacity) })
         }
-        return result
+        return layers
     }
 
     /// `draw(rect)`, averaged along the trail when the node moved.

@@ -165,13 +165,18 @@ final class ShortcutRenderer: @unchecked Sendable {
     /// from `lerp(now, before, strength)` to now like every sprung node (uniform weights,
     /// `smoothFalloffRatio` 0).
     func draw(over output: CIImage, atPlayback time: Double, motionBlurStrength strength: Double = 0, quality: RenderQuality = .export) -> CIImage {
+        RenderPass.stack(layers(atPlayback: time, motionBlurStrength: strength, quality: quality), over: output)
+    }
+
+    /// Every key, bottom first, as `draw` lays them over the frame.
+    func layers(atPlayback time: Double, motionBlurStrength strength: Double = 0, quality: RenderQuality = .export) -> [CIImage] {
         let nodes = track.scene(atPlayback: time)
-        guard !nodes.isEmpty else { return output }
+        guard !nodes.isEmpty else { return [] }
         var before: [Int: ShortcutKeyNode] = [:]
         if strength > 0 {
             for node in track.scene(atPlayback: max(0, time - 1000 / track.fps)) { before[node.instance] = node }
         }
-        var result = output
+        var layers: [CIImage] = []
         for node in nodes {
             var image = key(node, rect: node.rect)
             if let previous = before[node.instance] {
@@ -187,8 +192,8 @@ final class ShortcutRenderer: @unchecked Sendable {
                     }
                 }
             }
-            result = image.composited(over: result)
+            layers.append(image)
         }
-        return result
+        return layers
     }
 }

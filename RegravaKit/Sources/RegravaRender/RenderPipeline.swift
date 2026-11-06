@@ -41,11 +41,14 @@ public final class RenderState: @unchecked Sendable {
             let canvas = track.layout.canvas
             let bounds = CGRect(origin: .zero, size: size)
             let scales = outputScales(for: size)
-            var image = compositor(scale: scales.y, scaleX: scales.x).compose(source: source, camera: camera, frame: frame, quality: quality)
+            let toOutput = CGSize(width: size.width / max(canvas.width, 1), height: size.height / max(canvas.height, 1))
+            // Composed at canvas size, the passes the compositor ends are drawn at the output's.
+            let rasterScale = composesAtOutputSize ? CGSize(width: 1, height: 1) : toOutput
+            var image = compositor(scale: scales.y, scaleX: scales.x).compose(source: source, camera: camera, frame: frame, quality: quality, rasterScale: rasterScale)
             // Drawn at the output size, the frame covers it exactly. Composed at canvas size,
             // it is scaled to the output.
             if !composesAtOutputSize, canvas.width != size.width || canvas.height != size.height {
-                image = image.transformed(by: CGAffineTransform(scaleX: size.width / max(canvas.width, 1), y: size.height / max(canvas.height, 1)))
+                image = image.transformed(by: CGAffineTransform(scaleX: toOutput.width, y: toOutput.height))
             }
             return image.cropped(to: bounds)
         }
