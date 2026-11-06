@@ -275,6 +275,7 @@ final class EditorModel: ObservableObject {
         await rebuildComposition()
         updateFaceTracking()
         updateSensitiveDataScan()
+        updateCameraMatte()
         updateSilence()
         syncMicrophoneRenders()
         updateHoverDetection()
@@ -499,6 +500,7 @@ final class EditorModel: ObservableObject {
         }
         if faceTrackingChanged { updateFaceTracking() }
         if updated.processing != oldProcessing { updateSensitiveDataScan() }
+        updateCameraMatte()
         if updated.cursor.followRecordedPositionOnHover != oldFollowsHovers || (updated.animation.mouseSpring == nil) != oldSpringIsNil { updateHoverDetection() }
         if silenceChanged { updateSilence() }
         if canvasChanged || slicesChanged || backgroundChanged || clicksChanged || cameraDelayChanged {
@@ -833,6 +835,38 @@ final class EditorModel: ObservableObject {
             await MainActor.run { [weak self] in
                 self?.lastSensitiveDataResult = detections
                 self?.scheduleRefresh()
+            }
+        }
+    }
+
+    private var cameraMatteTask: Task<Void, Never>?
+    private var cameraMatteURL: URL?
+    /// The webcam's mattes, held while a cutout layout is used: frames come from memory or the
+    /// project's cache while a sweep fills it in the background.
+    private var cameraMatting: CameraMatting?
+
+    /// A cutout layout matting the webcam opens its mattes ("Preparing camera cutout", shown
+    /// after a second, while the person window is found and the model loads); dropping it stops
+    /// the sweep.
+    private func updateCameraMatte() {
+        let movie = project.recording.cameraFileName.map { bundleURL.appendingPathComponent($0) }
+        let wanted = project.isCutoutLayoutUsed ? movie : nil
+        guard wanted != cameraMatteURL else { return }
+        cameraMatteURL = wanted
+        cameraMatteTask?.cancel()
+        cameraMatteTask = nil
+        let taskID = "camera-matte-" + bundleURL.path + "-0-opening"
+        tasks.finish(taskID)
+        cameraMatting = nil
+        guard let wanted, FileManager.default.fileExists(atPath: wanted.path) else { return }
+        tasks.register(taskID, name: "Preparing camera cutout", showAfterMs: 1000)
+        cameraMatteTask = Task.detached(priority: .utility) { [weak self] in
+            let matting = try? CameraMatting.open(videoURL: wanted, waitsForStoredMattes: false)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.tasks.finish(taskID)
+                guard !Task.isCancelled, self.cameraMatteURL == wanted else { return }
+                self.cameraMatting = matting
             }
         }
     }
@@ -2040,6 +2074,9 @@ final class EditorModel: ObservableObject {
             try? transcript.save(bundle: bundleURL)
         }
         sensitiveDataTask?.cancel()
+        cameraMatteTask?.cancel()
+        cameraMatting?.stop()
+        cameraMatting = nil
         faceTrackingTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
