@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The text recognizer's first load compiles its models (tens of seconds); done now so a
         // sensitive data scan does not wait for it.
         DispatchQueue.global(qos: .utility).async { SensitiveDataScanner.prewarm() }
+        // Same for the camera cutout's person matte model.
+        DispatchQueue.global(qos: .utility).async { CameraMatting.prewarm() }
         AppController.shared.launch()
     }
 
