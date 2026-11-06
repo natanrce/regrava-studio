@@ -9,7 +9,7 @@ import Testing
 /// click, captions, shortcuts, a mask, the cut-out camera with its shadow, the loupe) must
 /// leave the background as it is: no pass may read a layer's edge past what it drew.
 struct PassInputsTests {
-    private static func buffer(_ width: Int, _ height: Int, seed: Double) -> CVPixelBuffer {
+    static func buffer(_ width: Int, _ height: Int, seed: Double) -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
         CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, [kCVPixelBufferMetalCompatibilityKey: true, kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
         // Bright, varied content up to the edges: a wrong read past them shows on the background.
@@ -20,7 +20,7 @@ struct PassInputsTests {
         return buffer!
     }
 
-    private static func project() throws -> Project {
+    static func project() throws -> Project {
         let json = TrailInputsTests.projectJSON.replacingOccurrences(of: #""type":"camera-overlay""#, with: #""type":"cutout-camera""#)
         var project = try JSONDecoder().decode(Project.self, from: Data(json.utf8))
         project.cursor.clickEffect = ClickEffect(type: .ripple)
@@ -33,7 +33,7 @@ struct PassInputsTests {
     }
 
     /// Words of one caption line, all shown at 1500 ms.
-    private static let words = "isto deve continuar igual mesmo com muitas palavras na mesma linha".split(separator: " ").enumerated().map {
+    static let words = "isto deve continuar igual mesmo com muitas palavras na mesma linha".split(separator: " ").enumerated().map {
         TranscriptWord(index: $0.offset, startMs: 900 + Double($0.offset) * 40, endMs: 2500, text: String($0.element))
     }
 

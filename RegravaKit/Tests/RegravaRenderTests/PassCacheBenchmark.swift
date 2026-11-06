@@ -170,6 +170,50 @@ struct PassCacheBenchmark {
         try Self.writeHashes(hashes, suffix: ".preview")
     }
 
+    /// Every layer at once (cursor and screen trails, clicks, captions, shortcuts, a mask, the
+    /// sharpened camera with its shadow, the loupe) through a camera transition, at every quality.
+    @Test(.enabled(if: bundlePath != nil))
+    func everyLayer() throws {
+        // The overlay camera: the person matte's network is not exact from run to run.
+        var project = try JSONDecoder().decode(Project.self, from: Data(TrailInputsTests.projectJSON.utf8))
+        project.cursor.clickEffect = ClickEffect(type: .ripple)
+        project.captions.enableShortcuts = true
+        project.keystrokes = [
+            Keystroke(kind: .down, timeMs: 1300, character: "k", activeModifiers: [.command, .shift]),
+            Keystroke(kind: .up, timeMs: 1400, character: "k", activeModifiers: [.command, .shift]),
+        ]
+        project.camera.sharpen01 = 0.5
+        project.processing.improveRecordingQuality01 = 1
+        let track = CameraTrack(project: project, fps: 60)
+        let size = CGSize(width: 1920, height: 1080)
+        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: CursorLibrary.arrowOnly(), transcript: PassInputsTests.words, fps: 60, outputScale: size.width / track.layout.canvas.width)
+        let source = CIImage(cvPixelBuffer: PassInputsTests.buffer(3024, 1964, seed: 0))
+        let camera = CIImage(cvPixelBuffer: PassInputsTests.buffer(1920, 1080, seed: 50))
+        let out = Self.outputBuffer(size)
+        var hashes: [String] = []
+        for quality in [RenderQuality.export, .pausedHigh, .playing] {
+            var times: [Double] = []
+            for t in stride(from: 800.0, to: 2600, by: 50) {
+                var frame = track.frame(at: t)
+                frame.loupe = LoupeFrame(center: Vec2(0.4, 0.5), radius: 0.15, zoom: 2, bevelRatio: 0.2, chromaticAberration: 0.5, shadowAlpha: 0.3, presence: 1)
+                frame.clicks = [CursorClick(ageMs: 200, position: Vec2(1500, 1000))]
+                frame.mask = MaskFrame(bounds01: Rect2(x: 0.1, y: 0.2, width: 0.3, height: 0.2), borderRadius01: 0.01, type: .sensitiveData, highlightOpacity: 0.5, active: true, opacity: 1)
+                for _ in 0..<3 {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    let image = compositor.compose(source: source, camera: camera, frame: frame, quality: quality).cropped(to: CGRect(origin: .zero, size: size))
+                    CanvasCompositor.context.render(image, to: out, bounds: CGRect(origin: .zero, size: size), colorSpace: CanvasCompositor.sRGB)
+                    CVPixelBufferLockBaseAddress(out, .readOnly)
+                    CVPixelBufferUnlockBaseAddress(out, .readOnly)
+                    times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                }
+                hashes.append("every-layer \(quality) \(Int(t)) \(Self.hash(out))")
+            }
+            let sorted = times.sorted()
+            print(String(format: "BENCH every layer %@ (each frame 3×): avg %.2f ms, median %.2f ms", "\(quality)", times.reduce(0, +) / Double(times.count), sorted[sorted.count / 2]))
+        }
+        try Self.writeHashes(hashes, suffix: ".every")
+    }
+
     @Test(.enabled(if: bundlePath != nil))
     func export() async throws {
         let (dir, bundle, project) = try Self.copiedBundle()
