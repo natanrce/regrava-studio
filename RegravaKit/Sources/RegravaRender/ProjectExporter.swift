@@ -88,7 +88,7 @@ public enum ProjectExporter {
         try await completeSensitiveDataScan(project: project, bundle: videoURL.deletingLastPathComponent())
         // And for the microphone's silences when the camera hides during them.
         try await SilenceAnalyzer.ensure(project: project, bundle: videoURL.deletingLastPathComponent(), recording: videoURL)
-        let state = RenderState(project: project, cursors: cursors, assetsDirectory: videoURL.deletingLastPathComponent(), fps: Double(settings.fps))
+        let state = renderState(project: project, cursors: cursors, bundle: videoURL.deletingLastPathComponent(), settings: settings)
 
         switch settings.format {
         case .gif:
@@ -111,6 +111,12 @@ public enum ProjectExporter {
                 return [outputURL, hevcURL]
             }
         }
+    }
+
+    /// What draws the export's frames. Every format is drawn at its output size, so blur,
+    /// edges and text land on the pixels that are written.
+    static func renderState(project: Project, cursors: CursorLibrary?, bundle: URL, settings: ExportSettings) -> RenderState {
+        RenderState(project: project, cursors: cursors, assetsDirectory: bundle, fps: Double(settings.fps), outputSize: settings.outputSize(aspectRatio: project.stageAspectRatio))
     }
 
     // MARK: Movie (MP4 / ProRes)

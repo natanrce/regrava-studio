@@ -123,6 +123,23 @@ struct OutputSizeRenderTests {
         }
     }
 
+    /// Every export format draws at its output size, 4K included (twice the 1920 canvas).
+    @Test(arguments: [ExportFormat.mp4, .prores, .gif])
+    func exportsDrawAtTheOutputSize(format: ExportFormat) {
+        let project = project()
+        for height in format.resolutionOptions {
+            var settings = ExportSettings.defaults(for: format)
+            settings.height = height
+            if format == .mp4 { settings.codec = .both }
+            let size = settings.outputSize(aspectRatio: project.stageAspectRatio)
+            let snapshot = ProjectExporter.renderState(project: project, cursors: nil, bundle: URL(fileURLWithPath: NSTemporaryDirectory()), settings: settings).current
+            #expect(snapshot.composesAtOutputSize)
+            #expect(snapshot.compositor.outputScaleX == size.width / 1920, "\(format) \(height)")
+            #expect(snapshot.compositor.outputScale == size.height / 1080, "\(format) \(height)")
+            #expect(snapshot.compositor.layout.canvas == Rect2(size: size))
+        }
+    }
+
     /// An even export size off the canvas's aspect (9:16 at 1080p: 606 × 1080, the canvas
     /// 0.9997 as wide there) is drawn on exactly: each axis scales by its own ratio, nothing
     /// is padded or resampled after the frame is drawn.
