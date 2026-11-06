@@ -19,7 +19,8 @@ import Foundation
 /// changes its hash too. A frame whose pass hashes the same is served the kept output instead of
 /// drawing it again. A video frame hashes by its buffer and what the buffer holds: a playing
 /// frame draws the passes reading it anew, and passes that read no video (the background,
-/// captions, shortcuts) are drawn once while they stay the same.
+/// captions, shortcuts) are drawn once while they stay the same. Kept outputs are released
+/// once no frame has been drawn for `KeepAlive.idleRelease` seconds.
 enum RenderPass {
     /// Textures one program of the frame may read; 3 below the limit, for the reads Core
     /// Image adds itself.
@@ -47,6 +48,74 @@ enum RenderPass {
     static func served(_ image: CIImage) -> CIImage {
         guard !image.extent.isInfinite, !image.extent.isEmpty else { return image }
         return image.insertingIntermediate(cache: true)
+    }
+
+    /// Releases the outputs kept for frames once none has been drawn for a while.
+    static let keepAlive = KeepAlive { CanvasCompositor.context.clearCaches() }
+
+    /// Calls `release` once nothing was used for `idleRelease` seconds: every `sweepInterval`
+    /// while something is held, it checks the time since the last use.
+    final class KeepAlive: @unchecked Sendable {
+        static let idleRelease: TimeInterval = 5
+        static let sweepInterval: TimeInterval = 1
+
+        private let lock = NSLock()
+        private let release: @Sendable () -> Void
+        private let now: @Sendable () -> TimeInterval
+        private let schedule: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+        private var lastUsed: TimeInterval?
+        private var isSweepScheduled = false
+
+        init(
+            now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+            schedule: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { delay, work in
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
+            },
+            release: @escaping @Sendable () -> Void
+        ) {
+            self.now = now
+            self.schedule = schedule
+            self.release = release
+        }
+
+        /// Something was drawn now.
+        func markUsed() {
+            lock.lock()
+            lastUsed = now()
+            let needsSweep = !isSweepScheduled
+            isSweepScheduled = true
+            lock.unlock()
+            if needsSweep { scheduleSweep() }
+        }
+
+        /// Whether outputs are held: used since the last release.
+        var isHolding: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return lastUsed != nil
+        }
+
+        private func scheduleSweep() {
+            schedule(Self.sweepInterval) { [weak self] in self?.sweep() }
+        }
+
+        private func sweep() {
+            lock.lock()
+            guard let lastUsed else {
+                isSweepScheduled = false
+                lock.unlock()
+                return
+            }
+            if now() - lastUsed > Self.idleRelease {
+                self.lastUsed = nil
+                isSweepScheduled = false
+                lock.unlock()
+                release()
+                return
+            }
+            lock.unlock()
+            scheduleSweep()
+        }
     }
 
     /// How far past its extent a layer may draw: antialiased edges spill about a pixel.

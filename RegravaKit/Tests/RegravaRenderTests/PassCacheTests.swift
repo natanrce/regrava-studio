@@ -6,7 +6,7 @@ import Testing
 @testable import RegravaRender
 
 /// Pass outputs kept between frames: served when a pass hashes the same, drawn again when
-/// anything it reads changed.
+/// anything it reads changed, released after the frames stop.
 struct PassCacheTests {
     private static let bounds = CGRect(x: 0, y: 0, width: 640, height: 360)
 
@@ -100,5 +100,46 @@ struct PassCacheTests {
         for timeMs in [1000.0, 1500, 1500, 2200, 1500] {
             #expect(try render(CanvasCompositor.context, timeMs: timeMs) == render(fresh, timeMs: timeMs), "at \(timeMs) ms")
         }
+    }
+
+    /// A clock and a timer queue driven by hand.
+    private final class Clock: @unchecked Sendable {
+        var now: TimeInterval = 100
+        var pending: [(at: TimeInterval, work: @Sendable () -> Void)] = []
+        var releases = 0
+
+        func advance(to time: TimeInterval) {
+            while let next = pending.min(by: { $0.at < $1.at }), next.at <= time {
+                pending.removeAll { $0.at == next.at }
+                now = next.at
+                next.work()
+            }
+            now = time
+        }
+    }
+
+    @Test func keptOutputsAreReleasedFiveSecondsAfterTheLastFrame() {
+        let clock = Clock()
+        let keepAlive = RenderPass.KeepAlive(now: { clock.now }, schedule: { delay, work in clock.pending.append((clock.now + delay, work)) }, release: { clock.releases += 1 })
+        #expect(!keepAlive.isHolding)
+        keepAlive.markUsed()
+        #expect(keepAlive.isHolding)
+        // Frames every second keep it.
+        for t in stride(from: 101.0, through: 110, by: 1) {
+            clock.advance(to: t)
+            keepAlive.markUsed()
+        }
+        #expect(clock.releases == 0)
+        // Idle from 110: still held at 115, released at the first sweep past five seconds.
+        clock.advance(to: 115)
+        #expect(clock.releases == 0)
+        clock.advance(to: 116)
+        #expect(clock.releases == 1)
+        #expect(!keepAlive.isHolding)
+        #expect(clock.pending.isEmpty, "no sweep while nothing is held")
+        // A new frame starts sweeping again.
+        keepAlive.markUsed()
+        clock.advance(to: 123)
+        #expect(clock.releases == 2)
     }
 }

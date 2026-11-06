@@ -130,6 +130,8 @@ public final class FrameCompositor: @unchecked Sendable {
     /// the passes it ends itself keep the output's resolution.
     /// `cameraTimeMs` is the presentation time of `cameraImage` in the webcam movie.
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, cameraTimeMs: Double? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export, rasterScale: CGSize = CGSize(width: 1, height: 1)) -> CIImage {
+        // The outputs kept from earlier frames stay while frames are drawn.
+        RenderPass.keepAlive.markUsed()
         let frame = canvasFrame.scaled(x: outputScaleX, y: outputScale)
         let canvasRect = ciRect(layout.canvas)
         // The recording is debanded first (`screenDeband`), on the whole frame.
