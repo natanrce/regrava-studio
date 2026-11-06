@@ -115,8 +115,9 @@ public enum ProjectExporter {
 
     /// What draws the export's frames. Every format is drawn at its output size, so blur,
     /// edges and text land on the pixels that are written.
+    /// Cutout frames wait for their stored mattes, so the export is the same whatever the cache held.
     static func renderState(project: Project, cursors: CursorLibrary?, bundle: URL, settings: ExportSettings) -> RenderState {
-        RenderState(project: project, cursors: cursors, assetsDirectory: bundle, fps: Double(settings.fps), outputSize: settings.outputSize(aspectRatio: project.stageAspectRatio))
+        RenderState(project: project, cursors: cursors, assetsDirectory: bundle, fps: Double(settings.fps), outputSize: settings.outputSize(aspectRatio: project.stageAspectRatio), waitsForStoredMattes: true)
     }
 
     // MARK: Movie (MP4 / ProRes)
