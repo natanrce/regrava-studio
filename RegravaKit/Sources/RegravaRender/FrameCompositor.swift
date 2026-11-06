@@ -419,7 +419,7 @@ public final class FrameCompositor: @unchecked Sendable {
             guard let bytes = try? matting.matte(of: index, frame: content), let image = CameraCutout.matteImage(bytes) else { return nil }
             return (image, matting.window)
         }
-        guard let bytes = try? FrameMatter.wholeFrame.matte(content), let image = CameraCutout.matteImage(bytes) else { return nil }
+        guard let bytes = try? FrameMatter.wholeFrame?.matte(content), let image = CameraCutout.matteImage(bytes) else { return nil }
         return (image, PersonWindow.wholeFrame)
     }
 

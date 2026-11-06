@@ -2,39 +2,30 @@ import Accelerate
 import AVFoundation
 import CoreImage
 import CoreVideo
+import CoreML
 import Foundation
-import Vision
 
 /// The person matte of one webcam frame inside its person window, `width`×`height` bytes in
-/// rows from the top, by Apple Vision person segmentation at its accurate level. One matter
-/// works on one frame at a time.
+/// rows from the top, by the bundled person matte network. One matter works on one frame at a time.
 final class FrameMatter: @unchecked Sendable {
     static let width = MatteCache.matteWidth
     static let height = MatteCache.matteHeight
     /// Names the mattes in cache identities and window files.
-    static let model = "vision-person-segmentation-accurate"
+    static let model = PersonMatteNetwork.model
 
     let window: CGRect
-    /// Whether the model ran on the blank frame at creation.
-    private(set) var isLoaded = false
     /// The whole-frame matter for webcam frames that are not from a project's movie.
-    static let wholeFrame = FrameMatter(window: PersonWindow.wholeFrame)
-    private let request = VNGeneratePersonSegmentationRequest()
+    static let wholeFrame = try? FrameMatter(window: PersonWindow.wholeFrame)
+    private let network: PersonMatteNetwork
+    private let input: MLMultiArray
     private let lock = NSLock()
     static let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
 
-    /// Loads the model by matting a blank frame, so the first real frame does not wait for it.
-    init(window: CGRect) {
+    /// Loads the network (a Mac's first load compiles it) and runs it once.
+    init(window: CGRect) throws {
         self.window = window
-        request.qualityLevel = .accurate
-        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
-        if let blank = Self.blankFrame() { isLoaded = (try? matte(blank)) != nil }
-    }
-
-    private static func blankFrame() -> CVPixelBuffer? {
-        var buffer: CVPixelBuffer?
-        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
-        return buffer
+        network = try PersonMatteNetwork.loadBundled()
+        input = try MLMultiArray(shape: [1, 3, NSNumber(value: Self.height), NSNumber(value: Self.width)], dataType: .float16)
     }
 
     /// The window of `frame` in Core Image coordinates (bottom-up).
@@ -48,43 +39,65 @@ final class FrameMatter: @unchecked Sendable {
     }
 
     func matte(_ image: CIImage) throws -> [UInt8] {
+        try matteAndGuide(image).matte
+    }
+
+    /// The matte and the network's input as the flicker filter's guide (`guide(_:window:)`).
+    func matteAndGuide(_ image: CIImage) throws -> (matte: [UInt8], guide: [UInt8]) {
         lock.lock()
         defer { lock.unlock() }
-        let rect = Self.windowRect(window, in: image.extent)
-        let input = image.cropped(to: rect).transformed(by: CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
-        try VNImageRequestHandler(ciImage: input, options: [:]).perform([request])
-        guard let mask = request.results?.first?.pixelBuffer else { throw MatteChunkError.message("The matte network returned no matte") }
-        let maskImage = CIImage(cvPixelBuffer: mask)
-        let scaled = maskImage.transformed(by: CGAffineTransform(scaleX: CGFloat(Self.width) / maskImage.extent.width, y: CGFloat(Self.height) / maskImage.extent.height))
-        var out = [UInt8](repeating: 0, count: Self.width * Self.height)
-        out.withUnsafeMutableBytes { bytes in
-            Self.context.render(scaled, toBitmap: bytes.baseAddress!, rowBytes: Self.width, bounds: CGRect(x: 0, y: 0, width: Self.width, height: Self.height), format: .L8, colorSpace: nil)
+        let planes = Self.inputPlanes(image, window: window)
+        let count = Self.width * Self.height
+        let pointer = input.dataPointer.assumingMemoryBound(to: UInt16.self)
+        planes.withUnsafeBufferPointer { pointer.update(from: $0.baseAddress!, count: count * 3) }
+        let output = try network.matte(input)
+        return (Self.matteBytes(output), Self.guideBytes(planes))
+    }
+
+    /// The network's [1, 1, 576, 1024] half-float matte as bytes (0…1 → 0…255), rows as strided.
+    static func matteBytes(_ output: MLMultiArray) -> [UInt8] {
+        var floats = [Float](repeating: 0, count: width * height)
+        let rowStride = output.strides.count >= 4 ? output.strides[2].intValue : width
+        output.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            floats.withUnsafeMutableBytes { target in
+                var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: base), height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowStride * 2)
+                var to = vImage_Buffer(data: target.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 4)
+                _ = vImageConvert_Planar16FtoPlanarF(&source, &to, vImage_Flags(kvImageNoFlags))
+            }
         }
-        return out
+        var bytes = [UInt8](repeating: 0, count: width * height)
+        floats.withUnsafeMutableBytes { source in
+            bytes.withUnsafeMutableBytes { target in
+                var from = vImage_Buffer(data: source.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 4)
+                var to = vImage_Buffer(data: target.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width)
+                _ = vImageConvert_PlanarFtoPlanar8(&from, &to, 1, 0, vImage_Flags(kvImageNoFlags))
+            }
+        }
+        return bytes
     }
 
     private static let guideKernel = RenderKernels.general("cameraMatteGuide")
 
-    /// The window of the footage at matte size, three planes (r, g, b), each pixel the mean of a
-    /// box of up to 4×4 bilinear reads, stored as half floats in −1…1 and brought to 0…255.
-    static func guide(_ frame: CVPixelBuffer, window: CGRect) -> [UInt8] {
+    /// The window of the footage at matte size as the network reads it: three planes (r, g, b),
+    /// each pixel the mean of a box of up to 4×4 bilinear reads, normalized to −1…1, half floats.
+    static func inputPlanes(_ image: CIImage, window: CGRect) -> [UInt16] {
         let count = width * height
-        var guide = [UInt8](repeating: 0, count: count * 3)
-        guard let guideKernel else { return guide }
-        let image = CIImage(cvPixelBuffer: frame)
+        var halves = [UInt16](repeating: 0, count: count * 3)
+        guard let guideKernel else { return halves }
         let extent = image.extent
         let rect = windowRect(window, in: extent)
         let taps = CIVector(x: CGFloat(taps(window.width * extent.width / Double(width))), y: CGFloat(taps(window.height * extent.height / Double(height))))
         let output = CGRect(x: 0, y: 0, width: width, height: height)
-        guard let sampled = guideKernel.apply(extent: output, roiCallback: { _, _ in rect.insetBy(dx: -2, dy: -2) },
-                                              arguments: [image.clampedToExtent(), CIVector(cgRect: rect), CIVector(x: CGFloat(width), y: CGFloat(height)), taps]) else { return guide }
+        let origin = image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+        let local = rect.offsetBy(dx: -extent.minX, dy: -extent.minY)
+        guard let sampled = guideKernel.apply(extent: output, roiCallback: { _, _ in local.insetBy(dx: -2, dy: -2) },
+                                              arguments: [origin.clampedToExtent(), CIVector(cgRect: local), CIVector(x: CGFloat(width), y: CGFloat(height)), taps]) else { return halves }
         var rgba = [Float](repeating: 0, count: count * 4)
         rgba.withUnsafeMutableBytes { bytes in
             context.render(sampled, toBitmap: bytes.baseAddress!, rowBytes: width * 16, bounds: output, format: .RGBAf, colorSpace: nil)
         }
-        // Planes, normalized to −1…1 and rounded through half floats like the network's input.
         var planes = [Float](repeating: 0, count: count * 4)
-        var halves = [UInt16](repeating: 0, count: count * 3)
         rgba.withUnsafeMutableBytes { interleaved in
             planes.withUnsafeMutableBytes { planar in
                 let base = planar.baseAddress!
@@ -102,16 +115,34 @@ final class FrameMatter: @unchecked Sendable {
                     var floats = vImage_Buffer(data: base, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width * 4)
                     var packed = vImage_Buffer(data: half.baseAddress, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width * 2)
                     _ = vImageConvert_PlanarFtoPlanar16F(&floats, &packed, vImage_Flags(kvImageNoFlags))
-                    _ = vImageConvert_Planar16FtoPlanarF(&packed, &floats, vImage_Flags(kvImageNoFlags))
                 }
-                guide.withUnsafeMutableBytes { target in
-                    var floats = vImage_Buffer(data: base, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width * 4)
-                    var bytes = vImage_Buffer(data: target.baseAddress, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width)
-                    _ = vImageConvert_PlanarFtoPlanar8(&floats, &bytes, 1, -1, vImage_Flags(kvImageNoFlags))
+            }
+        }
+        return halves
+    }
+
+    /// The network's input planes brought to 0…255 (−1…1 → 0…255): the flicker filter's guide.
+    static func guideBytes(_ halves: [UInt16]) -> [UInt8] {
+        let count = width * height
+        var floats = [Float](repeating: 0, count: count * 3)
+        var guide = [UInt8](repeating: 0, count: count * 3)
+        var halves = halves
+        halves.withUnsafeMutableBytes { half in
+            floats.withUnsafeMutableBytes { target in
+                var packed = vImage_Buffer(data: half.baseAddress, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width * 2)
+                var to = vImage_Buffer(data: target.baseAddress, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width * 4)
+                _ = vImageConvert_Planar16FtoPlanarF(&packed, &to, vImage_Flags(kvImageNoFlags))
+                guide.withUnsafeMutableBytes { bytes in
+                    var to8 = vImage_Buffer(data: bytes.baseAddress, height: vImagePixelCount(height * 3), width: vImagePixelCount(width), rowBytes: width)
+                    _ = vImageConvert_PlanarFtoPlanar8(&to, &to8, 1, -1, vImage_Flags(kvImageNoFlags))
                 }
             }
         }
         return guide
+    }
+
+    static func guide(_ frame: CVPixelBuffer, window: CGRect) -> [UInt8] {
+        guideBytes(inputPlanes(CIImage(cvPixelBuffer: frame), window: window))
     }
 
     /// Reads per output pixel along one axis: source pixels per matte pixel, rounded, 1…4.
@@ -141,7 +172,7 @@ enum PersonWindow {
         if let data = try? Data(contentsOf: file), let stored = try? JSONDecoder().decode(StoredWindow.self, from: data) {
             return CGRect(x: stored.x, y: stored.y, width: stored.width, height: stored.height)
         }
-        let matter = FrameMatter(window: wholeFrame)
+        let matter = try FrameMatter(window: wholeFrame)
         let window = try estimate(videoURL: videoURL, frameTimes: frameTimes, matter: matter)
         try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true, attributes: nil)
         let stored = StoredWindow(x: window.minX, y: window.minY, width: window.width, height: window.height)

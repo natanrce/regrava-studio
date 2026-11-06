@@ -68,12 +68,12 @@ final class PersonMatteSweep: @unchecked Sendable {
     let laneCount: Int
     private let workers: [FrameMatter]
 
-    init(videoURL: URL, frameTimes: [CMTime], window: CGRect, laneCount: Int) {
+    init(videoURL: URL, frameTimes: [CMTime], window: CGRect, laneCount: Int) throws {
         self.videoURL = videoURL
         self.frameTimes = frameTimes
         self.window = window
         self.laneCount = laneCount
-        workers = (0..<laneCount).map { _ in FrameMatter(window: window) }
+        workers = try (0..<laneCount).map { _ in try FrameMatter(window: window) }
     }
 
     /// The exact index of a decoded frame's time.
@@ -123,9 +123,8 @@ final class PersonMatteSweep: @unchecked Sendable {
                         if isCancelled() { break }
                         Thread.sleep(forTimeInterval: 0.002)
                     }
-                    let matte = try worker.matte(frame)
-                    let guide = wantsGuide ? FrameMatter.guide(frame, window: window) : nil
-                    try onFrame(index, matte, guide)
+                    let result = try worker.matteAndGuide(CIImage(cvPixelBuffer: frame))
+                    try onFrame(index, result.matte, wantsGuide ? result.guide : nil)
                     done.insert(index)
                 }
                 if isCancelled() { break }
@@ -177,7 +176,7 @@ final class MatteDemand: @unchecked Sendable {
 }
 
 /// A webcam's person mattes for drawing: from memory, else from the project's cache, else from
-/// the network (Vision) at once. A sweep fills the cache in the background, nearest the shown
+/// the network at once. A sweep fills the cache in the background, nearest the shown
 /// frame first, with the mattes filtered over time and stored as H.264. With
 /// `waitsForStoredMattes` (an export) a frame waits for its stored matte instead, so the frames
 /// are the same whatever the cache held before.
@@ -226,7 +225,7 @@ public final class CameraMatting: @unchecked Sendable {
         window = try PersonWindow.window(videoURL: videoURL, frameTimes: frameTimes, model: FrameMatter.model, cacheRoot: root)
         let videoKey = MatteCache.videoKey(forVideoAt: videoURL.path)
         cache = try MatteCache.open(root: root, videoKey: videoKey, identity: MatteCache.identity(videoKey: videoKey, model: FrameMatter.model, window: window), frameCount: count)
-        matter = FrameMatter(window: window)
+        matter = try FrameMatter(window: window)
     }
 
     deinit {
@@ -278,7 +277,7 @@ public final class CameraMatting: @unchecked Sendable {
     /// launch. Whether it loaded.
     @discardableResult
     public static func prewarm() -> Bool {
-        FrameMatter(window: PersonWindow.wholeFrame).isLoaded
+        (try? FrameMatter(window: PersonWindow.wholeFrame)) != nil
     }
 
     /// Stops the sweep; frames waiting for a stored matte give up.
@@ -461,7 +460,7 @@ public final class CameraMatting: @unchecked Sendable {
                 var written: Set<Int> = []
                 defer { cache.release(chunks.filter { !written.contains($0) }) }
                 if sweep == nil {
-                    sweep = PersonMatteSweep(videoURL: videoURL, frameTimes: frameTimes, window: window, laneCount: CameraMatting.sweepLaneLimit)
+                    sweep = try PersonMatteSweep(videoURL: videoURL, frameTimes: frameTimes, window: window, laneCount: CameraMatting.sweepLaneLimit)
                 }
                 guard let sweep else { return }
                 let frameCount = cache.frameCount

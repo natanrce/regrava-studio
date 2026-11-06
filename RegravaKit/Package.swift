@@ -19,7 +19,7 @@ let package = Package(
         // Pure, platform-independent logic: models, auto-zoom, grouping, springs, camera track.
         .target(name: "RegravaCore"),
         // Core Image / AVFoundation frame compositing, preview composition and export.
-        .target(name: "RegravaRender", dependencies: ["RegravaCore", "RegravaSpeech"], resources: [.copy("Resources/Wallpapers"), .copy("Resources/Fonts"), .copy("Resources/Devices"), .copy("Resources/Sounds"), .copy("Resources/BackgroundAudio"), .copy("Resources/CursorSets"), .copy("Resources/SensitiveData"), .copy("RegravaKernels.metallib")]),
+        .target(name: "RegravaRender", dependencies: ["RegravaCore", "RegravaSpeech"], resources: [.copy("Resources/Wallpapers"), .copy("Resources/Fonts"), .copy("Resources/Devices"), .copy("Resources/Sounds"), .copy("Resources/BackgroundAudio"), .copy("Resources/CursorSets"), .copy("Resources/SensitiveData"), .copy("Resources/PersonMatte"), .copy("RegravaKernels.metallib")]),
         // MossFormer2 and TF-Restormer on MLX. Needs Apple silicon.
         .target(
             name: "RegravaSpeech",

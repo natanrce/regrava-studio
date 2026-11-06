@@ -105,7 +105,7 @@ struct MatteCacheTests {
     }
 
     @Test func identityHashesTheVideoModelAndWindow() {
-        #expect(MatteCache.identity(videoKey: "/tmp/x.mov|10|20", model: "vision-person-segmentation-accurate", window: CGRect(x: 0, y: 0, width: 1, height: 1)) == "matte-6a23e08830359d9bc4fe")
+        #expect(MatteCache.identity(videoKey: "/tmp/x.mov|10|20", model: "pp-mattingv2-ss9-refined", window: CGRect(x: 0, y: 0, width: 1, height: 1)) == "matte-44b53edac225ad22dcac")
         #expect(MatteCache.root(forVideoAt: "/a/b/P.regrava/camera.mov").path == "/a/b/P.regrava/cache/camera-matte")
     }
 

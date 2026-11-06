@@ -40,9 +40,10 @@ struct CutoutTests {
         #expect(alpha(inset, x: 316) < alpha(plain, x: 316))
     }
 
-    @Test func visionMatteRunsOnAnyFrame() {
+    @Test func networkMatteRunsOnAnyFrame() {
         // No person in a flat frame: either no matte or an empty one, never a crash.
-        if let bytes = try? FrameMatter.wholeFrame.matte(frame), let m = CameraCutout.matteImage(bytes) {
+        #expect(FrameMatter.wholeFrame != nil)
+        if let bytes = try? FrameMatter.wholeFrame?.matte(frame), let m = CameraCutout.matteImage(bytes) {
             #expect(m.extent.width > 0)
         }
     }

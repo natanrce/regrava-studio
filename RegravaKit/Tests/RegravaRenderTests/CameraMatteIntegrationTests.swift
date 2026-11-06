@@ -3,6 +3,7 @@ import CoreImage
 import CryptoKit
 import Foundation
 import Testing
+import Vision
 @testable import RegravaCore
 @testable import RegravaRender
 
@@ -119,6 +120,38 @@ struct CameraMatteIntegrationTests {
         let b = try await exportFrameHashes(bundle: bundle, project: project, frames: 30)
         print("MATTE plain export identical frames:", zip(a, b).filter { $0 == $1 }.count, "of", a.count)
         #expect(a == b)
+    }
+
+    /// The network's matte roughly agrees with Vision's person segmentation on where the person is.
+    @Test func networkMatteFindsThePerson() throws {
+        let camera = source.appendingPathComponent(try ProjectStore.load(from: source).recording.cameraFileName!)
+        let times = try CameraFrames.frameTimes(videoURL: camera)
+        let matter = try FrameMatter(window: PersonWindow.wholeFrame)
+        let w = FrameMatter.width, h = FrameMatter.height
+        for index in [30, 200, 400] {
+            let frame = try CameraFrames.decodeFrame(videoURL: camera, at: times[index])!
+            let start = CFAbsoluteTimeGetCurrent()
+            let matte = try matter.matte(frame)
+            let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            let request = VNGeneratePersonSegmentationRequest()
+            request.qualityLevel = .accurate
+            request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+            try VNImageRequestHandler(cvPixelBuffer: frame).perform([request])
+            let mask = CIImage(cvPixelBuffer: request.results!.first!.pixelBuffer)
+            var vision = [UInt8](repeating: 0, count: w * h)
+            FrameMatter.context.render(mask.transformed(by: CGAffineTransform(scaleX: CGFloat(w) / mask.extent.width, y: CGFloat(h) / mask.extent.height)),
+                                       toBitmap: &vision, rowBytes: w, bounds: CGRect(x: 0, y: 0, width: w, height: h), format: .L8, colorSpace: nil)
+            var both = 0, either = 0, person = 0
+            for i in 0..<(w * h) {
+                let a = matte[i] >= 128, b = vision[i] >= 128
+                if a && b { both += 1 }
+                if a || b { either += 1 }
+                if a { person += 1 }
+            }
+            let iou = Double(both) / Double(max(either, 1))
+            print(String(format: "MATTE frame %d: network %.0f ms, person %.0f%%, IoU with Vision %.3f", index, ms, Double(person) * 100 / Double(w * h), iou))
+            #expect(iou > 0.7)
+        }
     }
 
     @Test func previewFrameCost() throws {
