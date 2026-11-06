@@ -45,6 +45,8 @@ public final class FrameCompositor: @unchecked Sendable {
     /// Hide sensitive data / Hide faces: the scan's detections, drawn by source time.
     private let processing: ProcessingConfig
     private let sensitiveData: AutoMaskTimeline
+    /// An export running alongside the scan: frames wait for, and draw, its final detections.
+    private let exportSensitiveData: ExportSensitiveData?
     private let resolver: TimeResolver
     private let videoSize: Size2
     /// The colour grade already mixed with the identity by `lutIntensity`.
@@ -55,9 +57,11 @@ public final class FrameCompositor: @unchecked Sendable {
     /// `outputScaleX` (the same when nil) that many times wider; the frames passed to `compose`
     /// stay in canvas pixels.
     /// `waitsForStoredMattes`: a cutout frame waits until its stored matte exists (export).
-    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1, outputScaleX: Double? = nil, waitsForStoredMattes: Bool = false) {
+    /// `exportSensitiveData`: the covers come from a scan still running instead of `sensitiveData`.
+    public init(project: Project, layout: CanvasLayout, cursors: CursorLibrary?, assetsDirectory: URL? = nil, transcript: [TranscriptWord] = [], sensitiveData: [SensitiveDataDetection] = [], fps: Double = CameraTrack.previewFps, outputScale: Double = 1, outputScaleX: Double? = nil, waitsForStoredMattes: Bool = false, exportSensitiveData: ExportSensitiveData? = nil) {
         processing = project.processing
         self.sensitiveData = AutoMaskTimeline(detections: project.processing.isAutoMasking ? sensitiveData.sorted { $0.startMs < $1.startMs } : [])
+        self.exportSensitiveData = project.processing.isAutoMasking ? exportSensitiveData : nil
         resolver = project.resolver
         videoSize = project.recording.videoSize
         self.outputScale = outputScale
@@ -139,7 +143,11 @@ public final class FrameCompositor: @unchecked Sendable {
         let videoPerCanvas = screenSource.extent.width / max(videoRect(inBody: frame.screenRect).width, 0.0001)
         var src = MaskRenderer.apply(frame.mask, to: screenSource, antialias: SmoothShapes.antialias * max(1, videoPerCanvas))
         // Auto masks after the manual one, never on the timeline.
-        if !sensitiveData.isEmpty {
+        if let exportSensitiveData {
+            let sourceMs = resolver.playbackToSource(frame.timeMs)
+            let covers = AutoMasks.frame(at: sourceMs, timeline: exportSensitiveData.timeline(atSourceMs: sourceMs), config: processing, videoSize: videoSize)
+            src = AutoMaskRenderer.apply(covers, to: src, crop01: screenCrop01, videoSize: videoSize)
+        } else if !sensitiveData.isEmpty {
             let covers = AutoMasks.frame(at: resolver.playbackToSource(frame.timeMs), timeline: sensitiveData, config: processing, videoSize: videoSize)
             src = AutoMaskRenderer.apply(covers, to: src, crop01: screenCrop01, videoSize: videoSize)
         }

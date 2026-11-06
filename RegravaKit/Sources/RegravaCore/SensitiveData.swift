@@ -283,6 +283,67 @@ public enum AutoMasks {
     }
 }
 
+/// An export can draw frames while the scan still runs, from the partial results final past the
+/// frame. Afterwards the complete result is checked against each partial result it drew from.
+public enum SensitiveDataExportCheck {
+    /// A frame is drawn once its partial result is final this far past it.
+    public static let readyLeadMs = 1000.0
+    /// Margin around the drawn range compared with the complete result.
+    public static let compareMarginMs = 1000.0
+
+    /// Whether a frame at `sourceMs` can be drawn from a partial result final up to `finalUpToMs`.
+    public static func isReady(sourceMs: Double, finalUpToMs: Double) -> Bool {
+        sourceMs + readyLeadMs < finalUpToMs
+    }
+
+    /// One partial result an export drew from, and the source times it drew over.
+    public struct Use: Sendable {
+        public var detections: [SensitiveDataDetection]
+        public var finalUpToMs: Double
+        public var fromMs: Double
+        public var toMs: Double
+
+        public init(detections: [SensitiveDataDetection], finalUpToMs: Double, fromMs: Double, toMs: Double) {
+            self.detections = detections
+            self.finalUpToMs = finalUpToMs
+            self.fromMs = fromMs
+            self.toMs = toMs
+        }
+    }
+
+    /// Whether `result` covers what every used partial result covered: over each drawn range
+    /// widened by the margin, cut off where that partial result was final.
+    public static func isConsistent(_ uses: [Use], with result: [SensitiveDataDetection]) -> Bool {
+        for use in uses {
+            let fromMs = use.fromMs - compareMarginMs
+            let untilMs = min(use.finalUpToMs, use.toMs + compareMarginMs)
+            if signature(use.detections, fromMs: fromMs, untilMs: untilMs) != signature(result, fromMs: fromMs, untilMs: untilMs) { return false }
+        }
+        return true
+    }
+
+    /// The covers of `detections` over `fromMs..<untilMs`: each overlapping detection with its
+    /// session, kind, clipped span, video size and the keyframes reaching into the range (one
+    /// before, one after), one line each, in sorted order.
+    public static func signature(_ detections: [SensitiveDataDetection], fromMs: Double, untilMs: Double) -> String {
+        func number(_ value: Double) -> String {
+            value == value.rounded() && abs(value) < 1e15 ? String(Int64(value)) : String(value)
+        }
+        return detections.filter { $0.startMs < untilMs && $0.endMs > fromMs }.map { d -> String in
+            let keys = d.keyframes
+            let first = keys.firstIndex { $0.timeMs >= fromMs }
+            let last = keys.firstIndex { $0.timeMs >= untilMs }
+            let lower = first.map { max(0, $0 - 1) } ?? keys.count - 1
+            let upper = last.map { $0 + 1 } ?? keys.count
+            let slice = lower < upper ? keys[max(lower, 0)..<min(upper, keys.count)].map { k in
+                "[" + [k.timeMs, k.x, k.y, k.width, k.height].map(number).joined(separator: ",") + "]"
+            } : []
+            return "[" + [String(d.sessionIndex), "\"" + d.kind.rawValue + "\"", number(max(d.startMs, fromMs)), number(min(d.endMs, untilMs)),
+                          number(d.videoWidthPx), number(d.videoHeightPx), "[" + slice.joined(separator: ",") + "]"].joined(separator: ",") + "]"
+        }.sorted().joined(separator: "\n")
+    }
+}
+
 /// The scan's results kept in the project (`cache/sensitive-data_v1.json`).
 public struct SensitiveDataScan: Codable, Sendable {
     /// Inputs the detections were found with.

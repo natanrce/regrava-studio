@@ -83,15 +83,16 @@ public final class RenderState: @unchecked Sendable {
     private var snapshot: Snapshot
 
     /// `waitsForStoredMattes`: cutout frames wait for their stored mattes (an export).
-    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false) {
-        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps, outputSize: outputSize, waitsForStoredMattes: waitsForStoredMattes)
+    /// `exportSensitiveData`: an export's covers while the scan still runs.
+    public init(project: Project, cursors: CursorLibrary? = CursorLibrary.arrowOnly(), assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false, exportSensitiveData: ExportSensitiveData? = nil) {
+        snapshot = Self.makeSnapshot(project: project, cursors: cursors, assetsDirectory: assetsDirectory, fps: fps, outputSize: outputSize, waitsForStoredMattes: waitsForStoredMattes, exportSensitiveData: exportSensitiveData)
     }
 
     /// `assetsDirectory` is the project folder (background images). `fps` is the rate frames
     /// are produced at: the editor's playback rate, or the export's. With `outputSize` frames
     /// are drawn at the size they are shown, starting with that one; without it they are
     /// composed at canvas size and scaled.
-    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false) -> Snapshot {
+    public static func makeSnapshot(project: Project, cursors: CursorLibrary?, assetsDirectory: URL? = nil, fps: Double = CameraTrack.previewFps, outputSize: Size2? = nil, waitsForStoredMattes: Bool = false, exportSensitiveData: ExportSensitiveData? = nil) -> Snapshot {
         let faces = project.camera.enableFaceTracking ? assetsDirectory.flatMap(CameraFaces.load(bundle:)) : nil
         let silence = assetsDirectory.flatMap { SilenceAnalyzer.stored(project: project, bundle: $0) } ?? []
         let hovers = assetsDirectory.flatMap(CursorHovers.load(bundle:))
@@ -99,11 +100,13 @@ public final class RenderState: @unchecked Sendable {
         // Captions read the transcript stored beside the project (source time, onset-adjusted).
         let transcript = assetsDirectory.flatMap { SessionTranscript.load(bundle: $0) }
             .map { TranscriptTiming.clientTranscript([(0, $0.transcript)]) } ?? []
-        // Hide sensitive data / Hide faces: the detections the scan has so far (an export waits for the finished scan).
-        let sensitiveData = project.processing.isAutoMasking ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.previewDetections ?? []) : []
+        // Hide sensitive data / Hide faces: the detections the scan has so far (an export
+        // running alongside the scan takes them frame by frame).
+        let sensitiveData = project.processing.isAutoMasking && exportSensitiveData == nil
+            ? (assetsDirectory.flatMap { SensitiveDataScan.load(bundle: $0) }?.previewDetections ?? []) : []
         let layout = track.layout
         let make: @Sendable (Double, Double) -> FrameCompositor = { scale, scaleX in
-            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale, outputScaleX: scaleX, waitsForStoredMattes: waitsForStoredMattes)
+            FrameCompositor(project: project, layout: layout, cursors: cursors, assetsDirectory: assetsDirectory, transcript: transcript, sensitiveData: sensitiveData, fps: fps, outputScale: scale, outputScaleX: scaleX, waitsForStoredMattes: waitsForStoredMattes, exportSensitiveData: exportSensitiveData)
         }
         let scale = outputSize.map { $0.height.rounded() / max(layout.canvas.height, 1) } ?? 1
         let scaleX = outputSize.map { $0.width.rounded() / max(layout.canvas.width, 1) } ?? 1

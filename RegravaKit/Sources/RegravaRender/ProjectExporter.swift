@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import os
 import RegravaCore
 import VideoToolbox
 
@@ -41,18 +42,27 @@ public enum ProjectExporter {
         try CursorHovers(chunks: [.init(startMs: 0, endMs: project.recording.durationMs, result: times)]).save(bundle: bundle)
     }
 
-    /// Hide sensitive data / Hide faces: an export waits for the whole scan, so only final
-    /// detections are drawn (`isSensitiveDataStale` cannot happen then).
-    public static func completeSensitiveDataScan(project: Project, bundle: URL) async throws {
+    /// Hide sensitive data / Hide faces: an export renders while the scan runs, unless the project
+    /// holds the complete result for its inputs. Nil when nothing is to be hidden or the result is
+    /// stored.
+    static func streamingSensitiveData(project: Project, bundle: URL, video: URL, requesterId: String,
+                                       options: SensitiveDataScanner.Options = .init()) -> ExportSensitiveData? {
         let processing = project.processing
-        guard processing.isAutoMasking else { return }
-        if let stored = SensitiveDataScan.load(bundle: bundle), stored.isComplete, stored.matches(processing) { return }
-        let video = bundle.appendingPathComponent(project.recording.videoFileName)
-        guard FileManager.default.fileExists(atPath: video.path) else { return }
-        let detections = try await SensitiveDataScanner.scan(video: video, phrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces, bundle: bundle) { _, _ in }
-        try SensitiveDataScan(customPhrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces, detections: detections,
-                              finalUpToMs: project.recording.durationMs, isComplete: true).save(bundle: bundle)
+        guard processing.isAutoMasking else { return nil }
+        if let stored = SensitiveDataScan.load(bundle: bundle), stored.isComplete, stored.matches(processing) { return nil }
+        guard FileManager.default.fileExists(atPath: video.path) else { return nil }
+        return ExportSensitiveData(project: project, video: video, bundle: bundle, requesterId: requesterId,
+                                   firstSourceMs: project.resolver.playbackToSource(0), options: options)
     }
+
+    /// Keeps the scan's complete result in the project.
+    static func storeSensitiveDataResult(_ detections: [SensitiveDataDetection], project: Project, bundle: URL) {
+        let processing = project.processing
+        try? SensitiveDataScan(customPhrases: processing.sensitiveDataCustomPhrases, detectFaces: processing.autoMaskFaces, detections: detections,
+                               finalUpToMs: project.recording.durationMs, isComplete: true).save(bundle: bundle)
+    }
+
+    private static let log = Logger(subsystem: "com.natanzin.regravastudio", category: "export")
 
     /// Exports and returns the written files (two files for codec "Both").
     @discardableResult
@@ -78,36 +88,67 @@ public enum ProjectExporter {
         to outputURL: URL,
         cursors: CursorLibrary?,
         readsAhead: Bool,
+        sensitiveDataOptions: SensitiveDataScanner.Options = .init(),
+        observeSensitiveData: (@Sendable (ExportSensitiveData) -> Void)? = nil,
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> [URL] {
         let settings = rawSettings.normalized(target: target)
         let outputSize = settings.outputSize(aspectRatio: project.stageAspectRatio)
+        let bundle = videoURL.deletingLastPathComponent()
         // Export frames wait until face data covers them ("tracking face").
-        try await completeFaceTracking(project: project, bundle: videoURL.deletingLastPathComponent())
-        try await completeHoverDetection(project: project, bundle: videoURL.deletingLastPathComponent())
-        try await completeSensitiveDataScan(project: project, bundle: videoURL.deletingLastPathComponent())
+        try await completeFaceTracking(project: project, bundle: bundle)
+        try await completeHoverDetection(project: project, bundle: bundle)
         // And for the microphone's silences when the camera hides during them.
-        try await SilenceAnalyzer.ensure(project: project, bundle: videoURL.deletingLastPathComponent(), recording: videoURL)
-        let state = renderState(project: project, cursors: cursors, bundle: videoURL.deletingLastPathComponent(), settings: settings)
+        try await SilenceAnalyzer.ensure(project: project, bundle: bundle, recording: videoURL)
 
+        // Hide sensitive data / Hide faces: frames are drawn as the scan reaches them.
+        let sensitiveData = streamingSensitiveData(project: project, bundle: bundle, video: bundle.appendingPathComponent(project.recording.videoFileName),
+                                                   requesterId: "export-" + UUID().uuidString, options: sensitiveDataOptions)
+        if let sensitiveData { observeSensitiveData?(sensitiveData) }
+        defer { sensitiveData?.stop() }
+        let files = try await withTaskCancellationHandler {
+            let state = renderState(project: project, cursors: cursors, bundle: bundle, settings: settings, exportSensitiveData: sensitiveData)
+            if let files = try await write(project: project, videoURL: videoURL, settings: settings, outputURL: outputURL, outputSize: outputSize, state: state, readsAhead: readsAhead,
+                                           isStale: { await sensitiveData?.isStale() ?? false }, progress: progress) {
+                if let result = await sensitiveData?.completeResult() { storeSensitiveDataResult(result, project: project, bundle: bundle) }
+                return files
+            }
+            // Drawn from partial results the complete scan changed: rendered again from it.
+            log.warning("The export was rendered with outdated sensitive data covers, rendering it again")
+            if let result = await sensitiveData?.completeResult() { storeSensitiveDataResult(result, project: project, bundle: bundle) }
+            sensitiveData?.stop()
+            let complete = renderState(project: project, cursors: cursors, bundle: bundle, settings: settings)
+            guard let files = try await write(project: project, videoURL: videoURL, settings: settings, outputURL: outputURL, outputSize: outputSize, state: complete,
+                                              readsAhead: readsAhead, isStale: { false }, progress: progress) else { throw ExportError.cancelled }
+            return files
+        } onCancel: {
+            sensitiveData?.stop()
+        }
+        return files
+    }
+
+    /// Writes the format's files; nil (nothing kept in place) when `isStale` says, once every
+    /// frame is written, that the frames must be drawn again.
+    private static func write(project: Project, videoURL: URL, settings: ExportSettings, outputURL: URL, outputSize: Size2, state: RenderState, readsAhead: Bool,
+                              isStale: @escaping @Sendable () async -> Bool, progress: @escaping @Sendable (Double) -> Void) async throws -> [URL]? {
         switch settings.format {
         case .gif:
-            try await writeGIF(project: project, videoURL: videoURL, settings: settings, outputSize: outputSize, state: state, to: outputURL, progress: progress)
+            guard try await writeGIF(project: project, videoURL: videoURL, settings: settings, outputSize: outputSize, state: state, to: outputURL, isStale: isStale, progress: progress) else { return nil }
             return [outputURL]
         case .prores:
-            try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(nil, outputURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, progress: progress)
+            guard try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(nil, outputURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, isStale: isStale, progress: progress) else { return nil }
             return [outputURL]
         case .mp4:
             switch settings.codec {
             case .h264, .h265:
-                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(settings.codec, outputURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, progress: progress)
+                guard try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(settings.codec, outputURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, isStale: isStale, progress: progress) else { return nil }
                 return [outputURL]
             case .both:
                 let hevcURL = outputURL.deletingPathExtension()
                     .appendingPathExtension("hevc")
                     .appendingPathExtension(outputURL.pathExtension)
                 // One render feeds both encoders.
-                try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(.h264, outputURL), (.h265, hevcURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, progress: progress)
+                guard try await writeMovies(project: project, videoURL: videoURL, settings: settings, outputs: [(.h264, outputURL), (.h265, hevcURL)], outputSize: outputSize, state: state, readsAhead: readsAhead, isStale: isStale, progress: progress) else { return nil }
                 return [outputURL, hevcURL]
             }
         }
@@ -116,8 +157,9 @@ public enum ProjectExporter {
     /// What draws the export's frames. Every format is drawn at its output size, so blur,
     /// edges and text land on the pixels that are written.
     /// Cutout frames wait for their stored mattes, so the export is the same whatever the cache held.
-    static func renderState(project: Project, cursors: CursorLibrary?, bundle: URL, settings: ExportSettings) -> RenderState {
-        RenderState(project: project, cursors: cursors, assetsDirectory: bundle, fps: Double(settings.fps), outputSize: settings.outputSize(aspectRatio: project.stageAspectRatio), waitsForStoredMattes: true)
+    static func renderState(project: Project, cursors: CursorLibrary?, bundle: URL, settings: ExportSettings, exportSensitiveData: ExportSensitiveData? = nil) -> RenderState {
+        RenderState(project: project, cursors: cursors, assetsDirectory: bundle, fps: Double(settings.fps), outputSize: settings.outputSize(aspectRatio: project.stageAspectRatio), waitsForStoredMattes: true,
+                    exportSensitiveData: exportSensitiveData)
     }
 
     // MARK: Movie (MP4 / ProRes)
@@ -195,8 +237,9 @@ public enum ProjectExporter {
         outputSize: Size2,
         state: RenderState,
         readsAhead: Bool,
+        isStale: @escaping @Sendable () async -> Bool,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    ) async throws -> Bool {
         let media = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: videoURL.deletingLastPathComponent()))
         let asset = media.asset
         let duration = try await asset.load(.duration)
@@ -337,6 +380,10 @@ public enum ProjectExporter {
             if settings.format == .mp4 { for file in files { try? FileManager.default.removeItem(at: file) } }
             throw ExportError.cannotWrite(failed.writer.error?.localizedDescription ?? "unknown error")
         }
+        if await isStale() {
+            if settings.format == .mp4 { for file in files { try? FileManager.default.removeItem(at: file) } }
+            return false
+        }
         if settings.format == .mp4 {
             do {
                 for (file, output) in zip(files, outputs) {
@@ -352,6 +399,7 @@ public enum ProjectExporter {
             }
         }
         progress(1)
+        return true
     }
 
     /// Where an MP4 is written until the export finishes: a hidden file beside it,
@@ -397,8 +445,9 @@ public enum ProjectExporter {
         outputSize: Size2,
         state: RenderState,
         to outputURL: URL,
+        isStale: @escaping @Sendable () async -> Bool,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    ) async throws -> Bool {
         let asset = try await PlaybackComposition.media(asset: AVURLAsset(url: videoURL), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: videoURL.deletingLastPathComponent())).asset
         let duration = try await asset.load(.duration).seconds
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
@@ -475,16 +524,22 @@ public enum ProjectExporter {
                 }
                 _ = try encoder.finish(endFrameIndex: kept.count)
                 try handle.synchronize()
-                try? FileManager.default.removeItem(at: outputURL)
-                guard rename(partialURL.path, outputURL.path) == 0 else {
-                    throw ExportError.cannotWrite("could not move the GIF to \(outputURL.path)")
-                }
             } catch {
                 try? FileManager.default.removeItem(at: partialURL)
                 throw error
             }
         }
+        if await isStale() {
+            try? FileManager.default.removeItem(at: partialURL)
+            return false
+        }
+        try? FileManager.default.removeItem(at: outputURL)
+        guard rename(partialURL.path, outputURL.path) == 0 else {
+            try? FileManager.default.removeItem(at: partialURL)
+            throw ExportError.cannotWrite("could not move the GIF to \(outputURL.path)")
+        }
         progress(1)
+        return true
     }
 }
 
