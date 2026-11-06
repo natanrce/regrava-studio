@@ -1060,7 +1060,10 @@ final class EditorModel: ObservableObject {
 
     private func manualTick() {
         let now = CACurrentMediaTime()
-        let next = currentTimeMs + (now - manualLast) * 1000 * manualRate
+        let deltaMs = (now - manualLast) * 1000 * manualRate
+        var next = currentTimeMs + deltaMs
+        // The playhead follows the audio being heard.
+        if let heard = audioPlayer.audibleTimeMs { next += PlaybackClockChase.correction(errorMs: heard - next, deltaMs: deltaMs) }
         manualLast = now
         if next < 0 || next > durationMs {
             currentTimeMs = clamp(next, 0, durationMs)
