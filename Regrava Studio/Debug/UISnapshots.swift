@@ -79,6 +79,19 @@ enum UISnapshots {
         recents.reload()
         write(RecentProjectsView(model: recents, close: {}).background(Color(hex: 0x1C1D22)).environment(\.colorScheme, .dark), width: 1440, height: 280, to: directory.appendingPathComponent("recent-projects.png"))
 
+        // A search with no recent match, then the same search across this Mac.
+        let term = ProcessInfo.processInfo.environment["REGRAVA_SNAPSHOT_MAC_SEARCH"] ?? "zqxa"
+        recents.search = term
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        write(RecentProjectsView(model: recents, close: {}).background(Color(hex: 0x1C1D22)).environment(\.colorScheme, .dark), width: 1440, height: 280, to: directory.appendingPathComponent("recent-projects-no-match.png"))
+        recents.isMacSearching = true
+        let deadline = Date().addingTimeInterval(10)
+        while recents.macSearch?.status != .done, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
+        write(RecentProjectsView(model: recents, close: {}).background(Color(hex: 0x1C1D22)).environment(\.colorScheme, .dark), width: 1440, height: 280, to: directory.appendingPathComponent("recent-projects-mac-search.png"))
+        let found = recents.macResults.map { "\($0.name)\t\(MacProjectSearch.location(path: $0.url.path))" }.joined(separator: "\n")
+        try? "\(recents.macSearch?.errorMessage ?? "")\n\(found)\n".write(to: directory.appendingPathComponent("recent-projects-mac-search.txt"), atomically: true, encoding: .utf8)
+        recents.search = ""
+
         // Context menu rows with custom views (palette, slider).
         let menu = NativeContextMenu.build([
             [.palette([
