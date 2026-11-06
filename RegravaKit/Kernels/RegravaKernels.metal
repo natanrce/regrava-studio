@@ -58,6 +58,24 @@ float4 casSharpen(sampler image, float amount, destination dest) {
 
 // MARK: Camera cutout
 
+/// `prepareInput`: one matte-size pixel of the footage's person window, the mean of a
+/// `taps.x`×`taps.y` box of bilinear reads. `window` = the window's source rect (x, y bottom,
+/// width, height); `size` = matte size. Rows count from the top, as the matte's do.
+float4 cameraMatteGuide(sampler source, float4 window, float2 size, float2 taps, destination dest) {
+    float2 d = dest.coord();
+    float2 gid = float2(floor(d.x), floor(size.y - d.y));
+    float3 sum = float3(0.0);
+    for (float ty = 0.0; ty < taps.y; ty += 1.0) {
+        for (float tx = 0.0; tx < taps.x; tx += 1.0) {
+            float2 sub = (float2(tx, ty) + 0.5) / taps;
+            float2 f = (gid + sub) / size;
+            float2 p = float2(window.x + f.x * window.z, window.y + window.w - f.y * window.w);
+            sum += source.sample(source.transform(p)).rgb;
+        }
+    }
+    return float4(sum / (taps.x * taps.y), 1.0);
+}
+
 static float cutoutInside(float2 p, float4 bounds) {
     return (p.x >= bounds.x && p.y >= bounds.y && p.x <= bounds.x + bounds.z && p.y <= bounds.y + bounds.w) ? 1.0 : 0.0;
 }
