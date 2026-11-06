@@ -33,3 +33,28 @@ public struct AudioPreviewLoop: Hashable, Sendable {
         endFrame = frame(loopEnd)
     }
 }
+
+/// Per-sample gains of an audio change preview: voices crossfade linearly (the newest rises,
+/// the older ones fall) and the whole preview fades in, or out once its hold has passed.
+public enum PreviewGainRamp {
+    /// One sample later: the newest voice gains 1/`crossfadeFrames`, the others lose it.
+    public static func stepVoice(_ gain: Float, isNewest: Bool) -> Float {
+        let step = 1 / Float(AudioPreviewLoop.crossfadeFrames)
+        let falling = gain - step
+        let rising = min(step + gain, 1)
+        return isNewest ? rising : (falling < 0 ? 0 : falling)
+    }
+
+    /// One sample later: up over `fadeInFrames`, or down over `fadeOutFrames` when fading out.
+    public static func stepMaster(_ gain: Float, fadingOut: Bool) -> Float {
+        let next = fadingOut
+            ? -1 / Float(AudioPreviewLoop.fadeOutFrames) + gain
+            : 1 / Float(AudioPreviewLoop.fadeInFrames) + gain
+        return min(next < 0 ? 0 : next, 1)
+    }
+
+    /// The output gain of a sample: the master over the sum of the voice gains.
+    public static func outputScale(master: Float, voiceGainSum: Float) -> Float {
+        master / max(voiceGainSum, Float.leastNormalMagnitude)
+    }
+}
