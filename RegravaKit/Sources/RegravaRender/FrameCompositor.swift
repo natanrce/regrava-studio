@@ -51,6 +51,10 @@ public final class FrameCompositor: @unchecked Sendable {
     private let videoSize: Size2
     /// The colour grade already mixed with the identity by `lutIntensity`.
     private let cameraGrade: (data: Data, size: Int)?
+    /// The last screen and camera frames read, so a frame drawn again from the same buffer reads
+    /// the same image and the passes over it hash the same (a buffer written since hashes anew).
+    private let framesLock = NSLock()
+    private var lastFrames: [CIImage] = []
 
     /// `assetsDirectory` is the project folder (for background images).
     /// `outputScale` draws the frame that many times taller than `layout`'s canvas and
@@ -101,6 +105,19 @@ public final class FrameCompositor: @unchecked Sendable {
 
     private var canvasHeight: Double { layout.canvas.height }
 
+    /// `screen` and `camera`, or the images read last for the same buffers.
+    private func sameFrames(_ screen: CIImage, _ camera: CIImage?) -> (CIImage, CIImage?) {
+        framesLock.lock()
+        defer { framesLock.unlock() }
+        func same(_ image: CIImage) -> CIImage {
+            guard let buffer = image.pixelBuffer else { return image }
+            return lastFrames.first { $0.pixelBuffer === buffer && $0.extent == image.extent } ?? image
+        }
+        let frames = (same(screen), camera.map(same))
+        lastFrames = [frames.0] + (frames.1.map { [$0] } ?? [])
+        return frames
+    }
+
     /// Only the crop of the recording, moved to the origin (Core Image is y-up).
     private func cropped(_ image: CIImage) -> CIImage {
         guard screenCrop01 != Rect2(x: 0, y: 0, width: 1, height: 1) else { return image }
@@ -132,6 +149,7 @@ public final class FrameCompositor: @unchecked Sendable {
     public func compose(source: CIImage, camera cameraImage: CIImage? = nil, cameraTimeMs: Double? = nil, frame canvasFrame: CameraFrame, quality: RenderQuality = .export, rasterScale: CGSize = CGSize(width: 1, height: 1)) -> CIImage {
         // The outputs kept from earlier frames stay while frames are drawn.
         RenderPass.keepAlive.markUsed()
+        let (source, cameraImage) = sameFrames(source, cameraImage)
         let frame = canvasFrame.scaled(x: outputScaleX, y: outputScale)
         let canvasRect = ciRect(layout.canvas)
         // The recording is debanded first (`screenDeband`), on the whole frame.

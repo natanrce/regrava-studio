@@ -102,6 +102,34 @@ struct PassCacheTests {
         }
     }
 
+    @Test func aFrameDrawnAgainFromTheSameBufferIsServed() throws {
+        let project = try PassInputsTests.project()
+        let track = CameraTrack(project: project, fps: 60)
+        let size = CGSize(width: 1280, height: 720)
+        let compositor = FrameCompositor(project: project, layout: track.layout, cursors: CursorLibrary.arrowOnly(), fps: 60, outputScale: size.width / track.layout.canvas.width)
+        let screen = PassInputsTests.buffer(3024, 1964, seed: 0)
+        let fresh = CIContext(options: [.cacheIntermediates: false])
+        let frame = track.frame(at: 1500)
+        func render(_ context: CIContext) throws -> (passes: Int, pixels: [UInt8]) {
+            let output = PassInputsTests.buffer(Int(size.width), Int(size.height), seed: 0)
+            // Each draw wraps the buffer anew, as the player and the scrubber do.
+            let image = compositor.compose(source: CIImage(cvPixelBuffer: screen), frame: frame, quality: .pausedHigh).cropped(to: CGRect(origin: .zero, size: size))
+            let destination = CIRenderDestination(pixelBuffer: output)
+            destination.colorSpace = CanvasCompositor.sRGB
+            let passes = try context.startTask(toRender: image, from: CGRect(origin: .zero, size: size), to: destination, at: .zero).waitUntilCompleted().passCount
+            return (passes, Self.pixels(output))
+        }
+        let first = try render(CanvasCompositor.context)
+        let again = try render(CanvasCompositor.context)
+        #expect(again.passes < first.passes, "served: \(again.passes) passes, drawn: \(first.passes)")
+        #expect(again.pixels == first.pixels)
+        // The buffer holds another frame now.
+        CanvasCompositor.context.render(CIFilter(name: "CIRandomGenerator")!.outputImage!.transformed(by: CGAffineTransform(translationX: 77, y: 77)).cropped(to: CGRect(x: 0, y: 0, width: 3024, height: 1964)), to: screen)
+        let next = try render(CanvasCompositor.context)
+        #expect(next.pixels != first.pixels)
+        #expect(next.pixels == (try render(fresh)).pixels)
+    }
+
     /// A clock and a timer queue driven by hand.
     private final class Clock: @unchecked Sendable {
         var now: TimeInterval = 100

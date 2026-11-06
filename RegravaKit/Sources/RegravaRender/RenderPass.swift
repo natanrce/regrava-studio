@@ -18,9 +18,10 @@ import Foundation
 /// parameters, the region drawn and the hashes of its inputs, so a change anywhere below a pass
 /// changes its hash too. A frame whose pass hashes the same is served the kept output instead of
 /// drawing it again. A video frame hashes by its buffer and what the buffer holds: a playing
-/// frame draws the passes reading it anew, and passes that read no video (the background,
-/// captions, shortcuts) are drawn once while they stay the same. Kept outputs are released
-/// once no frame has been drawn for `KeepAlive.idleRelease` seconds.
+/// frame draws the passes reading it anew, a frame drawn again from the same buffer (a paused
+/// redraw) is served them, and passes that read no video (the background, captions,
+/// shortcuts) are drawn once while they stay the same. Kept outputs are released once no frame
+/// has been drawn for `KeepAlive.idleRelease` seconds.
 enum RenderPass {
     /// Textures one program of the frame may read; 3 below the limit, for the reads Core
     /// Image adds itself.
