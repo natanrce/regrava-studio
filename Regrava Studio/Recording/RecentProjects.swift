@@ -67,9 +67,49 @@ enum ProjectPreview {
 
 @MainActor
 final class RecentProjectsModel: ObservableObject {
-    @Published var search = ""
+    @Published var search = "" {
+        didSet {
+            guard search != oldValue else { return }
+            let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Clearing the field ends the Mac-wide search; its term follows typing after 400 ms.
+            if term.isEmpty { isMacSearching = false }
+            debounce?.invalidate()
+            debounce = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.debouncedSearch = term }
+            }
+        }
+    }
     @Published private(set) var projects: [RecentProject] = []
     @Published var openingURL: URL?
+    /// "Search your Mac for projects" was chosen for the current search.
+    @Published var isMacSearching = false { didSet { updateMacSearch() } }
+    @Published private(set) var debouncedSearch = "" { didSet { updateMacSearch() } }
+    @Published private(set) var macSearch: MacProjectSearchSession?
+    private var debounce: Timer?
+    private var macSearchChange: AnyCancellable?
+
+    /// The "On your Mac" section shows while a Mac-wide search is on and the term is not empty.
+    var showsMacSearch: Bool { isMacSearching && !debouncedSearch.isEmpty }
+
+    func searchMac() {
+        MacProjectSearchSession.requestFolderAccess()
+        isMacSearching = true
+    }
+
+    /// Mac-wide matches, leaving out every project already in the recent list.
+    var macResults: [RecentProject] {
+        let recent = Set(projects.map(\.url.path))
+        return (macSearch?.results ?? []).filter { !recent.contains($0.url.path) }
+    }
+
+    /// One search per term; a new term or a hidden section stops the running one.
+    private func updateMacSearch() {
+        let term = showsMacSearch ? debouncedSearch : nil
+        guard macSearch?.term != term else { return }
+        macSearch?.cancel()
+        macSearch = term.map { MacProjectSearchSession(term: $0) }
+        macSearchChange = macSearch?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
 
     func reload() {
         let opened = UserDefaults.standard.dictionary(forKey: "recentProjectsOpenedAt") as? [String: Double] ?? [:]
@@ -129,7 +169,10 @@ final class RecentProjectsPanel: NSPanel {
 
     override func cancelOperation(_ sender: Any?) { closeStrip() }
 
-    func closeStrip() { onClose() }
+    func closeStrip() {
+        model.isMacSearching = false
+        onClose()
+    }
 
     func present() {
         // The list is read when the strip appears; while shown, only removals change it.
@@ -178,41 +221,100 @@ struct RecentProjectsView: View {
                 }
             }
             .padding(EdgeInsets(top: 20, leading: 24, bottom: 16, trailing: 24))
-            body(for: model.filtered)
-                .padding(EdgeInsets(top: 4, leading: 24, bottom: 20, trailing: 24))
-            Spacer(minLength: 0)
+            // The list area scrolls vertically once the Mac results are added below.
+            ScrollView(.vertical) {
+                body(for: model.filtered)
+                    .padding(EdgeInsets(top: 4, leading: 24, bottom: 20, trailing: 24))
+            }
         }
         .foregroundStyle(Theme.Colors.text)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private var term: String { model.search.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     @ViewBuilder
     private func body(for projects: [RecentProject]) -> some View {
-        if model.projects.isEmpty {
-            empty(icon: "video.fill", title: "No projects yet", text: "Projects you record or open will show up here.")
-        } else if projects.isEmpty {
-            empty(icon: "magnifyingglass", title: "No recent projects match “\(model.search)”", text: nil)
-        } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(projects) { project in
-                        RecentProjectCard(project: project, isOpening: model.openingURL == project.url, isDimmed: model.openingURL != nil && model.openingURL != project.url) {
-                            open(project)
-                        } onRemove: {
-                            model.remove(project)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            if !projects.isEmpty {
+                cards(projects, variant: .recent)
+            } else if term.isEmpty {
+                empty(icon: "video.fill", title: "No projects yet", text: "Projects you record or open will show up here.")
+            } else if !model.isMacSearching {
+                empty(icon: "magnifyingglass", title: "No recent projects match “\(term)”", text: "Searches this Mac for Regrava Studio projects. macOS may ask for access to your Documents, Desktop and Downloads folders.") {
+                    RSButton(title: "Search your Mac for projects", icon: "magnifyingglass", kind: .secondary) { model.searchMac() }
                 }
-                .padding(.horizontal, 24)
             }
-            .padding(.horizontal, -24)
+            if model.showsMacSearch {
+                macSection.padding(.top, projects.isEmpty ? 0 : 24)
+            }
         }
     }
 
+    private func cards(_ projects: [RecentProject], variant: RecentProjectCard.Variant) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(projects) { project in
+                    RecentProjectCard(project: project, variant: variant, isOpening: model.openingURL == project.url, isDimmed: model.openingURL != nil && model.openingURL != project.url) {
+                        open(project)
+                    } onRemove: {
+                        model.remove(project)
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+        .padding(.horizontal, -24)
+    }
+
+    /// "On your Mac": progress or the match count, an error, the matches, or the empty note.
+    private var macSection: some View {
+        let session = model.macSearch
+        let isSearching = session == nil || session?.status == .searching
+        let results = model.macResults
+        let errorMessage = session?.errorMessage
+        return VStack(alignment: .leading, spacing: Theme.gap(1.5)) {
+            HStack(spacing: Theme.gap()) {
+                Text("On your Mac").font(Theme.Typo.copy.weight(.medium))
+                Spacer(minLength: 0)
+                HStack(spacing: Theme.gap(0.75)) {
+                    if isSearching {
+                        ProgressView().controlSize(.mini)
+                        Text("Searching…")
+                    } else {
+                        Text(MacProjectSearch.foundLabel(count: results.count))
+                    }
+                }
+                .font(Theme.Typo.label.monospacedDigit())
+                .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+            }
+            .frame(height: 24)
+            if let errorMessage {
+                Text(errorMessage).font(Theme.Typo.label).foregroundStyle(Theme.Colors.danger)
+            }
+            if !results.isEmpty {
+                cards(results, variant: .macSearch)
+            }
+            if !isSearching, results.isEmpty, errorMessage == nil {
+                Text("No projects matching “\(model.debouncedSearch)” were found on this Mac.")
+                    .font(Theme.Typo.copy)
+                    .foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                    .padding(EdgeInsets(top: 8, leading: 0, bottom: 24, trailing: 0))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func empty(icon: String, title: String, text: String?) -> some View {
+        empty(icon: icon, title: title, text: text) { EmptyView() }
+    }
+
+    /// Icon, title, an optional action, then the note.
+    private func empty<Action: View>(icon: String, title: String, text: String?, @ViewBuilder action: () -> Action) -> some View {
         VStack(spacing: 11.3) {
             Image(systemName: icon).font(.system(size: 34)).foregroundStyle(Theme.Colors.tertiary)
             Text(title).font(Theme.Typo.copy.weight(.medium))
+            action()
             if let text {
                 Text(text).font(Theme.Typo.label).foregroundStyle(Color.white.opacity(Theme.secondaryOpacity)).frame(maxWidth: 340).multilineTextAlignment(.center)
             }
@@ -233,9 +335,12 @@ struct RecentProjectsView: View {
 }
 
 /// Card: a 16:10 thumbnail with a 1 px border (primary at 0.75 on hover, 0.985 when
-/// pressed), then the name and when it was last opened.
+/// pressed), then the name and when it was last opened, or, for a Mac-wide match, its folder.
 private struct RecentProjectCard: View {
+    enum Variant { case recent, macSearch }
+
     var project: RecentProject
+    var variant: Variant = .recent
     var isOpening: Bool
     var isDimmed: Bool
     var action: () -> Void
@@ -259,10 +364,18 @@ private struct RecentProjectCard: View {
                             }
                         }
                     }
-                HStack(spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
                     Text(project.name).font(Theme.Typo.copy.weight(.medium)).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
-                    Text(Self.detail(project.lastOpened ?? project.modified)).font(Theme.Typo.copy).foregroundStyle(Color.white.opacity(Theme.secondaryOpacity)).lineLimit(1).fixedSize()
+                    switch variant {
+                    case .recent:
+                        Text(Self.detail(project.lastOpened ?? project.modified)).font(Theme.Typo.copy).foregroundStyle(Color.white.opacity(Theme.secondaryOpacity)).lineLimit(1).fixedSize()
+                    case .macSearch:
+                        // The folder can wrap; it is not cut short.
+                        Text(MacProjectSearch.location(path: project.url.path)).font(Theme.Typo.copy).foregroundStyle(Color.white.opacity(Theme.secondaryOpacity))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
+                    }
                 }
                 .frame(width: 240)
             }
@@ -273,7 +386,7 @@ private struct RecentProjectCard: View {
         .onHover { hovered = $0 }
         .contextMenu {
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([project.url]) }
-            if project.lastOpened != nil { Button("Remove from Recents", action: onRemove) }
+            if variant == .recent, project.lastOpened != nil { Button("Remove from Recents", action: onRemove) }
         }
     }
 
