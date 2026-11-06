@@ -4,56 +4,62 @@ import Testing
 @testable import RegravaCore
 @testable import RegravaRender
 
-/// How far the engine's audio is from the player's picture while both play a project from
-/// the start; runs only with REGRAVA_SYNC_PROJECT set to a project bundle.
+/// How far the engine's audio is from the player's picture over a minute of playback, with
+/// and with the player's rate nudged every tick so the picture follows the audio; runs only with REGRAVA_BENCH=1.
 struct AudioSyncBenchmark {
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["REGRAVA_SYNC_PROJECT"] != nil))
-    func audioAgainstPicture() async throws {
-        let bundle = URL(fileURLWithPath: ProcessInfo.processInfo.environment["REGRAVA_SYNC_PROJECT"]!)
-        let project = try ProjectStore.load(from: bundle)
-        let video = ProjectStore.videoURL(bundle: bundle, project: project)
-        let media = try await PlaybackComposition.media(asset: AVURLAsset(url: video), project: project, assetsDirectory: ProjectStore.assetsURL(bundle: bundle))
-        let item = AVPlayerItem(asset: media.asset)
+    private final class Clocks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var latest: LiveAudioPlayer.Clock?
+        func set(_ clock: LiveAudioPlayer.Clock) { lock.withLock { latest = clock } }
+        func get() -> LiveAudioPlayer.Clock? { lock.withLock { latest } }
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["REGRAVA_BENCH"] == "1"), arguments: [false, true])
+    @MainActor
+    func audioAgainstPicture(chasing: Bool) async throws {
+        let seconds = Double(ProcessInfo.processInfo.environment["REGRAVA_SYNC_SECONDS"] ?? "") ?? 60
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("sync-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000)!
+        chunk.frameLength = 48_000
+        for _ in 0..<Int(seconds + 5) { try file.write(from: chunk) }
+
+        let item = AVPlayerItem(asset: AVURLAsset(url: url))
         let player = AVPlayer(playerItem: item)
         player.volume = 0
         while item.status != .readyToPlay { try await Task.sleep(for: .milliseconds(20)) }
-        await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-
-        final class Clocks: @unchecked Sendable {
-            let lock = NSLock()
-            var latest: LiveAudioPlayer.Clock?
-        }
         let clocks = Clocks()
-        let engine = LiveAudioPlayer(onClock: { clock in
-            clocks.lock.lock()
-            clocks.latest = clock
-            clocks.lock.unlock()
-        }, onFailure: { print("audio failure:", $0) })
+        let engine = LiveAudioPlayer(onClock: { clocks.set($0) }, onFailure: { print("audio failure:", $0) })
         defer { engine.close() }
-        var recorded: [AudioSource: AudioMixSource] = [:]
-        for (index, source) in project.recording.audioSources.enumerated() { recorded[source] = AudioMixSource(path: video.path, audioTrack: index) }
-        let segments = project.audioMixSegments(sources: AudioMixSources(recorded: recorded, clickSounds: nil, backgroundAudio: nil))
-        engine.setSegments(try engine.catalog.layout(segments: segments))
+        engine.setSegments(try engine.catalog.layout(segments: [AudioMixSegment(source: AudioMixSource(path: url.path), track: .microphone, fromMs: 0, insertAtMs: 0, speed: 1, volume: 1)]))
         try await Task.sleep(for: .milliseconds(300))
 
-        // As the editor starts playing: the player's rate, then the transport.
+        func heard(at now: Double) -> Double? {
+            guard let clock = clocks.get(), now - clock.hostTimeMs <= 500 else { return nil }
+            return clock.timeMs + (now - clock.hostTimeMs) * clock.rate
+        }
         player.rate = 1
         engine.setTransport(LiveAudioPlayer.Transport(isPlaying: true, timeMs: 0, rate: 1, generation: 1))
-        var offsets: [Double] = []
-        for _ in 0..<80 {
-            try await Task.sleep(for: .milliseconds(50))
-            clocks.lock.lock()
-            let clock = clocks.latest
-            clocks.lock.unlock()
-            guard let clock, let timebase = item.timebase else { continue }
-            let before = HostClock.nowMs
-            let picture = CMTimebaseGetTime(timebase).seconds * 1000
-            let now = (before + HostClock.nowMs) / 2
-            let heard = clock.timeMs + (now - clock.hostTimeMs) * clock.rate
-            if picture > 0 { offsets.append(heard - picture) }
+        var samples: [(t: Double, offset: Double)] = []
+        let start = HostClock.nowMs
+        var last = start
+        while HostClock.nowMs - start < seconds * 1000 {
+            try await Task.sleep(for: .milliseconds(16))
+            let now = HostClock.nowMs
+            let picture = CMTimebaseGetTime(item.timebase!).seconds * 1000
+            guard let audio = heard(at: now) else { last = now; continue }
+
+            if picture > 0 { samples.append((now - start, audio - picture)) }
+            if chasing {
+                player.rate = Float(PlaybackClockChase.playerRate(rate: 1, deltaMs: now - last, errorMs: audio - picture))
+            }
+            last = now
         }
         player.pause()
-        let sorted = offsets.sorted()
-        print("audio − picture (ms): n=\(offsets.count) median=\(sorted[sorted.count / 2]) min=\(sorted.first!) max=\(sorted.last!) first=\(offsets.prefix(5)) last=\(offsets.suffix(5))")
+        func median(_ part: ArraySlice<(t: Double, offset: Double)>) -> Double { part.map(\.offset).sorted()[part.count / 2] }
+        let tenth = max(samples.count / 10, 1)
+        print("chasing=\(chasing) audio − picture (ms) over \(Int(seconds)) s: first 10% median=\(median(samples.prefix(tenth))) last 10% median=\(median(samples.suffix(tenth))) min=\(samples.map(\.offset).min()!) max=\(samples.map(\.offset).max()!)")
     }
 }
