@@ -156,17 +156,18 @@ public final class FrameCompositor: @unchecked Sendable {
         let trailStart = strength > 0 ? now.lerp(to: frame.previousScreenRect ?? now, strength) : now
         let isStatic = strength == 0 || now.isClose(to: trailStart, tolerance: 1)
 
-        var output = base
+        // Bottom first: the shadow, the screen, the cursor and the camera.
+        var layers: [CIImage] = []
         if style.shadow.intensity > 0 {
             // One shadow at the trail's middle, under the inset and the content.
             let middle = isStatic ? now : trailStart.lerp(to: now, 0.5)
             let reference = frame.screenReferenceWidth > 0 ? frame.screenReferenceWidth : layout.restScreen.width
             // A device body casts it with its own smoothing, shrunk by its inset.
             let body = deviceFrame?.device
-            output = partShadow(
+            layers.append(partShadow(
                 ciRect(middle), radius: screenRadius(middle, frame: frame), zoomFactor: middle.width / max(reference, 1), perspective: perspective,
                 smoothing: body?.roundness ?? 1, inset: (body?.bodyInset ?? 0) * pointsToCanvas(middle)
-            ).composited(over: output)
+            ))
         }
         var screenImage = screenLayer(src, rect: now, frame: frame)
         if !isStatic {
@@ -178,7 +179,7 @@ public final class FrameCompositor: @unchecked Sendable {
                 screenImage = blurred
             }
         }
-        output = Self.dithered(screenImage).composited(over: output)
+        layers.append(Self.dithered(screenImage))
 
         let videoToCanvas = frame.screenRect.width / max(layout.videoSize.width, 1)
 
@@ -215,14 +216,14 @@ public final class FrameCompositor: @unchecked Sendable {
                     cursorImage = blurred
                 }
             }
-            output = cursorImage.composited(over: output)
+            layers.append(cursorImage)
         }
 
         // The webcam is drawn above everything.
         if let camera, let rect = frame.cameraRect, frame.cameraOpacity > 0.001, rect.width > 0.5, rect.height > 0.5 {
-            output = cameraLayer(camera.image, rect: rect, frame: frame, quality: quality, perspective: perspective).composited(over: output)
+            layers.append(cameraLayer(camera.image, rect: rect, frame: frame, quality: quality, perspective: perspective))
         }
-        return output
+        return RenderPass.stack(layers, over: base)
     }
 
     // MARK: Device frame
