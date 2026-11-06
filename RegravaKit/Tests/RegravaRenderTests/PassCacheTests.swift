@@ -7,7 +7,7 @@ import Testing
 
 /// Pass outputs kept between frames: served when a pass hashes the same, drawn again when
 /// anything it reads changed, released after the frames stop.
-struct PassCacheTests {
+@Suite(.serialized) struct PassCacheTests {
     private static let bounds = CGRect(x: 0, y: 0, width: 640, height: 360)
 
     private static func buffer() -> CVPixelBuffer {
@@ -31,7 +31,11 @@ struct PassCacheTests {
     }
 
     /// `image` drawn by the frame context; the passes it ran.
-    private static func draw(_ image: CIImage, to output: CVPixelBuffer, context: CIContext = CanvasCompositor.context) throws -> Int {
+    /// A context of the suite's own with the frame context's options, so other suites rendering
+    /// at the same time (or clearing the shared caches) can't change what is served.
+    private static let context = CIContext(options: [.cacheIntermediates: true])
+
+    private static func draw(_ image: CIImage, to output: CVPixelBuffer, context: CIContext = Self.context) throws -> Int {
         let destination = CIRenderDestination(pixelBuffer: output)
         destination.colorSpace = CanvasCompositor.sRGB
         return try context.startTask(toRender: image, from: bounds, to: destination, at: .zero).waitUntilCompleted().passCount
