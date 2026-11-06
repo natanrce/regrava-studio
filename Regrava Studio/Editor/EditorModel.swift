@@ -257,14 +257,16 @@ final class EditorModel: ObservableObject {
             }
             .removeDuplicates()
             .debounce(for: .milliseconds(Self.analysisDemandDelayMs), scheduler: RunLoop.main)
-            .sink { [weak self] in self?.analysisDemandMs = $0 }
+            .sink { [weak self] in self?.setAnalysisDemand($0) }
             .store(in: &cancellables)
     }
 
     static let analysisDemandDelayMs = 500
-    /// The source moment the editor looks at: a sensitive data scan starts with the chunks
-    /// nearest it.
-    private var analysisDemandMs: Double?
+    /// The source moment the editor looks at (preview priority): a sensitive data scan starts
+    /// with the chunks nearest it.
+    private func setAnalysisDemand(_ sourceMs: Double?) {
+        SensitiveDataScans.setDemand(bundle: bundleURL, requesterId: "editor", recordingTimeMs: sourceMs, priority: .preview)
+    }
 
     /// Playback duration (clips sped up, slowed down or cut).
     var durationMs: Double { resolver.playbackDurationMs }
@@ -809,7 +811,7 @@ final class EditorModel: ObservableObject {
         }
         // Until the new scan has results, the last one finished in this session stays shown.
         let previous = lastSensitiveDataResult ?? []
-        let phrases = processing.sensitiveDataCustomPhrases, faces = processing.autoMaskFaces, demandMs = analysisDemandMs
+        let phrases = processing.sensitiveDataCustomPhrases, faces = processing.autoMaskFaces
         try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: [], finalUpToMs: 0, isComplete: false,
                                previousDetections: previous).save(bundle: bundle)
         scheduleRefresh()
@@ -818,7 +820,7 @@ final class EditorModel: ObservableObject {
         tasks.register("sensitive-data", name: "Detecting sensitive data", showAfterMs: 500, progress01: 0)
         sensitiveDataTask = Task.detached(priority: .utility) { [weak self] in
             defer { Task { @MainActor [weak self] in self?.tasks.finish("sensitive-data") } }
-            let detections = try? await SensitiveDataScanner.scan(video: video, phrases: phrases, detectFaces: faces, bundle: bundle, demandMs: demandMs, onPartialResult: { partial in
+            let detections = try? await SensitiveDataScans.scan(video: video, phrases: phrases, detectFaces: faces, bundle: bundle, onPartialResult: { partial in
                 // Partial results show as they come (`project.sensitiveDataPartial`), with those
                 // scanned ahead and the last finished result.
                 try? SensitiveDataScan(customPhrases: phrases, detectFaces: faces, detections: partial.detections, finalUpToMs: partial.finalUpToMs,
@@ -2074,6 +2076,7 @@ final class EditorModel: ObservableObject {
             try? transcript.save(bundle: bundleURL)
         }
         sensitiveDataTask?.cancel()
+        setAnalysisDemand(nil)
         cameraMatteTask?.cancel()
         cameraMatting?.stop()
         cameraMatting = nil
