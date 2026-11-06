@@ -38,8 +38,9 @@ public enum ProjectExporter {
               CursorHovers.load(bundle: bundle)?.covers(durationMs: project.recording.durationMs) != true else { return }
         let video = bundle.appendingPathComponent(project.recording.videoFileName)
         guard FileManager.default.fileExists(atPath: video.path) else { return }
-        let times = try await CursorHoverDetector.detect(video: video, events: project.mouseEvents, pointPixelScale: project.recording.pointPixelScale)
-        try CursorHovers(chunks: [.init(startMs: 0, endMs: project.recording.durationMs, result: times)]).save(bundle: bundle)
+        // Stretches already read are kept; the rest are read from the first frame on.
+        let firstSourceMs = project.resolver.playbackToSource(0)
+        _ = try await CursorHoverDetections.detect(project: project, video: video, bundle: bundle, demandMs: { firstSourceMs })
     }
 
     /// Hide sensitive data / Hide faces: an export renders while the scan runs, unless the project

@@ -897,16 +897,18 @@ final class EditorModel: ObservableObject {
     private var hoverDetectionTask: Task<Void, Never>?
 
     /// The cursor follows hovers once the recording's hover changes are found
-    /// (`project.cursorHoverChanges`); runs in the background and redraws when done.
+    /// (`project.cursorHoverChanges`); runs in the background, stretch by stretch from the
+    /// playhead, and redraws as each stretch is found. Stretches already found are kept.
     private func updateHoverDetection() {
         let project = self.project
         guard project.cursor.followRecordedPositionOnHover, project.animation.mouseSpring != nil, hoverDetectionTask == nil,
               CursorHovers.load(bundle: bundleURL)?.covers(durationMs: project.recording.durationMs) != true else { return }
         let bundle = bundleURL, video = videoURL
         hoverDetectionTask = Task.detached(priority: .utility) { [weak self] in
-            if let times = try? await CursorHoverDetector.detect(video: video, events: project.mouseEvents, pointPixelScale: project.recording.pointPixelScale) {
-                try? CursorHovers(chunks: [.init(startMs: 0, endMs: project.recording.durationMs, result: times)]).save(bundle: bundle)
-            }
+            _ = try? await CursorHoverDetections.detect(
+                project: project, video: video, bundle: bundle,
+                demandMs: { [weak self] in await MainActor.run { self?.currentSourceTimeMs } },
+                onStretch: { [weak self] _ in await MainActor.run { self?.scheduleRefresh() } })
             await MainActor.run { [weak self] in
                 self?.hoverDetectionTask = nil
                 self?.scheduleRefresh()
