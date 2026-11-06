@@ -28,6 +28,9 @@ public enum CursorHoverDetector {
         var clickBeforeMs = 300.0
         var clickAfterMs = 80.0
         var spanJoinGapMs = 1000.0
+        /// A stretch also reads the movement this long before it, so it finds what a read of
+        /// the whole session finds.
+        var stretchLeadInMs = 2000.0
     }
 
     /// A decoded frame: 8-bit luma and interleaved half-size chroma (`YCbCrFrame`).
@@ -54,12 +57,19 @@ public enum CursorHoverDetector {
         }
     }
 
-    public static func detect(video: URL, events: [MouseEvent], pointPixelScale: Double, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [Double] {
+    /// `rangeMs`: only the changes within `fromMs..<toMs` (nil: the whole recording). A range
+    /// reads the movement from `stretchLeadInMs` before it, so the stretches of a recording
+    /// find what one read of all of it does.
+    public static func detect(video: URL, events: [MouseEvent], pointPixelScale: Double, rangeMs: Range<Double>? = nil, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> [Double] {
         let settings = Settings()
         let moves = events.filter { $0.kind == .move }.sorted { $0.timeMs < $1.timeMs }
         let clicks = events.filter { $0.kind == .down || $0.kind == .up }.map(\.timeMs).sorted()
         guard !moves.isEmpty else { return [] }
+        let lower = rangeMs.map { $0.lowerBound - settings.stretchLeadInMs } ?? -.infinity
+        let upper = rangeMs?.upperBound ?? .infinity
         let spans = movementSpans(moves, joinGapMs: settings.spanJoinGapMs, tailMs: settings.freeMovementWindowMs)
+            .map { (max($0.0, lower), min($0.1, upper)) }
+            .filter { $0.0 <= $0.1 }
         guard !spans.isEmpty else { return [] }
 
         let asset = AVURLAsset(url: video)
@@ -117,7 +127,7 @@ public enum CursorHoverDetector {
                 processed += end - start
                 progress(min(1, processed / total))
             }
-            return changes.sorted()
+            return changes.filter { rangeMs?.contains($0) ?? true }.sorted()
         }
     }
 
@@ -291,5 +301,105 @@ public enum CursorHoverDetector {
             s += k
         }
         return settings.scrollExplainsRatio * Double(base) > Double(best)
+    }
+}
+
+public extension CursorHoverDetector {
+    /// Reads the recording's stretches that are not stored yet, `concurrentStretches` at a time,
+    /// the one nearest `demandMs` first (asked again each time one starts). Each stretch is kept
+    /// as soon as it is read and passed to `onStretch` with every stretch finished so far; the
+    /// whole result is kept once all are. Cancelling stops the stretches being read and keeps
+    /// the finished ones, so the next detection resumes there.
+    static func detectStretches(
+        video: URL, events: [MouseEvent], pointPixelScale: Double, durationMs: Double, bundle: URL,
+        demandMs: @escaping @Sendable () async -> Double? = { nil },
+        onStretch: @escaping @Sendable (CursorHovers) async -> Void = { _ in }
+    ) async throws -> CursorHovers {
+        let grid = CursorHovers.stretches(durationMs: durationMs)
+        var results: [CursorHovers.Stretch: [Double]] = [:]
+        for stretch in grid { results[stretch] = CursorHovers.loadStretch(bundle: bundle, stretch) }
+        var pending = grid.filter { results[$0] == nil }
+        func finished() -> CursorHovers {
+            CursorHovers(chunks: grid.compactMap { s in results[s].map { .init(sessionIndex: s.sessionIndex, startMs: s.startMs, endMs: s.endMs, result: $0) } })
+        }
+        try await withThrowingTaskGroup(of: (CursorHovers.Stretch, [Double]).self) { group in
+            var running = 0
+            while true {
+                while running < CursorHovers.concurrentStretches, !pending.isEmpty {
+                    try Task.checkCancellation()
+                    let next = CursorHovers.scheduled(pending, demandMs: await demandMs())[0]
+                    pending.removeAll { $0 == next }
+                    group.addTask {
+                        (next, try await detect(video: video, events: events, pointPixelScale: pointPixelScale,
+                                                rangeMs: next.startMs..<max(next.endMs, next.startMs)))
+                    }
+                    running += 1
+                }
+                guard let (stretch, times) = try await group.next() else { break }
+                running -= 1
+                try CursorHovers.saveStretch(times, bundle: bundle, stretch)
+                results[stretch] = times
+                await onStretch(finished())
+            }
+        }
+        let complete = finished()
+        try complete.save(bundle: bundle)
+        return complete
+    }
+}
+
+/// The hover detection of a project runs once at a time, whoever asks for it (the editor, an
+/// export), and goes on while anyone waits for it or not until it finishes. Each caller sees
+/// the stretches as they finish; the stretches are read nearest the latest caller's demand.
+public enum CursorHoverDetections {
+    private final class Run: @unchecked Sendable {
+        var task: Task<CursorHovers, Error>?
+        var observers: [UUID: @Sendable (CursorHovers) async -> Void] = [:]
+        var demands: [(UUID, @Sendable () async -> Double?)] = []
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var runs: [String: Run] = [:]
+
+    /// Joins the project's running detection or starts it, and waits for the whole result. The
+    /// detection is not cancelled with the caller.
+    public static func detect(
+        project: Project, video: URL, bundle: URL,
+        demandMs: (@Sendable () async -> Double?)? = nil,
+        onStretch: (@Sendable (CursorHovers) async -> Void)? = nil
+    ) async throws -> CursorHovers {
+        let key = bundle.standardizedFileURL.path
+        let id = UUID()
+        let task: Task<CursorHovers, Error> = lock.withLock {
+            let run = runs[key] ?? Run()
+            if let onStretch { run.observers[id] = onStretch }
+            if let demandMs { run.demands.append((id, demandMs)) }
+            if let task = run.task { return task }
+            let events = project.mouseEvents, scale = project.recording.pointPixelScale, duration = project.recording.durationMs
+            let task = Task.detached(priority: .utility) { () throws -> CursorHovers in
+                defer { lock.withLock { runs[key] = nil } }
+                return try await CursorHoverDetector.detectStretches(
+                    video: video, events: events, pointPixelScale: scale, durationMs: duration, bundle: bundle,
+                    demandMs: {
+                        let demand = lock.withLock { run.demands.last?.1 }
+                        return await demand?()
+                    },
+                    onStretch: { hovers in
+                        let observers = lock.withLock { Array(run.observers.values) }
+                        for observer in observers { await observer(hovers) }
+                    })
+            }
+            run.task = task
+            runs[key] = run
+            return task
+        }
+        defer {
+            lock.withLock {
+                guard let run = runs[key] else { return }
+                run.observers[id] = nil
+                run.demands.removeAll { $0.0 == id }
+            }
+        }
+        return try await task.value
     }
 }
