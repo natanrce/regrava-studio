@@ -416,6 +416,7 @@ private struct PlaybackBar: View {
 
                 HStack(spacing: Theme.gap(1)) {
                     Spacer(minLength: 0)
+                    AudioScrubberToggle()
                     Rectangle().fill(Theme.Colors.backgroundAccent).frame(width: 1, height: 24)
                     SpeedButton(editor: editor)
                     if editor.layoutType.showsTimeline {
@@ -437,6 +438,21 @@ private struct PlaybackBar: View {
         }
         let seconds = Int((ms / 1000).rounded(.down))
         return "Timeline zoom — \(seconds) \(seconds == 1 ? "second" : "seconds") visible"
+    }
+}
+
+/// Turns hearing the audio while scrubbing on and off (`playbackAudioScrubber`).
+private struct AudioScrubberToggle: View {
+    @ObservedObject private var preferences = Preferences.shared
+
+    var body: some View {
+        let isOn = preferences.playbackAudioScrubber
+        RSIconButton(
+            icon: "waveform.badge.magnifyingglass", kind: isOn ? .subtleBg : .transparent, size: .toolbar,
+            tooltip: isOn ? "Disable audio scrubber" : "Enable audio scrubber (experimental)"
+        ) {
+            preferences.playbackAudioScrubber.toggle()
+        }
     }
 }
 
