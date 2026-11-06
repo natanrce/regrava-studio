@@ -13,6 +13,13 @@ import Foundation
 ///
 /// So every layer is cleared outside its extent where it is read, and stages that gather many
 /// layers end their pass well before the texture limit.
+///
+/// Every pass's output is kept under the hash of what it was drawn from: its kernels, their
+/// parameters, the region drawn and the hashes of its inputs, so a change anywhere below a pass
+/// changes its hash too. A frame whose pass hashes the same is served the kept output instead of
+/// drawing it again. A video frame hashes by its buffer and what the buffer holds: a playing
+/// frame draws the passes reading it anew, and passes that read no video (the background,
+/// captions, shortcuts) are drawn once while they stay the same.
 enum RenderPass {
     /// Textures one program of the frame may read; 3 below the limit, for the reads Core
     /// Image adds itself.
@@ -31,8 +38,15 @@ enum RenderPass {
     static func ended(_ image: CIImage, rasterScale: CGSize = CGSize(width: 1, height: 1)) -> CIImage {
         guard !image.extent.isInfinite, !image.extent.isEmpty else { return image }
         let scale = CGAffineTransform(scaleX: rasterScale.width, y: rasterScale.height)
-        guard rasterScale != CGSize(width: 1, height: 1) else { return clipped(image).insertingIntermediate(cache: false) }
-        return clipped(image.transformed(by: scale)).insertingIntermediate(cache: false).transformed(by: scale.inverted())
+        guard rasterScale != CGSize(width: 1, height: 1) else { return served(clipped(image)) }
+        return served(clipped(image.transformed(by: scale))).transformed(by: scale.inverted())
+    }
+
+    /// `image` drawn in a pass whose output is kept under its hash, served to a later frame
+    /// drawing the same.
+    static func served(_ image: CIImage) -> CIImage {
+        guard !image.extent.isInfinite, !image.extent.isEmpty else { return image }
+        return image.insertingIntermediate(cache: true)
     }
 
     /// How far past its extent a layer may draw: antialiased edges spill about a pixel.

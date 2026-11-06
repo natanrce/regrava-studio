@@ -348,7 +348,8 @@ extension CanvasInstruction {
 
 /// Renders each frame with Core Image on the GPU (Metal) at the output size (`RenderState`).
 final class CanvasCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
-    static let context = CIContext(options: [.cacheIntermediates: false])
+    /// Keeps pass outputs under their hash between frames (`RenderPass`).
+    static let context = CIContext(options: [.cacheIntermediates: true])
     /// The colour space every composed frame is rendered in.
     static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
