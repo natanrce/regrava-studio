@@ -45,7 +45,10 @@ final class EditorModel: ObservableObject {
     private let preferences = Preferences.shared
 
     @Published private(set) var project: Project {
-        didSet { if project.slices != oldValue.slices { resolver = project.resolver } }
+        didSet {
+            if project.slices != oldValue.slices { resolver = project.resolver }
+            audioPlayer.projectDidChange()
+        }
     }
     /// `project.resolver`, rebuilt only when the clips change (read every frame).
     private(set) var resolver: TimeResolver
@@ -64,15 +67,20 @@ final class EditorModel: ObservableObject {
     @Published private(set) var isPlaying = false {
         didSet {
             guard oldValue != isPlaying else { return }
+            audioPlayer.playbackDidChange()
             followSuspended = false
             updateRenderQuality()
             updatePlainScreen()
         }
     }
     /// `playback.defaultRate`: 0.25…8.
-    @Published var playbackRate: Double = 1
+    @Published var playbackRate: Double = 1 {
+        didSet { audioPlayer.playbackDidChange() }
+    }
     /// J/L speed (`shuttleRate`), cleared by any pause.
-    @Published private(set) var shuttleRate: Double?
+    @Published private(set) var shuttleRate: Double? {
+        didSet { audioPlayer.playbackDidChange() }
+    }
     var effectiveRate: Double { shuttleRate ?? playbackRate }
     /// A wheel scroll during playback stops following the playhead until playback stops.
     var followSuspended = false
@@ -155,8 +163,8 @@ final class EditorModel: ObservableObject {
     let tasks = BackgroundTasks()
     /// Audio waveforms drawn in the clips.
     let waveforms = TimelineWaveforms()
-    /// Plays a volume change while paused.
-    let audioChangePreview = AudioChangePreview()
+    /// The editor's audio: playback, scrubbing and volume change previews.
+    let audioPlayer = ProjectAudioPlayer()
     /// Visible timeline duration (zoom level of the timeline).
     var visibleDurationMs: Double {
         get { viewport.visibleDurationMs }
@@ -286,6 +294,12 @@ final class EditorModel: ObservableObject {
         exports.tasks = tasks
         exports.onWillStart = { [weak self] in self?.cancelSpeechModelRenders() }
         registerMediaKeys()
+        // The mix plays through the audio engine; the player only shows the video.
+        player.volume = 0
+        audioPlayer.start(editor: self)
+        player.publisher(for: \.isMuted)
+            .sink { [weak self] muted in self?.audioPlayer.setMuted(muted) }
+            .store(in: &cancellables)
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self, self.manualTimer == nil else { return }
@@ -592,6 +606,8 @@ final class EditorModel: ObservableObject {
     /// New composition (canvas or preview size changed); keeps the playhead. With
     /// `replacingItem` the player gets a new item, needed when clips change the timing.
     func rebuildComposition(replacingItem: Bool = false) async {
+        // New files (a finished microphone render) can change the mix.
+        audioPlayer.projectDidChange()
         // The new composition carries the current mix.
         audioMixTask?.cancel()
         compositionGeneration += 1
@@ -1063,6 +1079,7 @@ final class EditorModel: ObservableObject {
         if moveHead {
             currentTimeMs = clamped
             updatePlainScreen(redraw: false)
+            if isPlaying { audioPlayer.timeDidSet() } else { audioPlayer.displayedTimeDidChange(clamped) }
         }
         chaseSeek(to: CMTime(seconds: clamped / 1000, preferredTimescale: 600))
     }
@@ -1095,6 +1112,7 @@ final class EditorModel: ObservableObject {
         guard !isPlaying else { return }
         isScrubbing = true
         scrubTimeMs = clamp(timeMs, 0, durationMs)
+        audioPlayer.displayedTimeDidChange(scrubTimeMs)
         if scrubPreview == nil { makeScrubPreview() }
         scrubDisplay.activate()
         scrubPreview?.show(playbackMs: scrubTimeMs)
@@ -1117,6 +1135,7 @@ final class EditorModel: ObservableObject {
     func endScrub() {
         guard isScrubbing else { return }
         isScrubbing = false
+        audioPlayer.displayedTimeDidChange(currentTimeMs)
     }
 
     func step(frames: Int) {
@@ -2069,7 +2088,7 @@ final class EditorModel: ObservableObject {
         }
         scrubPreview?.close()
         scrubPreview = nil
-        audioChangePreview.stop()
+        audioPlayer.close()
         // A pending transcript edit is written right away.
         if transcriptSaveTask != nil, let transcript {
             transcriptSaveTask?.cancel()

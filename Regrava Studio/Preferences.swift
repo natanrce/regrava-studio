@@ -145,6 +145,8 @@ final class Preferences: ObservableObject {
     @Published var hideAudioWaveform: Bool
     /// `playbackLoop` and `alwaysShowTimelineScrollbar`.
     @Published var playbackLoop: Bool
+    /// The playback bar's audio scrubber (`playbackAudioScrubber`).
+    @Published var playbackAudioScrubber: Bool
     @Published var alwaysShowTimelineScrollbar: Bool
     @Published var enableSmoothWaveform: Bool
     /// Options ▸ Advanced ▸ Recording Engine: "auto" (Use Modern Engine If Available) or "modern".
@@ -212,6 +214,7 @@ final class Preferences: ObservableObject {
         showSpeakerNotes = bool("showSpeakerNotes", false)
         hideAudioWaveform = bool("hideAudioWaveform", false)
         playbackLoop = bool("playbackLoop", false)
+        playbackAudioScrubber = bool("playbackAudioScrubber", false)
         alwaysShowTimelineScrollbar = bool("alwaysShowTimelineScrollbar", false)
         enableSmoothWaveform = bool("enableSmoothWaveform", true)
         recordingEngine = store.string(forKey: "recordingUseScreenCaptureKit") ?? "auto"
@@ -275,6 +278,7 @@ final class Preferences: ObservableObject {
         set("showSpeakerNotes", showSpeakerNotes)
         set("hideAudioWaveform", hideAudioWaveform)
         set("playbackLoop", playbackLoop)
+        set("playbackAudioScrubber", playbackAudioScrubber)
         set("alwaysShowTimelineScrollbar", alwaysShowTimelineScrollbar)
         set("enableSmoothWaveform", enableSmoothWaveform)
         set("recordingUseScreenCaptureKit", recordingEngine)
@@ -320,6 +324,7 @@ final class Preferences: ObservableObject {
         showSpeakerNotes = false
         hideAudioWaveform = false
         playbackLoop = false
+        playbackAudioScrubber = false
         alwaysShowTimelineScrollbar = false
         enableSmoothWaveform = true
         recordingEngine = "auto"
