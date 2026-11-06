@@ -133,10 +133,12 @@ extension CameraFrame {
     }
 }
 
-/// Precomputed, deterministic camera and cursor animation for a whole project.
+/// Camera and cursor animation of a project, emulated lazily around the times asked for.
 ///
-/// Springs are stateful, so the track simulates the full timeline once, advancing them one
-/// project frame at a time. the simulation runs in playback time (clips sped up, slowed down
+/// Springs are stateful, so a frame depends on the frames before it. The track keeps one set
+/// of springs and the frames it has emulated (`CameraMotion`): a time within 1 s after the
+/// springs continues them; any other time starts them at rest on their targets 1 s earlier
+/// and emulates from there. The emulation runs in playback time (clips sped up, slowed down
 /// or cut) while zooms, mouse and keyboard data are looked up in source time (`Dd.timeMs =
 /// resolver.playbackToSourceTime(playbackMs)`).
 public final class CameraTrack: @unchecked Sendable {
@@ -152,196 +154,28 @@ public final class CameraTrack: @unchecked Sendable {
     /// Scale of the cursor while a button is held.
     public static let pressedCursorScale = 0.9
 
-    private let samples: [CameraFrame]
-    /// Presses of the drawn cursor's events.
-    private let clicks: [MouseEvent]
-    private let typeEvents: [MouseEvent]
-    /// Image names of `typeEvents`, index for index.
-    private let typeEventNames: [String]
-    private let cursorConfig: CursorConfig
-    private let planner: CameraPlanner
-    /// The screen-only layout of the plain stage.
-    private let plainResolver: LayoutResolver
+    /// What the animation reads and the springs emulated so far; shared with the track this
+    /// one replaces when none of what the animation reads changed.
+    let motion: CameraMotion
 
-    public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, fps: Double = CameraTrack.previewFps) {
-        // Everything below works in the crop's space.
-        let project = fullProject.screenCropSpace
-        let layout = CanvasLayout(project: project)
-        self.layout = layout
-        let timeline = LayoutTimeline(project: project)
-        let resolver = project.resolver
-        self.resolver = resolver
-        durationMs = max(resolver.playbackDurationMs, 0)
-        sampleIntervalMs = 1000 / max(fps, 1)
-
-        let sorted = project.mouseEvents.sorted { $0.timeMs < $1.timeMs }
-        let cleaned = MouseProcessing.removeShakes(sorted, threshold: project.cursor.removeShakeThreshold)
-        cursorConfig = project.cursor
-        let typeEvents = CursorTypes.typeEvents(cleaned, config: project.cursor)
-        self.typeEvents = typeEvents
-        let typeEventNames = project.cursor.alwaysUseDefault ? [] : CursorTypes.assetNames(of: typeEvents)
-        self.typeEventNames = typeEventNames
-        let imageChanges = CursorTypes.imageChangeTimes(typeEvents, names: typeEventNames, config: project.cursor)
-        let pathEvents = Self.cursorPathEvents(events: cleaned, resolver: resolver, config: project.cursor)
-        clicks = pathEvents.filter { $0.kind == .down }
-        let hoverTimes = project.cursorHoverTimes(hovers)
-
-        let planner = CameraPlanner(project: project, timeline: timeline, cleaned: cleaned, pathEvents: pathEvents, silence: silence)
-        self.planner = planner
-        plainResolver = project.plainLayoutResolver
-
-        let cursorPlan = CursorPathCache.shared.plan(for: CursorPlan.Inputs(
-            pathEvents: pathEvents,
-            cleanedEvents: cleaned,
-            imageChangesMs: imageChanges,
-            hoverTimesMs: hoverTimes,
-            slices: project.slices,
-            spring: project.animation.mouseSpring,
-            pointPixelScale: project.recording.pointPixelScale,
-            rotationMode: project.cursor.rotationMode,
-            rotateOnXMovementRatio: project.cursor.rotateOnXMovementRatio
-        ))
-
-        var screen = SpringRect(timeline.defaultResolver.initialScreenRect)
-        var cameraRect = SpringRect(Rect2(x: 0, y: 0, width: 0, height: 0))
-        var cameraOpacity = SpringValue(0)
-        var cameraRadius = SpringValue(0)
-        var cameraReference = SpringValue(1)
-        let hasCamera = project.recording.hasCamera && !project.camera.hide
-        let samplesFor200Ms = Int((200 / sampleIntervalMs).rounded(.up))
-        var lastHiddenIndex: Int?
-        var maskAnimator = MaskAnimator(masks: project.masks, recordingSize: project.recording.videoSize)
-        var press = SpringValue(1)
-        var opacity = SpringValue(1)
-        var rotation = SpringValue(0)
-        var fadeBlur = SpringValue(0)
-        let rotationSpring = CursorRotation.spring(for: project.cursor.rotationMode)
-        let baseRotationRad = project.cursor.baseRotation * .pi / 180
-        // Face tracking: the focal point always uses its own spring.
-        let confidentFaces = project.camera.enableFaceTracking ? FaceTracking.confident(faces) : nil
-        var focalX = SpringValue(0.5), focalY = SpringValue(0.5)
-        var cutout = SpringValue(0)
-        var loupe = LoupeSpring(.none)
-        var backdrop = BackdropSpring()
-        // The canvas in stage units.
-        let stage = Rect2(x: 0, y: 0, width: layout.canvas.width / layout.scale, height: layout.canvas.height / layout.scale)
-        let buttonEvents = pathEvents.filter(\.isClick)
-        var frames: [CameraFrame] = []
-        let count = Int((durationMs / sampleIntervalMs).rounded(.up)) + 2
-        let sliceLookup = SliceLookup(slices: project.slices)
-        frames.reserveCapacity(count)
-
-        for i in 0..<count {
-            let t = Double(i) * sampleIntervalMs
-            let source = resolver.playbackToSource(t)
-            let slice = sliceLookup.slice(atSource: source)
-            let loupeTarget = planner.loupeTarget(at: source)
-            let target = planner.targets(at: source, loupe: loupeTarget)
-            let screenConfig = target.instant ? SpringConfig.instant : project.animation.screenSpring
-            if i == 0 {
-                screen = SpringRect(target.screen)
-            } else {
-                screen.advance(toward: target.screen, config: screenConfig, milliseconds: sampleIntervalMs)
-            }
-
-            // Camera: the fast spring while hidden and for 200 ms after.
-            if target.cameraHidden { lastHiddenIndex = i }
-            let recentlyHidden = lastHiddenIndex.map { i - $0 <= samplesFor200Ms } ?? false
-            let cameraConfig = recentlyHidden ? Self.cameraHideSpring : project.animation.screenSpring
-            if hasCamera, let rect = target.camera {
-                if i == 0 || cameraRect.rect.width == 0 {
-                    cameraRect = SpringRect(rect)
-                    cameraRadius = SpringValue(target.cameraBorderRadius)
-                    cameraReference = SpringValue(target.cameraReferenceWidth)
-                    cutout = SpringValue(target.cameraCutout ? 1 : 0)
-                    if i == 0 { cameraOpacity = SpringValue(target.cameraOpacity) }
-                } else {
-                    cameraRect.advance(toward: rect, config: cameraConfig, milliseconds: sampleIntervalMs)
-                    cameraRadius.advance(toward: target.cameraBorderRadius, config: cameraConfig, milliseconds: sampleIntervalMs)
-                    cameraReference.advance(toward: target.cameraReferenceWidth, config: cameraConfig, milliseconds: sampleIntervalMs)
-                }
-                if i > 0 {
-                    cameraOpacity.advance(toward: target.cameraOpacity, config: cameraConfig, milliseconds: sampleIntervalMs)
-                    cutout.advance(toward: target.cameraCutout ? 1 : 0, config: cameraConfig, milliseconds: sampleIntervalMs)
-                }
-            } else if hasCamera {
-                cameraOpacity.advance(toward: 0, config: cameraConfig, milliseconds: sampleIntervalMs)
-            }
-
-            // Press scale (`pressSpring`): instant without smooth movement or in clips without it.
-            let smooth = project.animation.mouseSpring != nil
-            let pressSpring = !smooth || slice?.disableSmoothMouseMovement == true ? SpringConfig.instant : project.animation.mouseSpring!
-            let pressed = CursorTypes.isPressed(at: source, events: pathEvents, clicks: buttonEvents, smoothed: smooth)
-            press.setTarget(pressed ? Self.pressedCursorScale : 1, config: pressSpring)
-            if i == 0 { press.snapToTarget() } else { press.advance(by: sampleIntervalMs, config: pressSpring) }
-
-            var frame = CameraFrame(timeMs: t, screenRect: layout.toCanvas(screen.rect), cursor: cursorPlan.position(at: t))
-            // The lens springs on its own (`styles.loupe`).
-            if i == 0 { loupe = LoupeSpring(loupeTarget.frame) } else { loupe.advance(toward: loupeTarget.frame, config: planner.loupeSpring(at: source), milliseconds: sampleIntervalMs) }
-            let lens = loupe.frame
-            frame.loupe = lens.isVisible(recordingWidth: project.recording.videoSize.width, k: 0.1) ? lens : nil
-            backdrop.advance(toward: planner.backdropTarget(at: source, loupeActive: loupeTarget.isActive, stage: stage), config: project.animation.screenSpring, milliseconds: sampleIntervalMs, first: i == 0)
-            frame.backgroundRect = layout.toCanvas(backdrop.rect.rect)
-            frame.backgroundBlurRadius = backdrop.blurRadius.value
-            frame.frostBlurRadius = backdrop.frostBlurRadius.value
-            frame.screenReferenceWidth = target.screenReferenceWidth * layout.scale
-            frame.allowsScreenBorderRadius = target.allowsScreenBorderRadius
-            frame.isBackgroundVisible = target.isBackgroundVisible
-            if hasCamera, cameraRect.rect.width > 0 {
-                let rect = cameraRect.rect
-                frame.cameraRect = layout.toCanvas(rect)
-                frame.cameraOpacity = clamp(cameraOpacity.value, 0, 1)
-                frame.cameraSizeFactor = rect.width / max(cameraReference.value, 0.0001)
-                frame.cameraCornerRadius = cameraRadius.value * frame.cameraSizeFactor * layout.scale
-                frame.cameraCutout01 = clamp(cutout.value, 0, 1)
-            }
-            if hasCamera {
-                var focal = FaceTracking.disabledCenter
-                if project.camera.enableFaceTracking {
-                    focal = FaceTracking.faceCenter01(confident: confidentFaces, cameraTimeMs: source + project.camera.delayAdjustmentMs, crop01: project.camera.crop01)
-                }
-                if project.camera.mirror { focal.x = 1 - focal.x }
-                focalX.setTarget(focal.x, config: FaceTracking.spring)
-                focalY.setTarget(focal.y, config: FaceTracking.spring)
-                if i == 0 {
-                    focalX.snapToTarget()
-                    focalY.snapToTarget()
-                } else {
-                    focalX.advance(by: sampleIntervalMs, config: FaceTracking.spring)
-                    focalY.advance(by: sampleIntervalMs, config: FaceTracking.spring)
-                }
-                frame.cameraFocal01 = Vec2(focalX.value, focalY.value)
-            }
-            frame.cursorScale = press.value
-            frame.isInstantSnap = target.instant
-            // Cursor opacity: fades out quickly while typing, otherwise follows visibility.
-            let typing = Typing.isActivelyTyping(at: source, keystrokes: project.keystrokes, mouseEvents: sorted)
-            let visible = slice?.hideCursor != true
-                && Self.isCursorVisible(at: source, pathEvents: pathEvents, hideAfterMs: project.cursor.hideNotMovingAfterMs)
-            let opacitySpring = typing ? Self.typingFadeSpring : Self.visibilitySpring
-            opacity.setTarget(typing || !visible ? 0 : 1, config: opacitySpring)
-            if i == 0 { opacity.snapToTarget() } else { opacity.advance(by: sampleIntervalMs, config: opacitySpring) }
-            frame.cursorOpacity = opacity.value
-            // Rotation: the base plus the motion rotation, sprung.
-            rotation.setTarget(baseRotationRad + cursorPlan.motionRotation(at: t), config: rotationSpring)
-            if i == 0 { rotation.snapToTarget() } else { rotation.advance(by: sampleIntervalMs, config: rotationSpring) }
-            frame.cursorRotationRad = rotation.value
-            // A fading cursor blurs toward 10 with the visibility spring; none when it is not drawn.
-            if project.cursor.hide {
-                fadeBlur = SpringValue(0)
-            } else {
-                fadeBlur.setTarget(typing || !visible ? Self.fadeOutBlurRadius : 0, config: Self.visibilitySpring)
-                if i == 0 { fadeBlur.snapToTarget() } else { fadeBlur.advance(by: sampleIntervalMs, config: Self.visibilitySpring) }
-            }
-            frame.cursorFadeBlurRadius = fadeBlur.value
-            frame.mask = maskAnimator.frame(at: source, stepMs: sampleIntervalMs, first: i == 0)
-            frames.append(frame)
-        }
-        samples = frames
+    /// `reusing`: the track this one replaces (an edit). When the edit left everything the
+    /// animation reads as it was, the springs and the frames emulated so far carry over;
+    /// otherwise they start over.
+    public init(project fullProject: Project, faces: CameraFaces? = nil, silence: [SilenceChunk] = [], hovers: CursorHovers? = nil, fps: Double = CameraTrack.previewFps, reusing previous: CameraTrack? = nil) {
+        let key = CameraMotion.Key(project: fullProject.motionInputs, faces: faces, silence: silence, hovers: hovers, fps: fps)
+        let motion = previous.flatMap { $0.motion.key == key ? $0.motion : nil } ?? CameraMotion(key: key)
+        self.motion = motion
+        layout = motion.layout
+        durationMs = motion.durationMs
+        sampleIntervalMs = motion.frameDurationMs
+        resolver = motion.resolver
     }
 
     /// The frame at playback time `timeMs`, with the previous playback frame attached for motion blur.
     public func frame(at timeMs: Double) -> CameraFrame {
+        motion.lock.lock()
+        defer { motion.lock.unlock() }
+        motion.trackRequest(timeMs)
         var frame = interpolatedFrame(at: timeMs)
         let before = interpolatedMotion(at: max(0, timeMs - sampleIntervalMs))
         frame.previousScreenRect = before.screenRect
@@ -356,17 +190,21 @@ public final class CameraTrack: @unchecked Sendable {
     /// the unzoomed screen alone on the default stage at its resting focus, without the loupe,
     /// the cursor, its click effect or the webcam. Nothing moves, so there is no motion blur.
     public func plainFrame(at timeMs: Double) -> CameraFrame {
+        motion.lock.lock()
+        motion.trackRequest(timeMs)
         var frame = interpolatedFrame(at: timeMs)
+        motion.lock.unlock()
         let source = resolver.playbackToSource(timeMs)
-        let resting = planner.restingFocus(at: source)
-        let screen = layout.toCanvas(plainResolver.screenRect(focus01: resting.center, bounds01: resting.bounds, level: 1))
+        let resting = motion.planner.restingFocus(at: source)
+        let plain = motion.plainResolver
+        let screen = layout.toCanvas(plain.screenRect(focus01: resting.center, bounds01: resting.bounds, level: 1))
         frame.screenRect = screen
         frame.previousScreenRect = screen
         frame.isInstantSnap = false
-        frame.screenReferenceWidth = plainResolver.initialScreenRect.width * layout.scale
-        frame.allowsScreenBorderRadius = plainResolver.allowsScreenBorderRadius
-        frame.isBackgroundVisible = !(plainResolver.stageRect.width <= plainResolver.initialScreenRect.width
-            && plainResolver.stageRect.height <= plainResolver.initialScreenRect.height)
+        frame.screenReferenceWidth = plain.initialScreenRect.width * layout.scale
+        frame.allowsScreenBorderRadius = plain.allowsScreenBorderRadius
+        frame.isBackgroundVisible = !(plain.stageRect.width <= plain.initialScreenRect.width
+            && plain.stageRect.height <= plain.initialScreenRect.height)
         frame.loupe = nil
         frame.cursorOpacity = 0
         frame.previousCursor = nil
@@ -376,21 +214,37 @@ public final class CameraTrack: @unchecked Sendable {
         return frame
     }
 
-    /// The samples around playback time `timeMs` and the fraction between them.
+    /// Idle work: emulates frames ahead of the last time asked for while `shouldStartWork`
+    /// grants another 2 ms. False once 50 frames past it are ready.
+    public var hasIdlePrecomputeWork: Bool {
+        motion.lock.lock()
+        defer { motion.lock.unlock() }
+        return motion.hasIdlePrecomputeWork
+    }
+
+    public func stepIdlePrecompute(shouldStartWork: (Double) -> Bool) {
+        motion.lock.lock()
+        defer { motion.lock.unlock() }
+        motion.stepIdlePrecompute(shouldStartWork: shouldStartWork)
+    }
+
+    /// The frames around playback time `timeMs` and the fraction between them: the frame
+    /// after is only asked for when the time falls between two.
     private func neighbours(at timeMs: Double) -> (a: CameraFrame, b: CameraFrame, f: Double) {
-        let position = clamp(timeMs / sampleIntervalMs, 0, Double(samples.count - 1))
+        let position = clamp(motion.fractionalFrame(timeMs), 0, Double(motion.lastFrame))
         let i0 = Int(position.rounded(.down))
-        let i1 = min(i0 + 1, samples.count - 1)
-        return (samples[i0], samples[i1], position - Double(i0))
+        let f = position - Double(i0)
+        let a = motion.style(frame: i0)
+        guard f != 0 else { return (a, a, 0) }
+        return (a, motion.style(frame: min(i0 + 1, motion.lastFrame)), f)
     }
 
     /// Screen, cursor, press scale and camera placement of `interpolatedFrame(at:)`, without the rest.
     private func interpolatedMotion(at timeMs: Double) -> (screenRect: Rect2, cursor: Vec2?, cursorScale: Double, cursorRotationRad: Double, cameraRect: Rect2?) {
-        guard let first = samples.first else { return (layout.restScreen, nil, 1, 0, nil) }
         let (a, b, f) = neighbours(at: timeMs)
         return (
             a.screenRect.lerp(to: b.screenRect, f),
-            interpolate(a.cursor, b.cursor, f) ?? first.cursor,
+            interpolate(a.cursor, b.cursor, f) ?? motion.firstCursor,
             a.cursorScale + (b.cursorScale - a.cursorScale) * f,
             a.cursorRotationRad + (b.cursorRotationRad - a.cursorRotationRad) * f,
             Self.interpolate(a.cameraRect, b.cameraRect, f)
@@ -408,14 +262,11 @@ public final class CameraTrack: @unchecked Sendable {
     }
 
     private func interpolatedFrame(at timeMs: Double) -> CameraFrame {
-        guard let first = samples.first else {
-            return CameraFrame(timeMs: timeMs, screenRect: layout.restScreen)
-        }
         let (a, b, f) = neighbours(at: timeMs)
         var frame = CameraFrame(
             timeMs: timeMs,
             screenRect: a.screenRect.lerp(to: b.screenRect, f),
-            cursor: interpolate(a.cursor, b.cursor, f) ?? first.cursor
+            cursor: interpolate(a.cursor, b.cursor, f) ?? motion.firstCursor
         )
         frame.cursorOpacity = a.cursorOpacity + (b.cursorOpacity - a.cursorOpacity) * f
         frame.cursorScale = a.cursorScale + (b.cursorScale - a.cursorScale) * f
@@ -441,9 +292,9 @@ public final class CameraTrack: @unchecked Sendable {
         frame.frostBlurRadius = Self.interpolate(a.frostBlurRadius, b.frostBlurRadius, f)
         frame.cameraCutout01 = a.cameraCutout01 + (b.cameraCutout01 - a.cameraCutout01) * f
         let source = resolver.playbackToSource(timeMs)
-        frame.cursorName = CursorTypes.assetName(at: source, typeEvents: typeEvents, names: typeEventNames, config: cursorConfig)
-        if let effect = cursorConfig.clickEffect {
-            frame.clicks = ClickEffects.recentClicks(at: source, presses: clicks, kind: effect.type)
+        frame.cursorName = CursorTypes.assetName(at: source, typeEvents: motion.typeEvents, names: motion.typeEventNames, config: motion.cursorConfig)
+        if let effect = motion.cursorConfig.clickEffect {
+            frame.clicks = ClickEffects.recentClicks(at: source, presses: motion.clicks, kind: effect.type)
         }
         return frame
     }
