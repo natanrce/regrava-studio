@@ -162,4 +162,29 @@ final class AudioPlaybackTests: XCTestCase {
         XCTAssertGreaterThan(left.map(abs).max() ?? 0, 0.1)
         XCTAssertGreaterThan(produced, 2 * 4800)
     }
+
+    func testScrubSnippetPlaysTheMixAtThePlayhead() throws {
+        let url = try tone(seconds: 3, value: 0.5)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let catalog = MixSourceCatalogHandle()
+        let layout = try catalog.layout(segments: [AudioMixSegment(source: AudioMixSource(path: url.path), track: .microphone, fromMs: 0, toMs: nil, insertAtMs: 0, speed: 1, volume: 1)])
+        let renderer = MixRenderer(layout: layout, catalog: catalog.catalog)
+        let scrub = ScrubPlayer(cache: MixBlockCache(renderer: renderer))
+        scrub.add(timeMs: 1500, hostMs: 0)
+        XCTAssertEqual(scrub.head?.direction, 1)
+        var left = [Float](repeating: 0, count: 256), right = [Float](repeating: 0, count: 256)
+        var peaks: [Float] = []
+        for block in 0..<24 {
+            left.withUnsafeMutableBufferPointer { l in
+                right.withUnsafeMutableBufferPointer { r in
+                    scrub.render(left: l.baseAddress!, right: r.baseAddress!, count: 256, hostMs: Double(block) * 256 / 48)
+                }
+            }
+            peaks.append(left.map(abs).max() ?? 0)
+        }
+        // A 100 ms snippet at full gain, then silence.
+        XCTAssertEqual(peaks[5], 0.5, accuracy: 0.05)
+        XCTAssertEqual(peaks[23], 0)
+        XCTAssertFalse(scrub.isActive(atHostMs: 1000))
+    }
 }
