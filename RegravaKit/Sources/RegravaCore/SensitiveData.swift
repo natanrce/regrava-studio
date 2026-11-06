@@ -73,8 +73,15 @@ public struct SensitiveDataDetection: Codable, Hashable, Sendable {
     public var endMs: Double
     public var isTyped: Bool
     public var keyframes: [SensitiveDataKeyframe]
+    /// The recording session whose video was scanned.
+    public var sessionIndex: Int
+    /// Size of the scanned video, the space of the keyframes (0 in results stored before it was
+    /// kept: the recording's video size is used then).
+    public var videoWidthPx: Double
+    public var videoHeightPx: Double
 
-    public init(id: Int = 0, kind: SensitiveDataKind, text: String, startMs: Double, endMs: Double, isTyped: Bool = false, keyframes: [SensitiveDataKeyframe]) {
+    public init(id: Int = 0, kind: SensitiveDataKind, text: String, startMs: Double, endMs: Double, isTyped: Bool = false, keyframes: [SensitiveDataKeyframe],
+                sessionIndex: Int = 0, videoWidthPx: Double = 0, videoHeightPx: Double = 0) {
         self.id = id
         self.kind = kind
         self.text = text
@@ -82,6 +89,9 @@ public struct SensitiveDataDetection: Codable, Hashable, Sendable {
         self.endMs = endMs
         self.isTyped = isTyped
         self.keyframes = keyframes
+        self.sessionIndex = sessionIndex
+        self.videoWidthPx = videoWidthPx
+        self.videoHeightPx = videoHeightPx
     }
 
     public init(from decoder: Decoder) throws {
@@ -93,6 +103,9 @@ public struct SensitiveDataDetection: Codable, Hashable, Sendable {
         endMs = try c.decode(Double.self, forKey: .endMs)
         isTyped = try c.decodeIfPresent(Bool.self, forKey: .isTyped) ?? false
         keyframes = try c.decode([SensitiveDataKeyframe].self, forKey: .keyframes)
+        sessionIndex = try c.decodeIfPresent(Int.self, forKey: .sessionIndex) ?? 0
+        videoWidthPx = try c.decodeIfPresent(Double.self, forKey: .videoWidthPx) ?? 0
+        videoHeightPx = try c.decodeIfPresent(Double.self, forKey: .videoHeightPx) ?? 0
     }
 }
 
@@ -144,21 +157,27 @@ public enum AutoMasks {
     public static let maxTextBoxes = 32
     public static let maxFaceBoxes = 16
 
-    /// The detections covering `sourceMs`, as boxes.
-    public static func frame(at sourceMs: Double, timeline: AutoMaskTimeline, config: ProcessingConfig, videoSize: Size2) -> AutoMaskFrame {
-        guard config.isAutoMasking, videoSize.width > 0, videoSize.height > 0 else { return AutoMaskFrame() }
+    /// The detections of session `sessionIndex` covering `sourceMs`, as boxes of the scanned
+    /// video (the last covering detection's size; `videoSize` for results stored without one).
+    /// Nothing covering: no boxes.
+    public static func frame(at sourceMs: Double, timeline: AutoMaskTimeline, config: ProcessingConfig, videoSize: Size2, sessionIndex: Int = 0) -> AutoMaskFrame {
+        guard config.isAutoMasking else { return AutoMaskFrame() }
         var text: [Rect2] = []
         var faces: [Rect2] = []
+        var scannedSize: Size2?
         let detections = timeline.detections
         for index in timeline.firstUnended(at: sourceMs)..<detections.count {
             let detection = detections[index]
             if detection.startMs > sourceMs { break }
-            guard detection.endMs > sourceMs else { continue }
+            guard detection.sessionIndex == sessionIndex, detection.endMs > sourceMs else { continue }
             let isFace = detection.kind == .face
             guard isFace ? config.autoMaskFaces : config.autoMaskSensitiveData,
                   var rect = rect(of: detection, at: sourceMs, keyframesSorted: timeline.keyframesSorted[index]) else { continue }
+            let size = detection.videoWidthPx > 0 && detection.videoHeightPx > 0
+                ? Size2(width: detection.videoWidthPx, height: detection.videoHeightPx) : videoSize
             // Entirely outside the video.
-            guard rect.x < videoSize.width, rect.y < videoSize.height, rect.x + rect.width > 0, rect.y + rect.height > 0 else { continue }
+            guard rect.x < size.width, rect.y < size.height, rect.x + rect.width > 0, rect.y + rect.height > 0 else { continue }
+            scannedSize = size
             if isFace {
                 faces.append(rect)
             } else {
@@ -167,17 +186,18 @@ public enum AutoMasks {
                 text.append(rect)
             }
         }
+        guard let size = scannedSize, size.width > 0, size.height > 0 else { return AutoMaskFrame() }
         text = merged(text, shouldMerge: textBoxesMerge)
         faces = merged(faces, shouldMerge: faceBoxesMerge)
         func normalized(_ r: Rect2) -> Rect2 {
-            Rect2(x: r.x / videoSize.width, y: r.y / videoSize.height, width: r.width / videoSize.width, height: r.height / videoSize.height)
+            Rect2(x: r.x / size.width, y: r.y / size.height, width: r.width / size.width, height: r.height / size.height)
         }
         return AutoMaskFrame(bounds01: capped(text, max: maxTextBoxes).map(normalized), faceBounds01: capped(faces, max: maxFaceBoxes).map(normalized))
     }
 
     /// `frame(at:timeline:…)` over detections sorted by `startMs`, indexed for this call only.
-    public static func frame(at sourceMs: Double, detections: [SensitiveDataDetection], config: ProcessingConfig, videoSize: Size2) -> AutoMaskFrame {
-        frame(at: sourceMs, timeline: AutoMaskTimeline(detections: detections), config: config, videoSize: videoSize)
+    public static func frame(at sourceMs: Double, detections: [SensitiveDataDetection], config: ProcessingConfig, videoSize: Size2, sessionIndex: Int = 0) -> AutoMaskFrame {
+        frame(at: sourceMs, timeline: AutoMaskTimeline(detections: detections), config: config, videoSize: videoSize, sessionIndex: sessionIndex)
     }
 
     /// A face holds its last keyframe; text between two keyframes covers both (never interpolated).

@@ -103,4 +103,36 @@ struct SensitiveDataTests {
             }
         }
     }
+
+    /// Covers come from the frame's session only, as fractions of the scanned video.
+    @Test func coversFollowTheSessionAndTheScannedSize() {
+        var config = ProcessingConfig()
+        config.autoMaskSensitiveData = true
+        config.sensitiveDataExpandPx = 0
+        let first = SensitiveDataDetection(kind: .email, text: "", startMs: 0, endMs: 1000, keyframes: [.init(timeMs: 0, x: 200, y: 100, width: 100, height: 50)],
+                                           sessionIndex: 0, videoWidthPx: 2000, videoHeightPx: 1000)
+        let second = SensitiveDataDetection(kind: .email, text: "", startMs: 0, endMs: 1000, keyframes: [.init(timeMs: 0, x: 0, y: 0, width: 10, height: 10)],
+                                            sessionIndex: 1, videoWidthPx: 2000, videoHeightPx: 1000)
+        let compositorSize = Size2(width: 1000, height: 500)
+        let frame = AutoMasks.frame(at: 10, detections: [first, second], config: config, videoSize: compositorSize)
+        #expect(frame.bounds01 == [Rect2(x: 0.1, y: 0.1, width: 0.05, height: 0.05)])
+        let other = AutoMasks.frame(at: 10, detections: [first, second], config: config, videoSize: compositorSize, sessionIndex: 1)
+        #expect(other.bounds01 == [Rect2(x: 0, y: 0, width: 0.005, height: 0.01)])
+        #expect(AutoMasks.frame(at: 10, detections: [first], config: config, videoSize: compositorSize, sessionIndex: 2).isEmpty)
+        // Inside the scanned video though past the compositor's size.
+        let far = SensitiveDataDetection(kind: .email, text: "", startMs: 0, endMs: 1000, keyframes: [.init(timeMs: 0, x: 1500, y: 600, width: 100, height: 50)],
+                                         videoWidthPx: 2000, videoHeightPx: 1000)
+        #expect(AutoMasks.frame(at: 10, detections: [far], config: config, videoSize: compositorSize).bounds01 == [Rect2(x: 0.75, y: 0.6, width: 0.05, height: 0.05)])
+    }
+
+    /// Results stored without a video size keep the recording's.
+    @Test func storedDetectionsWithoutASizeLoad() throws {
+        let json = #"{"id":3,"kind":"email","text":"","startMs":0,"endMs":1000,"isTyped":false,"keyframes":[{"timeMs":0,"x":100,"y":50,"width":100,"height":50}]}"#
+        let d = try JSONDecoder().decode(SensitiveDataDetection.self, from: Data(json.utf8))
+        #expect(d.sessionIndex == 0 && d.videoWidthPx == 0 && d.videoHeightPx == 0)
+        var config = ProcessingConfig()
+        config.autoMaskSensitiveData = true
+        config.sensitiveDataExpandPx = 0
+        #expect(AutoMasks.frame(at: 10, detections: [d], config: config, videoSize: Size2(width: 1000, height: 500)).bounds01 == [Rect2(x: 0.1, y: 0.1, width: 0.1, height: 0.1)])
+    }
 }

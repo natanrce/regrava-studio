@@ -109,7 +109,7 @@ public enum SensitiveDataScanner {
                     do {
                         let output = try run(video: video, phrases: phrases, detectFaces: detectFaces, options: options, bundle: bundle,
                                              demandMs: demandMs, cancelled: cancelled, onPartialResult: onPartialResult, onProgress: onProgress)
-                        continuation.resume(returning: detections(output.detections))
+                        continuation.resume(returning: detections(output.detections, stats: output.stats))
                     } catch {
                         continuation.resume(throwing: error)
                     }
@@ -159,9 +159,9 @@ public enum SensitiveDataScanner {
             throw SD.SensitiveDataScanError(message: "Cannot read the face cascade at facefinder.cascade")
         }
         return try SD.runSensitiveDataScan(o, isCancelled: { cancelled.isSet }, onPartialResult: { output in
-            onPartialResult(PartialResult(detections: detections(output.detections), finalUpToMs: output.finalUpToMs,
+            onPartialResult(PartialResult(detections: detections(output.detections, stats: output.stats), finalUpToMs: output.finalUpToMs,
                                           analyzedUpToMs: output.analyzedUpToMs,
-                                          provisionalDetections: output.provisional.map { detections($0.detections) } ?? [],
+                                          provisionalDetections: output.provisional.map { detections($0.detections, stats: output.stats) } ?? [],
                                           provisionalFromMs: output.provisional?.fromMs ?? 0, provisionalToMs: output.provisional?.toMs ?? 0))
         })
     }
@@ -171,9 +171,11 @@ public enum SensitiveDataScanner {
         Bundle.module.url(forResource: "facefinder", withExtension: "cascade", subdirectory: "SensitiveData")?.path
     }
 
-    /// The scan's detection objects as the project model's detections.
-    static func detections(_ objects: [[String: Any]]) -> [SensitiveDataDetection] {
-        objects.map { object in
+    /// The scan's detection objects as the project model's detections, of the recording's one
+    /// session, sized as the scanned video (`stats` widthPx/heightPx).
+    static func detections(_ objects: [[String: Any]], stats: [String: Any] = [:]) -> [SensitiveDataDetection] {
+        let widthPx = number(stats["widthPx"]), heightPx = number(stats["heightPx"])
+        return objects.map { object in
             let kind = object["kind"] as? String ?? ""
             let keyframes = (object["keyframes"] as? [[String: Any]] ?? []).map { k in
                 SensitiveDataKeyframe(timeMs: number(k["timeMs"]), x: number(k["x"]), y: number(k["y"]),
@@ -182,7 +184,8 @@ public enum SensitiveDataScanner {
             // A kind outside the project model's list; none is produced by the finders, kept as a secret.
             return SensitiveDataDetection(id: object["id"] as? Int ?? 0, kind: SensitiveDataKind(rawValue: kind) ?? .secret,
                                           text: object["text"] as? String ?? "", startMs: number(object["startMs"]),
-                                          endMs: number(object["endMs"]), isTyped: object["isTyped"] as? Bool ?? false, keyframes: keyframes)
+                                          endMs: number(object["endMs"]), isTyped: object["isTyped"] as? Bool ?? false, keyframes: keyframes,
+                                          sessionIndex: 0, videoWidthPx: widthPx, videoHeightPx: heightPx)
         }
     }
 
